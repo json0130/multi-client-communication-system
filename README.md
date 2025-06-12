@@ -1,5 +1,3 @@
-# cs731-2025-project-team-jscript
-
 An Emotion-Aware Social Robot for Children with Mental Health Issues. With real-time emotion detection and a chatbot system that combines computer vision, natural language processing, and hardware integration, designed to be used for children.
 
 ## Project Overview
