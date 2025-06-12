@@ -1,0 +1,55 @@
+# Use Ubuntu 20.04 base image (compatible with JetPack 4.6.5 / L4T 32.7.6)
+FROM ubuntu:20.04
+
+# Set environment variables to avoid interaction during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install system packages
+RUN apt-get update && apt-get install -y \
+    python3-pip python3-dev \
+    libopencv-dev python3-opencv \
+    curl unzip git wget \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Arduino CLI
+RUN curl -fsSL https://raw.githubusercontent.com/arduino/arduino-cli/master/install.sh | sh
+
+# Install Python libraries
+RUN pip3 install pyserial opencv-python numpy
+
+RUN pip3 --version
+
+# Getting the torch from NVIDIA
+RUN wget https://nvidia.box.com/shared/static/ssf2v7pf5i245fk4i0q926hy4imzs2ph.whl -O torch-1.11.0-cp38-cp38-linux_aarch64.whl
+
+# Installing Torch and pre-dependencies
+# RUN apt-get install python3-pip libopenblas-base libopenmpi-dev libomp-dev
+RUN pip3 install 'Cython<3'
+RUN pip3 install numpy torch-1.11.0-cp38-cp38-linux_aarch64.whl
+
+# Install dependencies for torchvision
+RUN apt-get update && apt-get install -y \
+    libjpeg-dev zlib1g-dev libpython3-dev libopenblas-dev \
+    libavcodec-dev libavformat-dev libswscale-dev \
+    && apt-get clean && rm -rf /var/lib/apt/lists/*
+
+# Install Pillow (requirement for torchvision)
+RUN pip install 'pillow<7'
+
+# Copy the torchvision wheel into the container
+COPY torchvision-0.12.0-cp38-cp38-manylinux2014_aarch64.whl /tmp/
+
+# Install torchvision
+RUN pip3 install /tmp/torchvision-0.12.0-cp38-cp38-manylinux2014_aarch64.whl \
+    && rm /tmp/torchvision-0.12.0-cp38-cp38-manylinux2014_aarch64.whl
+
+# Set working directory
+WORKDIR /app
+
+# Optional: copy your project code
+# COPY . /app
+
+# Default command
+CMD ["bash"]
+
+

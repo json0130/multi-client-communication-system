@@ -1,0 +1,25 @@
+# Start from the Jetson-compatible Ultralytics image
+FROM ultralytics/ultralytics:latest-jetson-jetpack4
+
+# Install necessary dependencies for RealSense and other components
+RUN apt-get update && \
+    apt-get install -y curl libssl-dev libusb-1.0-0-dev libudev-dev \
+    pkg-config libgtk-3-dev libglfw3-dev libgl1-mesa-dev && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
+RUN pip3 install openai python-dotenv pyrealsense2 albumentations pyserial
+
+# Set working directory
+WORKDIR /app
+
+# Copy your application code into the container
+COPY . /app
+
+# Expose port for web streaming
+EXPOSE 8080
+
+# Default command (optional)
+# CMD ["python3", "main.py"]
+CMD ["bash"]
