@@ -1,0 +1,12 @@
+flask
+flask-socketio
+python-socketio
+torch
+torchvision
+torchaudio
+opencv-python
+pillow
+numpy
+openai
+requests
+python-dotenv
