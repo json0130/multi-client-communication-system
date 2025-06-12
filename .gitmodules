@@ -1,0 +1,4 @@
+[submodule "ChatBox"]
+	path = ChatBox
+	url = https://github.com/PeachWall/ChatBox.git
+	branch = main
