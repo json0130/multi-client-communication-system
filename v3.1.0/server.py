@@ -1,4 +1,4 @@
-# server.py - Modular Main Server
+# server.py - Modular Main Server with Speech-to-Text Support
 import os
 import time
 import socket
@@ -12,6 +12,7 @@ from emotion_processor import EmotionProcessor
 from gpt_client import GPTClient
 from web_interface import WebInterface
 from websocket_handler import WebSocketHandler
+from speech_processor import SpeechProcessor
 
 # Configuration
 MODEL_PATH = './models/efficientnet_HQRAF_improved_withCon.pth'
@@ -32,7 +33,7 @@ def get_local_ip():
         return "127.0.0.1"
 
 class EmotionServer:
-    """Main emotion detection server with modular components"""
+    """Main emotion detection server with modular components and speech support"""
     
     def __init__(self):
         # Server configuration
@@ -49,7 +50,13 @@ class EmotionServer:
             'emotion_window_size': 5,
             'confidence_threshold': 30.0,
             'emotion_change_threshold': 15.0,
-            'server_ip': self.server_ip
+            'server_ip': self.server_ip,
+            # Speech processing configuration
+            'whisper_model_size': 'base',  # base, small, medium, large
+            'whisper_device': 'auto',
+            'whisper_compute_type': 'float16',
+            'max_audio_length': 30,
+            'sample_rate': 16000
         }
         
         # Initialize Flask app and SocketIO
@@ -62,7 +69,7 @@ class EmotionServer:
             engineio_logger=False,
             ping_timeout=60,
             ping_interval=25,
-            max_http_buffer_size=1000000,
+            max_http_buffer_size=2000000,  # Increased for audio files
             transports=['websocket', 'polling'],
             allow_upgrades=True,
             cookie=False
@@ -71,6 +78,7 @@ class EmotionServer:
         # Initialize components
         self.emotion_processor = EmotionProcessor(MODEL_PATH, self.config)
         self.gpt_client = GPTClient()
+        self.speech_processor = SpeechProcessor(self.config)
         self.web_interface = WebInterface(self.config['stream_fps'])
         self.websocket_handler = WebSocketHandler(
             self.socketio, 
@@ -84,7 +92,7 @@ class EmotionServer:
         
         # Component status
         self.components_initialized = 0
-        self.total_components = 3
+        self.total_components = 4  # Updated for speech processor
     
     def setup_routes(self):
         """Setup Flask routes"""
@@ -94,12 +102,13 @@ class EmotionServer:
             """Root endpoint with enhanced server info"""
             emotion, confidence = self.emotion_processor.get_current_emotion()
             return jsonify({
-                "message": "Local Real-time Emotion-Aware System Server",
+                "message": "Local Real-time Emotion-Aware System Server with Speech Support",
                 "status": "running",
                 "server_ip": self.server_ip,
                 "components": {
                     **self.emotion_processor.get_status(),
-                    "openai_available": self.gpt_client.is_available()
+                    "openai_available": self.gpt_client.is_available(),
+                    "speech_available": self.speech_processor.is_available()
                 },
                 "optimization": {
                     "stream_fps": self.config['stream_fps'],
@@ -117,6 +126,7 @@ class EmotionServer:
                     "health": "/health",
                     "stats": "/stats",
                     "chat": "/chat (POST, requires auth)",
+                    "speech": "/speech (POST, requires auth)",
                     "websocket": "/socket.io/",
                     "live_stream": "/live_stream",
                     "monitor": "/monitor"
@@ -132,7 +142,8 @@ class EmotionServer:
                 "server_ip": self.server_ip,
                 "components": {
                     **self.emotion_processor.get_status(),
-                    "openai_available": self.gpt_client.is_available()
+                    "openai_available": self.gpt_client.is_available(),
+                    "speech_available": self.speech_processor.is_available()
                 },
                 "current_emotion": {
                     "emotion": emotion,
@@ -158,48 +169,75 @@ class EmotionServer:
                 if not message:
                     return jsonify({"error": "No message provided"}), 400
 
-                # Get current emotion state
-                detected_emotion, emotion_confidence = self.emotion_processor.get_current_emotion()
-                emotion_distribution = self.emotion_processor.get_emotion_distribution()
-
-                # Broadcast user message to monitors
-                self.websocket_handler.broadcast_chat_message({
-                    'type': 'user',
-                    'content': message,
-                    'emotion': detected_emotion,
-                    'timestamp': time.time()
-                })
-
-                if emotion_confidence > 10:
-                    print(f"Using detected emotion: {detected_emotion} ({emotion_confidence:.1f}%)")
-
-                print(f"Sending to GPT: [{detected_emotion}] {message}")
-
-                # Process with ChatGPT
-                response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
-                bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
-
-                print(f"GPT-4o-mini: {response_text}")
-
-                # Broadcast bot response to monitors
-                self.websocket_handler.broadcast_chat_message({
-                    'type': 'bot',
-                    'content': response_text,
-                    'emotion': bot_emotion,
-                    'timestamp': time.time()
-                })
-
-                return jsonify({
-                    "response": response_text,
-                    "bot_emotion": bot_emotion,
-                    "detected_emotion": detected_emotion,
-                    "confidence": round(emotion_confidence, 1),
-                    "emotion_distribution": emotion_distribution
-                })
+                return self._process_chat_message(message, "text")
 
             except Exception as e:
                 print(f"Chat endpoint error: {e}")
                 return jsonify({"error": "Internal server error"}), 500
+
+        @self.app.route('/speech', methods=['POST'])
+        def speech():
+            """New speech endpoint for audio transcription and chat"""
+            try:
+                auth_header = request.headers.get('Authorization')
+                if not auth_header or not auth_header.startswith('Bearer ') or auth_header.split(' ')[1] != self.api_key:
+                    return jsonify({"error": "Authentication required"}), 401
+
+                if not self.speech_processor.is_available():
+                    return jsonify({"error": "Speech-to-text not available"}), 503
+
+                data = request.json
+                audio_b64 = data.get('audio', '')
+
+                if not audio_b64:
+                    return jsonify({"error": "No audio data provided"}), 400
+
+                print("🎤 Received speech request")
+
+                # Transcribe audio to text
+                success, transcription, speech_confidence = self.speech_processor.transcribe_audio_base64(audio_b64)
+
+                if not success:
+                    print(f"❌ Speech transcription failed: {transcription}")
+                    return jsonify({
+                        "error": "Speech transcription failed",
+                        "details": transcription
+                    }), 400
+
+                # Check if transcription is empty or too short
+                if not transcription or len(transcription.strip()) < 2:
+                    print(f"⚠️ Transcription too short or empty: '{transcription}'")
+                    return jsonify({
+                        "error": "No meaningful speech detected",
+                        "details": f"Transcription: '{transcription}'"
+                    }), 400
+
+                print(f"📝 Transcribed: '{transcription}' (confidence: {speech_confidence:.1f}%)")
+
+                # Process the transcribed message like a regular chat
+                response = self._process_chat_message(transcription, "speech")
+                
+                # Add speech-specific info to response
+                if isinstance(response, tuple):
+                    response_data, status_code = response
+                    response_data = response_data.get_json()
+                else:
+                    response_data = response.get_json()
+                    status_code = 200
+
+                response_data.update({
+                    "transcription": transcription,
+                    "speech_confidence": round(speech_confidence, 1),
+                    "input_type": "speech"
+                })
+
+                return jsonify(response_data), status_code
+
+            except Exception as e:
+                print(f"❌ Speech endpoint error: {e}")
+                import traceback
+                print(f"   Traceback: {traceback.format_exc()}")
+                return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
         @self.app.route('/stats')
         def stats():
@@ -210,6 +248,7 @@ class EmotionServer:
                 "server_ip": self.server_ip,
                 "model_loaded": self.emotion_processor.model_loaded,
                 "openai_available": self.gpt_client.is_available(),
+                "speech_available": self.speech_processor.is_available(),
                 "cuda_available": torch.cuda.is_available() if 'torch' in globals() else False,
                 "device": str(torch.cuda.get_device_name(0)) if 'torch' in globals() and torch.cuda.is_available() else "CPU",
                 "current_emotion": emotion,
@@ -236,13 +275,56 @@ class EmotionServer:
             response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
             return response
     
+    def _process_chat_message(self, message, input_type="text"):
+        """Process chat message (from text or speech) and return response"""
+        # Get current emotion state
+        detected_emotion, emotion_confidence = self.emotion_processor.get_current_emotion()
+        emotion_distribution = self.emotion_processor.get_emotion_distribution()
+
+        # Broadcast user message to monitors
+        self.websocket_handler.broadcast_chat_message({
+            'type': 'user',
+            'content': message,
+            'emotion': detected_emotion,
+            'input_type': input_type,
+            'timestamp': time.time()
+        })
+
+        if emotion_confidence > 10:
+            print(f"🎭 Using detected emotion: {detected_emotion} ({emotion_confidence:.1f}%)")
+
+        print(f"📤 Sending to GPT: [{detected_emotion}] {message}")
+
+        # Process with ChatGPT
+        response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
+
+        print(f"🤖 GPT-4o-mini: {response_text}")
+
+        # Broadcast bot response to monitors
+        self.websocket_handler.broadcast_chat_message({
+            'type': 'bot',
+            'content': response_text,
+            'emotion': bot_emotion,
+            'timestamp': time.time()
+        })
+
+        return jsonify({
+            "response": response_text,
+            "bot_emotion": bot_emotion,
+            "detected_emotion": detected_emotion,
+            "confidence": round(emotion_confidence, 1),
+            "emotion_distribution": emotion_distribution,
+            "input_type": input_type
+        })
+    
     def initialize_components(self):
         """Initialize all server components"""
-        print("Initializing Local Real-time Emotion Detection Server...")
-        print("="*60)
-        print(f"Server IP: {self.server_ip}")
-        print(f"Port: {self.port}")
-        print("="*60)
+        print("🚀 Initializing Local Real-time Emotion Detection Server with Speech Support...")
+        print("="*70)
+        print(f"🌐 Server IP: {self.server_ip}")
+        print(f"🔌 Port: {self.port}")
+        print("="*70)
 
         self.components_initialized = 0
 
@@ -263,18 +345,27 @@ class EmotionServer:
         else:
             print("    ❌ OpenAI setup failed")
 
+        # Initialize speech processor
+        print("\n3️⃣ Setting up Speech-to-Text...")
+        if self.speech_processor.initialize():
+            self.components_initialized += 1
+            print("    ✅ Speech-to-text setup successful")
+        else:
+            print("    ❌ Speech-to-text setup failed")
+
         # Web interface is always available
         self.components_initialized += 1
-        print("\n3️⃣ Web interface ready")
+        print("\n4️⃣ Web interface ready")
         print("    ✅ Web interface initialized")
 
         print(f"\n✅ {self.components_initialized}/{self.total_components} components initialized")
 
         print("\n📊 Component Status:")
-        print(f"  🤖 Model loaded: {'✅' if self.emotion_processor.model_loaded else '❌'}")
+        print(f"  🤖 Emotion model loaded: {'✅' if self.emotion_processor.model_loaded else '❌'}")
         print(f"  🔄 Transform loaded: {'✅' if self.emotion_processor.transform_loaded else '❌'}")
         print(f"  👤 Face cascade loaded: {'✅' if self.emotion_processor.face_cascade_loaded else '❌'}")
         print(f"  🌐 OpenAI available: {'✅' if self.gpt_client.is_available() else '❌'}")
+        print(f"  🎤 Speech-to-text available: {'✅' if self.speech_processor.is_available() else '❌'}")
 
         return True
     
@@ -300,14 +391,16 @@ class EmotionServer:
             print(f"   📹 Live Stream: http://{self.server_ip}:{self.port}/live_stream")
             print(f"   📊 Monitor: http://{self.server_ip}:{self.port}/monitor")
             print(f"   🏥 Health: http://{self.server_ip}:{self.port}/health")
+            print(f"   💬 Chat API: http://{self.server_ip}:{self.port}/chat")
+            print(f"   🎤 Speech API: http://{self.server_ip}:{self.port}/speech")
             print(f"\n⚙️ Real-time Config: {self.config['stream_fps']}fps stream, {1/self.config['emotion_processing_interval']:.0f}fps emotion detection")
 
             print(f"\n🔧 Client Configuration:")
             print(f"   Update your Jetson client to use: http://{self.server_ip}:{self.port}")
 
-            print("\n" + "="*60)
-            print("🚀 Local emotion server is ready!")
-            print("="*60)
+            print("\n" + "="*70)
+            print("🚀 Local emotion server with speech support is ready!")
+            print("="*70)
 
             import atexit
             atexit.register(self.cleanup_resources)

@@ -15,5 +15,8 @@ Pillow>=8.0.0
 # AI Integration
 openai>=1.0.0
 
+# Speech-to-Text
+faster-whisper>=0.10.0
+
 # Environment and utilities
 python-dotenv>=0.19.0
