@@ -67,17 +67,21 @@ def discover_server_on_network():
     return None
 
 class VoiceRecorder:
-    """Voice recording class using PyAudio"""
+    """Voice recording class optimized for USB microphone - AUTO-DETECTS USB MIC"""
     
     def __init__(self, config=None):
         self.config = config or {}
         
-        # Audio configuration
-        self.sample_rate = self.config.get('sample_rate', 16000)
+        # Audio configuration - Updated for USB microphone
+        self.sample_rate = self.config.get('sample_rate', 48000)  # USB mic native rate
         self.channels = self.config.get('channels', 1)
         self.chunk_size = self.config.get('chunk_size', 1024)
         self.audio_format = pyaudio.paInt16
-        self.max_record_time = self.config.get('max_record_time', 30)  # seconds
+        self.max_record_time = self.config.get('max_record_time', 30)
+        
+        # USB microphone detection - THIS IS THE KEY PART
+        self.usb_device_index = None
+        self.prefer_usb = self.config.get('prefer_usb', True)
         
         # Recording state
         self.is_recording = False
@@ -86,27 +90,56 @@ class VoiceRecorder:
         self.stream = None
         self.record_thread = None
         
-        # Initialize PyAudio
+        # Initialize PyAudio and AUTO-FIND USB microphone
+        self._initialize_pyaudio()
+    
+    def _initialize_pyaudio(self):
+        """Initialize PyAudio and automatically find USB microphone"""
         try:
             self.audio = pyaudio.PyAudio()
             print("🎤 PyAudio initialized successfully")
+            
+            # AUTOMATICALLY find and set USB microphone
+            self._find_usb_microphone()
+            
         except Exception as e:
             print(f"❌ Failed to initialize PyAudio: {e}")
             self.audio = None
     
-    def list_audio_devices(self):
-        """List available audio input devices"""
+    def _find_usb_microphone(self):
+        """Automatically find and configure USB microphone"""
         if not self.audio:
             return
         
-        print("🎙️ Available audio input devices:")
+        print("🔍 Auto-detecting USB microphone...")
+        
         for i in range(self.audio.get_device_count()):
-            info = self.audio.get_device_info_by_index(i)
-            if info['maxInputChannels'] > 0:
-                print(f"   {i}: {info['name']} (channels: {info['maxInputChannels']})")
+            try:
+                info = self.audio.get_device_info_by_index(i)
+                if info['maxInputChannels'] > 0:
+                    # Look for USB microphone keywords
+                    name_lower = info['name'].lower()
+                    if any(keyword in name_lower for keyword in 
+                          ['uacdemov1.0', 'usb audio', 'usb', 'microphone']):
+                        
+                        # AUTOMATICALLY SET USB MICROPHONE AS INPUT DEVICE
+                        self.usb_device_index = i
+                        self.sample_rate = int(info['defaultSampleRate'])
+                        
+                        print(f"🎯 AUTO-SELECTED USB microphone:")
+                        print(f"   Device index: {i}")
+                        print(f"   Name: {info['name']}")
+                        print(f"   Sample rate: {self.sample_rate}")
+                        print(f"   ✅ Will be used for all recordings")
+                        return True
+            except Exception as e:
+                continue
+        
+        print("⚠️ USB microphone not found, using default device")
+        return False
     
-    def start_recording(self):
-        """Start voice recording"""
+    def start_recording(self, device_index=None):
+        """Start recording - AUTOMATICALLY uses USB microphone if detected"""
         if not self.audio:
             print("❌ PyAudio not available")
             return False
@@ -115,23 +148,36 @@ class VoiceRecorder:
             print("⚠️ Already recording")
             return False
         
+        # AUTOMATIC DEVICE SELECTION:
+        # 1. Use specified device_index if provided
+        # 2. Use USB microphone if detected
+        # 3. Use default device as fallback
+        recording_device = device_index or self.usb_device_index
+        
         try:
-            # Reset frames
             self.audio_frames = []
             
-            # Open audio stream
+            # Show which device is being used
+            if recording_device is not None:
+                device_info = self.audio.get_device_info_by_index(recording_device)
+                print(f"🎤 Recording with: {device_info['name']}")
+            else:
+                print("🎤 Recording with default device")
+            
+            # Open audio stream with the selected device
             self.stream = self.audio.open(
                 format=self.audio_format,
                 channels=self.channels,
                 rate=self.sample_rate,
                 input=True,
+                input_device_index=recording_device,  # THIS IS THE KEY LINE
                 frames_per_buffer=self.chunk_size
             )
             
             self.is_recording = True
             print("🔴 Recording started... Press Enter again to stop")
             
-            # Start recording in a separate thread
+            # Start recording thread
             self.record_thread = threading.Thread(target=self._record_audio, daemon=True)
             self.record_thread.start()
             
@@ -142,43 +188,44 @@ class VoiceRecorder:
             return False
     
     def _record_audio(self):
-        """Internal recording function"""
+        """Record audio with real-time feedback"""
         start_time = time.time()
         
         try:
             while self.is_recording:
-                # Check for maximum recording time
                 if time.time() - start_time > self.max_record_time:
-                    print(f"⏰ Maximum recording time ({self.max_record_time}s) reached")
+                    print(f"\n⏰ Maximum recording time reached")
                     break
                 
-                # Read audio data
                 try:
                     data = self.stream.read(self.chunk_size, exception_on_overflow=False)
                     self.audio_frames.append(data)
+                    
+                    # Show recording progress
+                    elapsed = int(time.time() - start_time)
+                    if elapsed > 0 and elapsed % 2 == 0:  # Every 2 seconds
+                        print(f"   🎤 Recording... {elapsed}s", end='\r')
+                    
                 except Exception as e:
-                    print(f"❌ Error reading audio: {e}")
+                    print(f"\n❌ Error reading audio: {e}")
                     break
                     
         except Exception as e:
-            print(f"❌ Recording error: {e}")
+            print(f"\n❌ Recording error: {e}")
         finally:
             self.is_recording = False
     
     def stop_recording(self):
-        """Stop voice recording and return WAV data"""
+        """Stop recording and return WAV data"""
         if not self.is_recording:
             print("⚠️ Not currently recording")
             return None
         
-        # Stop recording
         self.is_recording = False
         
-        # Wait for recording thread to finish
         if self.record_thread:
             self.record_thread.join(timeout=1.0)
         
-        # Close stream
         if self.stream:
             self.stream.stop_stream()
             self.stream.close()
@@ -189,7 +236,7 @@ class VoiceRecorder:
             return None
         
         try:
-            # Create WAV file in memory
+            # Create WAV file
             with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                 wav_file = wave.open(tmp_file, 'wb')
                 wav_file.setnchannels(self.channels)
@@ -200,15 +247,14 @@ class VoiceRecorder:
                 
                 tmp_file_path = tmp_file.name
             
-            # Read the WAV file as bytes
+            # Read WAV file as bytes
             with open(tmp_file_path, 'rb') as f:
                 wav_data = f.read()
             
-            # Clean up temporary file
             os.unlink(tmp_file_path)
             
             duration = len(self.audio_frames) * self.chunk_size / self.sample_rate
-            print(f"🟢 Recording stopped. Duration: {duration:.2f}s, Size: {len(wav_data)} bytes")
+            print(f"🟢 Recording completed: {duration:.2f}s, {len(wav_data)} bytes")
             
             return wav_data
             
@@ -216,8 +262,20 @@ class VoiceRecorder:
             print(f"❌ Error creating WAV file: {e}")
             return None
     
+    def list_audio_devices(self):
+        """List available audio devices"""
+        if not self.audio:
+            return
+        
+        print("🎙️ Available audio input devices:")
+        for i in range(self.audio.get_device_count()):
+            info = self.audio.get_device_info_by_index(i)
+            if info['maxInputChannels'] > 0:
+                marker = " 🎯 USB MIC" if i == self.usb_device_index else ""
+                print(f"   {i}: {info['name']}{marker}")
+    
     def cleanup(self):
-        """Cleanup PyAudio resources"""
+        """Cleanup resources"""
         if self.is_recording:
             self.stop_recording()
         
