@@ -1,0 +1,3 @@
+[] Add logging into db from server side
+[] Build local vector DB at startup from existing logs in DB
+[] Add RAG and test on postman with server endpoints
