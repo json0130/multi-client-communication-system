@@ -19,9 +19,8 @@ mongo_client = AsyncIOMotorClient(
     tls=True,
     tlsAllowInvalidCertificates=True
 )
-mongo_db = mongo_client["robot_db"]
-logs_collection = mongo_db["logs"]
-users_collection = mongo_db["users"]
+mongo_db = mongo_client["logs"]
+logs_collection = mongo_db["user_chat_logs"]
 
 # ----------------------------
 # 2) FAISS Setup

@@ -14,6 +14,14 @@ from web_interface import WebInterface
 from websocket_handler import WebSocketHandler
 from speech_processor import SpeechProcessor
 
+# Import database functions
+from db import (
+    init_faiss_index,
+    retrieve_similar_docs,
+    store_log_entry,
+    logs_collection,
+)
+
 # Configuration
 MODEL_PATH = './models/efficientnet_HQRAF_improved_withCon.pth'
 API_KEY = "emotion_recognition_key_123"
