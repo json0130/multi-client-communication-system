@@ -6,6 +6,8 @@ import threading
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+import asyncio
+from datetime import datetime  
 
 # Import our modular components
 from emotion_processor import EmotionProcessor
@@ -100,7 +102,7 @@ class EmotionServer:
         
         # Component status
         self.components_initialized = 0
-        self.total_components = 4  # Updated for speech processor
+        self.total_components = 5  # Updated for speech processor
     
     def setup_routes(self):
         """Setup Flask routes"""
@@ -283,8 +285,32 @@ class EmotionServer:
             response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
             return response
     
+    def _run_async(self, coro):
+        """Sync helper → run a short async DB/FAISS task."""
+        return asyncio.run(coro)
+    
     def _process_chat_message(self, message, input_type="text"):
         """Process chat message (from text or speech) and return response"""
+        # ---------------- RAG phase ----------------
+        # 1  Retrieve the two most similar past docs
+        try:
+            context_docs = self._run_async(retrieve_similar_docs(message, top_k=2))
+        except Exception as e:
+            print(f"[WARN] RAG retrieval failed: {e}")
+            context_docs = []
+
+        # 2  Persist the user message so future queries can find it
+        log_payload = {
+            "timestamp": datetime.utcnow().isoformat(),
+            "message":   message,
+            "metadata":  {"endpoint": "chat", "input_type": input_type}
+        }
+        try:
+            self._run_async(store_log_entry(log_payload))
+        except Exception as e:
+            print(f"[WARN] Could not log chat message: {e}")
+
+        # ---------------- Emotion & prompt building ----------------
         # Get current emotion state
         detected_emotion, emotion_confidence = self.emotion_processor.get_current_emotion()
         emotion_distribution = self.emotion_processor.get_emotion_distribution()
@@ -301,10 +327,20 @@ class EmotionServer:
         if emotion_confidence > 10:
             print(f"🎭 Using detected emotion: {detected_emotion} ({emotion_confidence:.1f}%)")
 
-        print(f"📤 Sending to GPT: [{detected_emotion}] {message}")
+        # ---------- build RAG prompt ----------
+        rag_block = ""
+        if context_docs:
+            rag_block = "Context:\n" + "\n".join(context_docs) + "\n\n"
+
+        full_prompt = f"{rag_block}{message}"
+
+        print(f"📤 Sending to GPT: [{len(context_docs)} ctx docs | {detected_emotion}] {message}")
 
         # Process with ChatGPT
-        response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        # response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        response_text = self.gpt_client.ask_chatgpt_optimized(
+            full_prompt, detected_emotion, emotion_confidence
+        )
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
 
         print(f"🤖 GPT-4o-mini: {response_text}")
@@ -365,6 +401,15 @@ class EmotionServer:
         self.components_initialized += 1
         print("\n4️⃣ Web interface ready")
         print("    ✅ Web interface initialized")
+        
+        # Initialize FAISS (RAG) index from Mongo ➜ memory
+        print("\n5️⃣ Rebuilding FAISS index (RAG context)…")
+        try:
+            asyncio.run(init_faiss_index())
+            print("    ✅ FAISS index initialized successfully")
+            self.components_initialized += 1
+        except Exception as e:
+            print(f"    ❌ FAISS index initialization failed: {e}")
 
         print(f"\n✅ {self.components_initialized}/{self.total_components} components initialized")
 
