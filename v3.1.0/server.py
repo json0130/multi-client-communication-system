@@ -16,6 +16,8 @@ from web_interface import WebInterface
 from websocket_handler import WebSocketHandler
 from speech_processor import SpeechProcessor
 
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OMP conflict
+
 # Import database functions
 from db import (
     init_faiss_index,
@@ -46,11 +48,15 @@ class EmotionServer:
     """Main emotion detection server with modular components and speech support"""
     
     def __init__(self):
+        # global loop
+        self.async_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.async_loop)
+        
         # Server configuration
         self.server_ip = get_local_ip()
         self.port = PORT
         self.api_key = API_KEY
-        
+
         # Configuration for components
         self.config = {
             'emotion_processing_interval': 0.1,
@@ -286,8 +292,9 @@ class EmotionServer:
             return response
     
     def _run_async(self, coro):
-        """Sync helper → run a short async DB/FAISS task."""
-        return asyncio.run(coro)
+        """Run a coroutine on the single long-lived loop."""
+        return self.async_loop.run_until_complete(coro)
+
     
     def _process_chat_message(self, message, input_type="text"):
         """Process chat message (from text or speech) and return response"""
@@ -308,7 +315,7 @@ class EmotionServer:
         try:
             self._run_async(store_log_entry(log_payload))
         except Exception as e:
-            print(f"[WARN] Could not log chat message: {e}")
+            print(f"[ERROR] Could not log chat message: {e}")
 
         # ---------------- Emotion & prompt building ----------------
         # Get current emotion state
@@ -330,7 +337,9 @@ class EmotionServer:
         # ---------- build RAG prompt ----------
         rag_block = ""
         if context_docs:
-            rag_block = "Context:\n" + "\n".join(context_docs) + "\n\n"
+            rag_block = "Previous Conversation Context:\n" + "\n".join(
+                f"- {doc}" for doc in context_docs
+            ) + "\n\n"
 
         full_prompt = f"{rag_block}{message}"
 
@@ -405,11 +414,12 @@ class EmotionServer:
         # Initialize FAISS (RAG) index from Mongo ➜ memory
         print("\n5️⃣ Rebuilding FAISS index (RAG context)…")
         try:
-            asyncio.run(init_faiss_index())
+            self._run_async(init_faiss_index())
             print("    ✅ FAISS index initialized successfully")
             self.components_initialized += 1
         except Exception as e:
             print(f"    ❌ FAISS index initialization failed: {e}")
+            print("    ⚠️ Continuing without RAG context support")
 
         print(f"\n✅ {self.components_initialized}/{self.total_components} components initialized")
 
@@ -425,6 +435,8 @@ class EmotionServer:
     def cleanup_resources(self):
         """Cleanup function to prevent resource leaks"""
         try:
+            if hasattr(self, 'async_loop') and not self.async_loop.is_closed():
+                self.async_loop.close()
             # Clear emotion tracker history
             self.emotion_processor.emotion_tracker.emotion_history.clear()
             self.emotion_processor.emotion_tracker.confidence_history.clear()
