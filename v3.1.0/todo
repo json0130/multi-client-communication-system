@@ -3,5 +3,8 @@ MVP:
 [✅] Build local vector DB at startup from existing logs in DB
 [✅] Add RAG and test on postman with server endpoints
 
+for testing:
+[] Add endpoint for dumping (ie. preload) sample data into the DB
+
 stretch:
 [] add per-user logs
