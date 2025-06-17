@@ -301,7 +301,7 @@ class EmotionServer:
         # ---------------- RAG phase ----------------
         # 1  Retrieve the two most similar past docs
         try:
-            context_docs = self._run_async(retrieve_similar_docs(message, top_k=2))
+            context_docs = self._run_async(retrieve_similar_docs(message, top_k=12))
         except Exception as e:
             print(f"[WARN] RAG retrieval failed: {e}")
             context_docs = []
