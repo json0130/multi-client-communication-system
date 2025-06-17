@@ -7,7 +7,7 @@ from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
 import asyncio
-from datetime import datetime  
+from datetime import datetime, timezone
 
 # Import our modular components
 from emotion_processor import EmotionProcessor
@@ -308,7 +308,8 @@ class EmotionServer:
 
         # 2  Persist the user message so future queries can find it
         log_payload = {
-            "timestamp": datetime.utcnow().isoformat(),
+            "timestamp": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+            # → e.g. "2025-06-16T04:03:09+00:00"
             "message":   message,
             "metadata":  {"endpoint": "chat", "input_type": input_type}
         }
