@@ -4,6 +4,7 @@ import time
 import socket
 import threading
 import csv
+import re
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
@@ -328,15 +329,23 @@ class EmotionServer:
             'input_type': input_type,
             'timestamp': time.time()
         })
-
+        
         # Check for drug interaction in CSV
+        # csv_interaction = None
+        # if " and " in message.lower():
+        #     parts = message.lower().split(" and ")
+        #     if len(parts) == 2:
+        #         drug1 = parts[0].strip()
+        #         drug2 = parts[1].strip()
+        #         csv_interaction = check_interaction_csv(drug1, drug2)
+
+        # If the message contains " and ", extract drugs and check CSV
         csv_interaction = None
-        if " and " in message.lower():
-            parts = message.lower().split(" and ")
-            if len(parts) == 2:
-                drug1 = parts[0].strip()
-                drug2 = parts[1].strip()
-                csv_interaction = check_interaction_csv(drug1, drug2)
+        drug1 = drug2 = None
+        match = re.search(r"\b([A-Za-z0-9\-]+)\s+and\s+([A-Za-z0-9\-]+)\b", message)
+        if match:
+            drug1, drug2 = match.group(1), match.group(2)
+            csv_interaction = check_interaction_csv(drug1, drug2)
 
         # Build GPT prompt
         if csv_interaction:
