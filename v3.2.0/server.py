@@ -3,11 +3,14 @@ import os
 import time
 import socket
 import threading
-import csv
-import re
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+
+# Import necessary libraries for Healthcare
+import csv
+import re
+from itertools import combinations
 
 # Import our modular components
 from emotion_processor import EmotionProcessor
@@ -22,19 +25,73 @@ API_KEY = "emotion_recognition_key_123"
 PORT = 5001
 load_dotenv()
 
+# This is for healthcare drug interaction analysis
+def extract_drugs(message):
+    # Naive token-based extractor (replace with smarter NER later if needed)
+    match = re.findall(r"\b([A-Za-z0-9\(\)\-\+\/]+(?: [A-Za-z0-9\(\)\-\+\/]+)?)\b", message)
+    common = {'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine', 'what', 'about', 'the'}
+    return [w.strip() for w in match if w.lower() not in common]
+
+def analyze_drugs_from_message(message):
+    drugs = extract_drugs(message)
+    interactions = []
+
+    # Lower all for safer matching
+    drugs = [d.strip().lower() for d in drugs]
+
+    if len(drugs) == 1:
+        # Check for intention to ask about all combinations with 1 drug
+        if re.search(r"all.*(interaction|combination|mix)", message.lower()):
+            target = drugs[0]
+            filepath = os.path.join(os.path.dirname(__file__), 'ddinter_downloads_code_V.csv')
+            try:
+                with open(filepath, 'r', encoding='utf-8') as f:
+                    reader = csv.DictReader(f)
+                    for row in reader:
+                        d1 = row['Drug_A'].lower()
+                        d2 = row['Drug_B'].lower()
+                        if target == d1 or target == d2:
+                            interactions.append(
+                                f"{row['Level']} interaction: {row['Drug_A']} + {row['Drug_B']}"
+                            )
+            except Exception as e:
+                return [], [f"[ERROR] Could not read CSV: {e}"]
+            return drugs, interactions
+
+    elif len(drugs) >= 2:
+        pairs = combinations(drugs, 2)
+        for d1, d2 in pairs:
+            result = check_interaction_csv(d1, d2)
+            if result:
+                interactions.append(result)
+        return drugs, interactions
+
+    return drugs, []
+# ------------------
+
+def normalize_name(name):
+    return name.lower().strip().replace("’", "'").replace("–", "-")
+
+def normalize_name(name):
+    return name.lower().strip()
+
 def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv'):
-    drug1 = drug1.lower().strip()
-    drug2 = drug2.lower().strip()
+    drug1 = normalize_name(drug1)
+    drug2 = normalize_name(drug2)
     filepath = os.path.join(os.path.dirname(__file__), filepath)
+
+    print(f"🔍 Checking: {drug1} vs {drug2}")
 
     try:
         with open(filepath, 'r', encoding='utf-8') as f:
             reader = csv.DictReader(f)
             for row in reader:
-                d1 = row['Drug_A'].lower()
-                d2 = row['Drug_B'].lower()
-                if (drug1 == d1 and drug2 == d2) or (drug1 == d2 and drug2 == d1):
+                d1 = normalize_name(row['Drug_A'])
+                d2 = normalize_name(row['Drug_B'])
+                if (drug1 in d1 and drug2 in d2) or (drug1 in d2 and drug2 in d1):
+                    print(f"✅ Match found: {row['Drug_A']} + {row['Drug_B']}")
                     return f"{row['Level']} interaction found between {row['Drug_A']} and {row['Drug_B']}."
+        print("❌ No match found.")
         return None
     except Exception as e:
         return f"[ERROR] Could not check CSV: {e}"
@@ -97,24 +154,36 @@ class EmotionServer:
         @self.app.route('/check_drug', methods=['POST'])
         def check_drug():
             data = request.json
-            drug1 = data.get("drug1")
-            drug2 = data.get("drug2")
+            drug1 = data.get("drug1", "").strip()
+            drug2 = data.get("drug2", "").strip()
 
             if not drug1 or not drug2:
                 return jsonify({"response": "[DEFAULT] Please provide two drug names."})
 
             interaction = check_interaction_csv(drug1, drug2)
-            if interaction:
-                return jsonify({"response": f"[DEFAULT] {interaction}"})
 
-            prompt = f"Are there any known interactions between {drug1} and {drug2}?"
+            if interaction:
+                prompt = (
+                    f"The user asked about the interaction between {drug1} and {drug2}.\n"
+                    f"A known interaction exists in our medical database: {interaction}\n"
+                    f"Please explain what this interaction means in simple, medically appropriate language. "
+                    f"Be specific and repeat the interaction level (e.g., Moderate, Major), "
+                    f"and clearly describe the possible consequences and recommended action."
+                )
+            else:
+                prompt = (
+                    f"The user asked about taking {drug1} and {drug2} together. "
+                    f"No known interaction was found in the database. "
+                    f"Please explain this carefully, and remind the user to consult a healthcare professional."
+                )
+
             gpt = GPTClient()
             if not gpt.setup_openai():
-                return jsonify({"response": "[DEFAULT] GPT not available."})
-            gpt_response = gpt.ask_chatgpt_optimized(prompt, "DEFAULT", 0.9)
+                return jsonify({"response": "[DEFAULT] GPT is not available right now."})
 
-            return jsonify({"response": gpt_response})
-    
+            response = gpt.ask_chatgpt_optimized(prompt, "DEFAULT", 0.9)
+            return jsonify({"response": response})
+
         # Initialize components
         self.emotion_processor = EmotionProcessor(MODEL_PATH, self.config)
         self.gpt_client = GPTClient()
@@ -329,31 +398,16 @@ class EmotionServer:
             'input_type': input_type,
             'timestamp': time.time()
         })
-        
-        # Check for drug interaction in CSV
-        # csv_interaction = None
-        # if " and " in message.lower():
-        #     parts = message.lower().split(" and ")
-        #     if len(parts) == 2:
-        #         drug1 = parts[0].strip()
-        #         drug2 = parts[1].strip()
-        #         csv_interaction = check_interaction_csv(drug1, drug2)
 
-        # If the message contains " and ", extract drugs and check CSV
-        csv_interaction = None
-        drug1 = drug2 = None
-        match = re.search(r"\b([A-Za-z0-9\-]+)\s+and\s+([A-Za-z0-9\-]+)\b", message)
-        if match:
-            drug1, drug2 = match.group(1), match.group(2)
-            csv_interaction = check_interaction_csv(drug1, drug2)
+        # Analyze drug content and find interactions
+        drugs, interactions = analyze_drugs_from_message(message)
 
-        # Build GPT prompt
-        if csv_interaction:
+        if interactions:
+            joined = "\n".join(interactions)
             prompt = (
-                f"The user asked about the interaction between {drug1} and {drug2}. "
-                f"A known interaction exists: {csv_interaction} "
-                f"Please explain whether it's safe to take these two medications together "
-                f"based on this data in a friendly and clear way."
+                f"The user asked about the drugs: {', '.join(drugs)}.\n"
+                f"Here are the known interactions I found:\n{joined}\n"
+                f"Please explain the risks clearly and whether these drugs are safe together."
             )
         else:
             prompt = f"The user asked: {message}. Please provide a medically appropriate response."
