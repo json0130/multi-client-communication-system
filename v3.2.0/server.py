@@ -329,13 +329,31 @@ class EmotionServer:
             'timestamp': time.time()
         })
 
+        # Check for drug interaction in CSV
+        csv_interaction = None
+        if " and " in message.lower():
+            parts = message.lower().split(" and ")
+            if len(parts) == 2:
+                drug1 = parts[0].strip()
+                drug2 = parts[1].strip()
+                csv_interaction = check_interaction_csv(drug1, drug2)
+
+        # Build GPT prompt
+        if csv_interaction:
+            prompt = (
+                f"The user asked about the interaction between {drug1} and {drug2}. "
+                f"A known interaction exists: {csv_interaction} "
+                f"Please explain whether it's safe to take these two medications together "
+                f"based on this data in a friendly and clear way."
+            )
+        else:
+            prompt = f"The user asked: {message}. Please provide a medically appropriate response."
+
         if emotion_confidence > 10:
             print(f"🎭 Using detected emotion: {detected_emotion} ({emotion_confidence:.1f}%)")
 
-        print(f"📤 Sending to GPT: [{detected_emotion}] {message}")
-
-        # Process with ChatGPT
-        response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        print(f"📤 Sending to GPT: [{detected_emotion}] {prompt}")
+        response_text = self.gpt_client.ask_chatgpt_optimized(prompt, detected_emotion, emotion_confidence)
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
 
         print(f"🤖 GPT-4o-mini: {response_text}")
@@ -356,7 +374,7 @@ class EmotionServer:
             "emotion_distribution": emotion_distribution,
             "input_type": input_type
         })
-    
+
     def initialize_components(self):
         """Initialize all server components"""
         print("🚀 Initializing Local Real-time Emotion Detection Server with Speech Support...")
