@@ -3,6 +3,7 @@ import os
 import time
 import socket
 import threading
+import csv
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
@@ -17,8 +18,25 @@ from speech_processor import SpeechProcessor
 # Configuration
 MODEL_PATH = './models/efficientnet_HQRAF_improved_withCon.pth'
 API_KEY = "emotion_recognition_key_123"
-PORT = 5000
+PORT = 5001
 load_dotenv()
+
+def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv'):
+    drug1 = drug1.lower().strip()
+    drug2 = drug2.lower().strip()
+    filepath = os.path.join(os.path.dirname(__file__), filepath)
+
+    try:
+        with open(filepath, 'r', encoding='utf-8') as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                d1 = row['Drug_A'].lower()
+                d2 = row['Drug_B'].lower()
+                if (drug1 == d1 and drug2 == d2) or (drug1 == d2 and drug2 == d1):
+                    return f"{row['Level']} interaction found between {row['Drug_A']} and {row['Drug_B']}."
+        return None
+    except Exception as e:
+        return f"[ERROR] Could not check CSV: {e}"
 
 def get_local_ip():
     """Get the local IP address of this machine"""
@@ -74,7 +92,28 @@ class EmotionServer:
             allow_upgrades=True,
             cookie=False
         )
-        
+    
+        @self.app.route('/check_drug', methods=['POST'])
+        def check_drug():
+            data = request.json
+            drug1 = data.get("drug1")
+            drug2 = data.get("drug2")
+
+            if not drug1 or not drug2:
+                return jsonify({"response": "[DEFAULT] Please provide two drug names."})
+
+            interaction = check_interaction_csv(drug1, drug2)
+            if interaction:
+                return jsonify({"response": f"[DEFAULT] {interaction}"})
+
+            prompt = f"Are there any known interactions between {drug1} and {drug2}?"
+            gpt = GPTClient()
+            if not gpt.setup_openai():
+                return jsonify({"response": "[DEFAULT] GPT not available."})
+            gpt_response = gpt.ask_chatgpt_optimized(prompt, "DEFAULT", 0.9)
+
+            return jsonify({"response": gpt_response})
+    
         # Initialize components
         self.emotion_processor = EmotionProcessor(MODEL_PATH, self.config)
         self.gpt_client = GPTClient()
