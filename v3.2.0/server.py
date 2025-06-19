@@ -72,12 +72,8 @@ def analyze_drugs_from_message(message):
 def normalize_name(name):
     return name.lower().strip().replace("’", "'").replace("–", "-")
 
-def normalize_name(name):
-    return name.lower().strip()
-
 def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv'):
-    drug1 = normalize_name(drug1)
-    drug2 = normalize_name(drug2)
+    drug1, drug2 = normalize_name(drug1), normalize_name(drug2)
     filepath = os.path.join(os.path.dirname(__file__), filepath)
 
     print(f"🔍 Checking: {drug1} vs {drug2}")
@@ -88,7 +84,8 @@ def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv')
             for row in reader:
                 d1 = normalize_name(row['Drug_A'])
                 d2 = normalize_name(row['Drug_B'])
-                if (drug1 in d1 and drug2 in d2) or (drug1 in d2 and drug2 in d1):
+
+                if (drug1 == d1 and drug2 == d2) or (drug1 == d2 and drug2 == d1):
                     print(f"✅ Match found: {row['Drug_A']} + {row['Drug_B']}")
                     return f"{row['Level']} interaction found between {row['Drug_A']} and {row['Drug_B']}."
         print("❌ No match found.")
@@ -164,17 +161,16 @@ class EmotionServer:
 
             if interaction:
                 prompt = (
+                    f"You are a medically-informed assistant responding to a drug interaction query.\n\n"
                     f"The user asked about the interaction between {drug1} and {drug2}.\n"
-                    f"A known interaction exists in our medical database: {interaction}\n"
-                    f"Please explain what this interaction means in simple, medically appropriate language. "
-                    f"Be specific and repeat the interaction level (e.g., Moderate, Major), "
-                    f"and clearly describe the possible consequences and recommended action."
+                    f"A known interaction exists in our verified interaction database: {interaction}\n\n"
+                    f"Please repeat this interaction level clearly (e.g., Moderate or Major), explain what this means clinically, "
+                    f"mention any relevant risks (e.g., sedation, heart effects), and remind the user to consult a doctor."
                 )
             else:
                 prompt = (
-                    f"The user asked about taking {drug1} and {drug2} together. "
-                    f"No known interaction was found in the database. "
-                    f"Please explain this carefully, and remind the user to consult a healthcare professional."
+                    f"The user asked about taking {drug1} and {drug2} together. No interaction was found in the database.\n"
+                    f"Please explain that clearly, note that this does not mean it’s always safe, and kindly suggest checking with a pharmacist or doctor."
                 )
 
             gpt = GPTClient()
@@ -405,9 +401,14 @@ class EmotionServer:
         if interactions:
             joined = "\n".join(interactions)
             prompt = (
+                f"You are a medically-informed assistant responding to a question about drug interactions.\n\n"
                 f"The user asked about the drugs: {', '.join(drugs)}.\n"
-                f"Here are the known interactions I found:\n{joined}\n"
-                f"Please explain the risks clearly and whether these drugs are safe together."
+                f"The following interactions were found in our verified interaction database:\n{joined}\n\n"
+                f"IMPORTANT:\n"
+                f"- Repeat the interaction levels (e.g., Moderate or Major).\n"
+                f"- Explain what they could mean clinically (e.g., risks of sedation, breathing issues).\n"
+                f"- Be friendly, but include medical caution.\n"
+                f"- Remind the user to speak to a healthcare professional."
             )
         else:
             prompt = f"The user asked: {message}. Please provide a medically appropriate response."
