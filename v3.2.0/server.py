@@ -11,6 +11,9 @@ from dotenv import load_dotenv
 import csv
 import re
 from itertools import combinations
+from patient_db import init_db
+from patient_db import get_patient_history, update_patient_history, extract_name_if_any
+from patient_db import add_patient, get_patient_by_name, update_patient_meds, add_medications, extract_name_if_any, get_patient_medications
 
 # Import our modular components
 from emotion_processor import EmotionProcessor
@@ -25,15 +28,27 @@ API_KEY = "emotion_recognition_key_123"
 PORT = 5001
 load_dotenv()
 
-# This is for healthcare drug interaction analysis
+# ------------------
+# def extract_drugs(message):
+#     # Naive token-based extractor (replace with smarter NER later if needed)
+#     match = re.findall(r"\b([A-Za-z0-9\(\)\-\+\/]+(?: [A-Za-z0-9\(\)\-\+\/]+)?)\b", message)
+#     common = {'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine', 'what', 'about', 'the'}
+#     return [w.strip() for w in match if w.lower() not in common]
+
 def extract_drugs(message):
-    # Naive token-based extractor (replace with smarter NER later if needed)
-    match = re.findall(r"\b([A-Za-z0-9\(\)\-\+\/]+(?: [A-Za-z0-9\(\)\-\+\/]+)?)\b", message)
-    common = {'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine', 'what', 'about', 'the'}
-    return [w.strip() for w in match if w.lower() not in common]
+    # Improved: extract possible drug tokens and exclude noise
+    tokens = re.findall(r'\b[A-Za-z][A-Za-z\-()0-9]+\b', message)
+    noise_words = {
+        'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine',
+        'what', 'about', 'the', 'my', 'name', 'hi', 'hello', 'please', 'still', 'now',
+        'you', 'me', 'of', 'a', 'do', 'like', 'know', 'help'
+    }
+    return [t for t in tokens if t.lower() not in noise_words and len(t) > 2]
+
 
 def analyze_drugs_from_message(message):
     drugs = extract_drugs(message)
+    print(f"🧪 Drugs from message: {drugs}")
     interactions = []
 
     # Lower all for safer matching
@@ -70,7 +85,9 @@ def analyze_drugs_from_message(message):
 # ------------------
 
 def normalize_name(name):
-    return name.lower().strip().replace("’", "'").replace("–", "-")
+    #return name.lower().strip().replace("’", "'").replace("–", "-")
+    return re.sub(r"\s+", " ", name.strip().lower().replace("’", "'").replace("–", "-"))
+
 
 def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv'):
     drug1, drug2 = normalize_name(drug1), normalize_name(drug2)
@@ -85,13 +102,24 @@ def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv')
                 d1 = normalize_name(row['Drug_A'])
                 d2 = normalize_name(row['Drug_B'])
 
-                if (drug1 == d1 and drug2 == d2) or (drug1 == d2 and drug2 == d1):
+                print(f"🔎 Comparing CSV: {d1} vs {d2}")
+
+                # Loosened match: check both exact match or partial containment
+                if (
+                    (drug1 == d1 and drug2 == d2) or
+                    (drug1 == d2 and drug2 == d1) or
+                    (drug1 in d1 and drug2 in d2) or
+                    (drug1 in d2 and drug2 in d1)
+                ):
                     print(f"✅ Match found: {row['Drug_A']} + {row['Drug_B']}")
                     return f"{row['Level']} interaction found between {row['Drug_A']} and {row['Drug_B']}."
+
         print("❌ No match found.")
         return None
     except Exception as e:
+        print(f"[ERROR] CSV lookup failed: {e}")
         return f"[ERROR] Could not check CSV: {e}"
+
 
 def get_local_ip():
     """Get the local IP address of this machine"""
@@ -109,6 +137,7 @@ class EmotionServer:
     """Main emotion detection server with modular components and speech support"""
     
     def __init__(self):
+        from patient_db import add_patient, add_medications
         # Server configuration
         self.server_ip = get_local_ip()
         self.port = PORT
@@ -148,6 +177,43 @@ class EmotionServer:
             cookie=False
         )
     
+        @self.app.route('/register_patient', methods=['POST'])
+        def register_patient():
+            data = request.json
+            name = data.get("name", "").strip()
+            if not name:
+                return jsonify({"error": "No name provided"}), 400
+            add_patient(name)
+            return jsonify({"message": f"Patient '{name}' registered."})
+
+        @self.app.route('/add_meds', methods=['POST'])
+        def add_meds():
+            data = request.json
+            name = data.get("name", "").strip()
+            meds = data.get("medications", [])
+            if not name or not meds or not isinstance(meds, list):
+                return jsonify({"error": "Name and medications list required"}), 400
+            success = add_medications(name, meds)
+            if not success:
+                return jsonify({"error": "Patient not found"}), 404
+            return jsonify({"message": f"Updated medications for {name}."})
+
+        @self.app.route('/chat', methods=['POST'])
+        def chat():
+            """Enhanced chat endpoint that broadcasts to monitors"""
+            try:
+                auth_header = request.headers.get('Authorization')
+                if not auth_header or not auth_header.startswith('Bearer ') or auth_header.split(' ')[1] != self.api_key:
+                    return jsonify({"error": "Authentication required"}), 401
+                data = request.json
+                message = data.get('message', '')
+                if not message:
+                    return jsonify({"error": "No message provided"}), 400
+                return self._process_chat_message(message, "text")
+            except Exception as e:
+                print(f"Chat endpoint error: {e}")
+                return jsonify({"error": "Internal server error"}), 500
+
         @self.app.route('/check_drug', methods=['POST'])
         def check_drug():
             data = request.json
@@ -260,26 +326,6 @@ class EmotionServer:
                 "timestamp": time.time()
             })
 
-        @self.app.route('/chat', methods=['POST'])
-        def chat():
-            """Enhanced chat endpoint that broadcasts to monitors"""
-            try:
-                auth_header = request.headers.get('Authorization')
-                if not auth_header or not auth_header.startswith('Bearer ') or auth_header.split(' ')[1] != self.api_key:
-                    return jsonify({"error": "Authentication required"}), 401
-
-                data = request.json
-                message = data.get('message', '')
-
-                if not message:
-                    return jsonify({"error": "No message provided"}), 400
-
-                return self._process_chat_message(message, "text")
-
-            except Exception as e:
-                print(f"Chat endpoint error: {e}")
-                return jsonify({"error": "Internal server error"}), 500
-
         @self.app.route('/speech', methods=['POST'])
         def speech():
             """New speech endpoint for audio transcription and chat"""
@@ -382,6 +428,8 @@ class EmotionServer:
     
     def _process_chat_message(self, message, input_type="text"):
         """Process chat message (from text or speech) and return response"""
+        from patient_db import get_patient_history, update_patient_history, extract_name_if_any
+
         # Get current emotion state
         detected_emotion, emotion_confidence = self.emotion_processor.get_current_emotion()
         emotion_distribution = self.emotion_processor.get_emotion_distribution()
@@ -395,21 +443,74 @@ class EmotionServer:
             'timestamp': time.time()
         })
 
-        # Analyze drug content and find interactions
+        # Try to extract name and medications
+        name = extract_name_if_any(message)
         drugs, interactions = analyze_drugs_from_message(message)
+        print(f"🧪 Extracted drugs: {drugs}")
+        print(f"📎 Interactions found: {interactions}")
 
-        if interactions:
+        prior_meds = []
+        if name:
+            prior_meds = get_patient_history(name)
+
+        # 🧠 Handle medication recall request (e.g. "what meds was I taking?")
+        if name and not interactions and re.search(r'\b(what|which).*med(ication|s)?\b', message.lower()):
+            if prior_meds:
+                meds = ', '.join(prior_meds)
+                prompt = (
+                    f"{name} previously saved these medications: {meds}.\n"
+                    f"The user asked: '{message}'\n"
+                    f"Kindly respond by confirming their list and asking if they wish to add or update anything."
+                )
+            else:
+                prompt = (
+                    f"The user named {name} asked: '{message}'\n"
+                    f"But there are no medications on file.\n"
+                    f"Kindly let them know their list is empty and ask if they'd like to add any medications now."
+                )
+
+        # 💊 Handle drug interaction messages
+        elif interactions:
             joined = "\n".join(interactions)
             prompt = (
-                f"You are a medically-informed assistant responding to a question about drug interactions.\n\n"
+                f"You are a medically-informed assistant responding to a patient.\n\n"
+                f"{f'Patient name: {name}.' if name else ''}\n"
                 f"The user asked about the drugs: {', '.join(drugs)}.\n"
-                f"The following interactions were found in our verified interaction database:\n{joined}\n\n"
+                f"The following interactions were found:\n{joined}\n\n"
                 f"IMPORTANT:\n"
                 f"- Repeat the interaction levels (e.g., Moderate or Major).\n"
                 f"- Explain what they could mean clinically (e.g., risks of sedation, breathing issues).\n"
-                f"- Be friendly, but include medical caution.\n"
-                f"- Remind the user to speak to a healthcare professional."
+                f"- Be friendly, but medically cautious.\n"
+                f"- Remind the user to consult a doctor or pharmacist."
             )
+
+        elif name and prior_meds:
+            meds = ', '.join(prior_meds)
+            # Check if user is referencing any known interactions again
+            interaction_found = False
+            joined = ""
+            for d1, d2 in combinations(drugs, 2):
+                interaction = check_interaction_csv(d1, d2)
+                if interaction:
+                    interaction_found = True
+                    joined += f"{interaction}\n"
+
+            if interaction_found:
+                prompt = (
+                    f"Welcome back, {name}! Last time you were taking: {meds}.\n"
+                    f"The user just said: {message}\n"
+                    f"I found the following interactions based on your current input:\n{joined}\n\n"
+                    f"Please explain the risks in friendly but clear language, and remind the user to consult a doctor."
+                )
+            else:
+                prompt = (
+                    f"Welcome back, {name}! Last time you were taking: {meds}.\n"
+                    f"User said: {message}\n"
+                    f"Please respond warmly and check if their question relates to these medications. "
+                    f"Ask if they are still taking them or want to update their list."
+                )
+
+        # 🤖 General fallback
         else:
             prompt = f"The user asked: {message}. Please provide a medically appropriate response."
 
@@ -420,9 +521,11 @@ class EmotionServer:
         response_text = self.gpt_client.ask_chatgpt_optimized(prompt, detected_emotion, emotion_confidence)
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
 
-        print(f"🤖 GPT-4o-mini: {response_text}")
+        # Optionally update meds if any were mentioned
+        if name and drugs:
+            update_patient_history(name, drugs)
 
-        # Broadcast bot response to monitors
+        # Broadcast bot response
         self.websocket_handler.broadcast_chat_message({
             'type': 'bot',
             'content': response_text,
@@ -438,6 +541,7 @@ class EmotionServer:
             "emotion_distribution": emotion_distribution,
             "input_type": input_type
         })
+
 
     def initialize_components(self):
         """Initialize all server components"""
@@ -549,6 +653,7 @@ def main():
     import torch  # Import here to make it available for stats
     globals()['torch'] = torch
     
+    init_db()
     server = EmotionServer()
     server.start()
 
