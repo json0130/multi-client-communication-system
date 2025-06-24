@@ -29,25 +29,28 @@ PORT = 5001
 load_dotenv()
 
 def extract_drugs(message):
-    # Improved: extract possible drug tokens and exclude noise
-    tokens = re.findall(r'\b[A-Za-z][A-Za-z\-()0-9]+\b', message)
+    tokens = re.findall(r"\b([A-Za-z][A-Za-z0-9\(\)\-\+\/]*)\b", message)
     noise_words = {
         'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine',
         'what', 'about', 'the', 'my', 'name', 'hi', 'hello', 'please', 'still', 'now',
-        'you', 'me', 'of', 'a', 'do', 'like', 'know', 'help'
+        'also', 'im', 'was', 'taking', 'again', 'currently', 'new', 'old', 'just',
+        'on', 'off', 'medications', 'medication', 'meds', 'yes', 'no', 'previous', 'along'
     }
-    return [t for t in tokens if t.lower() not in noise_words and len(t) > 2]
+    return [t.strip().lower() for t in tokens if t.lower() not in noise_words and len(t.strip()) > 2]
 
-def analyze_drugs_from_message(message):
+def analyze_drugs_from_message(message, name=None):
     drugs = extract_drugs(message)
     print(f"🧪 Drugs from message: {drugs}")
     interactions = []
 
-    # Lower all for safer matching
+    # 🧼 Remove patient name from drugs (if present)
+    if name and name.lower() in [d.lower() for d in drugs]:
+        drugs = [d for d in drugs if d.lower() != name.lower()]
+
+    # Normalize all drugs to lowercase
     drugs = [d.strip().lower() for d in drugs]
 
     if len(drugs) == 1:
-        # Check for intention to ask about all combinations with 1 drug
         if re.search(r"all.*(interaction|combination|mix)", message.lower()):
             target = drugs[0]
             filepath = os.path.join(os.path.dirname(__file__), 'ddinter_downloads_code_V.csv')
@@ -66,14 +69,12 @@ def analyze_drugs_from_message(message):
             return drugs, interactions
 
     elif len(drugs) >= 2:
-        pairs = combinations(drugs, 2)
-        for d1, d2 in pairs:
+        for d1, d2 in combinations(drugs, 2):
             result = check_interaction_csv(d1, d2)
             if result:
                 interactions.append(result)
-        return drugs, interactions
 
-    return drugs, []
+    return drugs, interactions
 # ------------------
 
 def normalize_name(name):
@@ -104,13 +105,11 @@ def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv')
                 ):
                     print(f"✅ Match found: {row['Drug_A']} + {row['Drug_B']}")
                     return f"{row['Level']} interaction found between {row['Drug_A']} and {row['Drug_B']}."
-
-        print("❌ No match found.")
+                
         return None
     except Exception as e:
         print(f"[ERROR] CSV lookup failed: {e}")
         return f"[ERROR] Could not check CSV: {e}"
-
 
 def get_local_ip():
     """Get the local IP address of this machine"""
@@ -434,18 +433,29 @@ class EmotionServer:
             'input_type': input_type,
             'timestamp': time.time()
         })
-
         # Try to extract name and medications
         name = extract_name_if_any(message)
         if name:
             self.last_known_name = name
         else:
             name = self.last_known_name
-            
-        drugs, interactions = analyze_drugs_from_message(message)
+
+        # ✅ Register new patient if not already in DB
+        if name and not get_patient_by_name(name):
+            print(f"🆕 New patient detected: {name} — adding to database.")
+            add_patient(name)
+
+        # Extract drugs and interactions
+        drugs, interactions = analyze_drugs_from_message(message, name)
+
+        # ✅ Remove patient name from drugs if mistakenly included
+        if name and name.lower() in drugs:
+            drugs = [d for d in drugs if d != name.lower()]
+
         print(f"🧪 Extracted drugs: {drugs}")
         print(f"📎 Interactions found: {interactions}")
 
+        # Retrieve prior medication history
         prior_meds = []
         if name:
             prior_meds = get_patient_history(name)
@@ -523,9 +533,12 @@ class EmotionServer:
             if not get_patient_by_name(name):
                 print(f"🆕 New patient detected: {name} — adding to database.")
                 add_patient(name)
+
             if drugs:
-                update_patient_history(name, drugs)
-                print(f"💾 Updated medications for {name}: {drugs}")
+                # Detect intent to REPLACE list (not append)
+                replace_intent = bool(re.search(r"\b(i\s*(now)?\s*(am)?\s*take|i\s*(currently)?\s*take)\b", message.lower()))
+                update_patient_history(name, drugs, replace=replace_intent)
+                print(f"💾 {'Replaced' if replace_intent else 'Updated'} medications for {name}: {drugs}")
 
         # Broadcast bot response
         self.websocket_handler.broadcast_chat_message({
@@ -543,7 +556,6 @@ class EmotionServer:
             "emotion_distribution": emotion_distribution,
             "input_type": input_type
         })
-
 
     def initialize_components(self):
         """Initialize all server components"""
