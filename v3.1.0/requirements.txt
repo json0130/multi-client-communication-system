@@ -20,3 +20,9 @@ faster-whisper>=0.10.0
 
 # Environment and utilities
 python-dotenv>=0.19.0
+
+# db.py
+pymongo[srv]
+faiss-cpu==1.11.0
+motor==3.7.1
+
