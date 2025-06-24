@@ -28,13 +28,6 @@ API_KEY = "emotion_recognition_key_123"
 PORT = 5001
 load_dotenv()
 
-# ------------------
-# def extract_drugs(message):
-#     # Naive token-based extractor (replace with smarter NER later if needed)
-#     match = re.findall(r"\b([A-Za-z0-9\(\)\-\+\/]+(?: [A-Za-z0-9\(\)\-\+\/]+)?)\b", message)
-#     common = {'can', 'i', 'take', 'together', 'and', 'with', 'is', 'safe', 'mix', 'combine', 'what', 'about', 'the'}
-#     return [w.strip() for w in match if w.lower() not in common]
-
 def extract_drugs(message):
     # Improved: extract possible drug tokens and exclude noise
     tokens = re.findall(r'\b[A-Za-z][A-Za-z\-()0-9]+\b', message)
@@ -44,7 +37,6 @@ def extract_drugs(message):
         'you', 'me', 'of', 'a', 'do', 'like', 'know', 'help'
     }
     return [t for t in tokens if t.lower() not in noise_words and len(t) > 2]
-
 
 def analyze_drugs_from_message(message):
     drugs = extract_drugs(message)
@@ -87,7 +79,6 @@ def analyze_drugs_from_message(message):
 def normalize_name(name):
     #return name.lower().strip().replace("’", "'").replace("–", "-")
     return re.sub(r"\s+", " ", name.strip().lower().replace("’", "'").replace("–", "-"))
-
 
 def check_interaction_csv(drug1, drug2, filepath='ddinter_downloads_code_V.csv'):
     drug1, drug2 = normalize_name(drug1), normalize_name(drug2)
@@ -142,6 +133,7 @@ class EmotionServer:
         self.server_ip = get_local_ip()
         self.port = PORT
         self.api_key = API_KEY
+        self.last_known_name = None
         
         # Configuration for components
         self.config = {
@@ -445,6 +437,11 @@ class EmotionServer:
 
         # Try to extract name and medications
         name = extract_name_if_any(message)
+        if name:
+            self.last_known_name = name
+        else:
+            name = self.last_known_name
+            
         drugs, interactions = analyze_drugs_from_message(message)
         print(f"🧪 Extracted drugs: {drugs}")
         print(f"📎 Interactions found: {interactions}")
@@ -522,8 +519,13 @@ class EmotionServer:
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
 
         # Optionally update meds if any were mentioned
-        if name and drugs:
-            update_patient_history(name, drugs)
+        if name:
+            if not get_patient_by_name(name):
+                print(f"🆕 New patient detected: {name} — adding to database.")
+                add_patient(name)
+            if drugs:
+                update_patient_history(name, drugs)
+                print(f"💾 Updated medications for {name}: {drugs}")
 
         # Broadcast bot response
         self.websocket_handler.broadcast_chat_message({
