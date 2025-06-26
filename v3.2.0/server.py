@@ -25,7 +25,7 @@ from speech_processor import SpeechProcessor
 # Configuration
 MODEL_PATH = './models/efficientnet_HQRAF_improved_withCon.pth'
 API_KEY = "emotion_recognition_key_123"
-PORT = 5001
+PORT = 5002
 load_dotenv()
 
 def extract_drugs(message):
