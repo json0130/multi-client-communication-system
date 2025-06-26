@@ -29,6 +29,7 @@ async def generate_topics(logs_collection, min_logs=10):
     )
     
     #topic_info = topic_model.get_topic_info()
+    #print(topic_info)
     # Build topic_info list, include Name from top words
     topic_info = []
     for topic_id, cnt in topic_counts:
@@ -72,6 +73,7 @@ async def generate_topics(logs_collection, min_logs=10):
                 print(f"Error generating wordcloud for topic {tid}: {e}")
                 continue
 
+    # THIS PART IS CAUSING ERRORS!!!!
     # 6) Global topic visualization HTML
     #fig = topic_model.visualize_topics()
     #viz_html = fig.to_html(full_html=False)
