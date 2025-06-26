@@ -45,30 +45,41 @@ async def generate_topics(logs_collection, min_logs=10):
             "Name": name
         })
 
-    # 5) Generate wordcloud for top non-outlier topic
+    # 5) Generate wordcloud for first valid non-outlier topic
     wordcloud_b64 = None
     for tid, cnt in topic_counts:
         if tid != -1:  # Skip outlier topic
             try:
-                # Get topic words and convert to frequency dictionary
+                # Get topic words and verify type
                 words = topic_model.get_topic(tid)
+                if not words or not isinstance(words, list):
+                    print(f"Skipping topic {tid}: invalid word list")
+                    continue
+                    
+                # Create frequency dictionary
                 freqs = {word: score for word, score in words}
                 
                 # Generate wordcloud
-                wc = WordCloud(background_color="white", max_words=1000)
+                wc = WordCloud(
+                    background_color="white",
+                    max_words=1000,
+                    width=800,
+                    height=800
+                )
                 wc.generate_from_frequencies(freqs)
 
-                # Save to base64
+                # Save to buffer
                 buf = BytesIO()
-                plt.figure(figsize=(6,6))
+                plt.figure(figsize=(8, 8), facecolor=None)
                 plt.imshow(wc, interpolation="bilinear")
                 plt.axis("off")
-                plt.tight_layout()
-                plt.savefig(buf, format="png")
+                plt.tight_layout(pad=0)
+                plt.savefig(buf, format="png", bbox_inches='tight', pad_inches=0)
                 plt.close()
                 buf.seek(0)
                 wordcloud_b64 = base64.b64encode(buf.read()).decode()
-                break
+                break  # Success, stop searching
+                
             except Exception as e:
                 print(f"Error generating wordcloud for topic {tid}: {e}")
                 continue
