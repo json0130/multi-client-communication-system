@@ -6,6 +6,8 @@ import threading
 from flask import Flask, request, jsonify
 from flask_socketio import SocketIO
 from dotenv import load_dotenv
+import asyncio
+from datetime import datetime, timezone
 
 # Import our modular components
 from emotion_processor import EmotionProcessor
@@ -13,6 +15,16 @@ from gpt_client import GPTClient
 from web_interface import WebInterface
 from websocket_handler import WebSocketHandler
 from speech_processor import SpeechProcessor
+
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OMP conflict
+
+# Import database functions
+from db import (
+    init_faiss_index,
+    retrieve_similar_docs,
+    store_log_entry,
+    logs_collection,
+)
 
 # Configuration
 MODEL_PATH = './models/efficientnet_HQRAF_improved_withCon.pth'
@@ -36,11 +48,15 @@ class EmotionServer:
     """Main emotion detection server with modular components and speech support"""
     
     def __init__(self):
+        # global loop
+        self.async_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(self.async_loop)
+        
         # Server configuration
         self.server_ip = get_local_ip()
         self.port = PORT
         self.api_key = API_KEY
-        
+
         # Configuration for components
         self.config = {
             'emotion_processing_interval': 0.1,
@@ -92,7 +108,7 @@ class EmotionServer:
         
         # Component status
         self.components_initialized = 0
-        self.total_components = 4  # Updated for speech processor
+        self.total_components = 5  # Updated for speech processor
     
     def setup_routes(self):
         """Setup Flask routes"""
@@ -275,8 +291,34 @@ class EmotionServer:
             response.headers.add('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS')
             return response
     
+    def _run_async(self, coro):
+        """Run a coroutine on the single long-lived loop."""
+        return self.async_loop.run_until_complete(coro)
+
+    
     def _process_chat_message(self, message, input_type="text"):
         """Process chat message (from text or speech) and return response"""
+        # ---------------- RAG phase ----------------
+        # 1  Retrieve the two most similar past docs
+        try:
+            context_docs = self._run_async(retrieve_similar_docs(message, top_k=12))
+        except Exception as e:
+            print(f"[WARN] RAG retrieval failed: {e}")
+            context_docs = []
+
+        # 2  Persist the user message so future queries can find it
+        log_payload = {
+            "timestamp": datetime.now().astimezone().replace(microsecond=0).isoformat(),
+            # → e.g. "2025-06-16T04:03:09+00:00"
+            "message":   message,
+            "metadata":  {"endpoint": "chat", "input_type": input_type}
+        }
+        try:
+            self._run_async(store_log_entry(log_payload))
+        except Exception as e:
+            print(f"[ERROR] Could not log chat message: {e}")
+
+        # ---------------- Emotion & prompt building ----------------
         # Get current emotion state
         detected_emotion, emotion_confidence = self.emotion_processor.get_current_emotion()
         emotion_distribution = self.emotion_processor.get_emotion_distribution()
@@ -293,10 +335,22 @@ class EmotionServer:
         if emotion_confidence > 10:
             print(f"🎭 Using detected emotion: {detected_emotion} ({emotion_confidence:.1f}%)")
 
-        print(f"📤 Sending to GPT: [{detected_emotion}] {message}")
+        # ---------- build RAG prompt ----------
+        rag_block = ""
+        if context_docs:
+            rag_block = "Previous Conversation Context:\n" + "\n".join(
+                f"- {doc}" for doc in context_docs
+            ) + "\n\n"
+
+        full_prompt = f"{rag_block}{message}"
+
+        print(f"📤 Sending to GPT: [{len(context_docs)} ctx docs | {detected_emotion}] {message}")
 
         # Process with ChatGPT
-        response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        # response_text = self.gpt_client.ask_chatgpt_optimized(message, detected_emotion, emotion_confidence)
+        response_text = self.gpt_client.ask_chatgpt_optimized(
+            full_prompt, detected_emotion, emotion_confidence
+        )
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
 
         print(f"🤖 GPT-4o-mini: {response_text}")
@@ -357,6 +411,16 @@ class EmotionServer:
         self.components_initialized += 1
         print("\n4️⃣ Web interface ready")
         print("    ✅ Web interface initialized")
+        
+        # Initialize FAISS (RAG) index from Mongo ➜ memory
+        print("\n5️⃣ Rebuilding FAISS index (RAG context)…")
+        try:
+            self._run_async(init_faiss_index())
+            print("    ✅ FAISS index initialized successfully")
+            self.components_initialized += 1
+        except Exception as e:
+            print(f"    ❌ FAISS index initialization failed: {e}")
+            print("    ⚠️ Continuing without RAG context support")
 
         print(f"\n✅ {self.components_initialized}/{self.total_components} components initialized")
 
@@ -372,6 +436,8 @@ class EmotionServer:
     def cleanup_resources(self):
         """Cleanup function to prevent resource leaks"""
         try:
+            if hasattr(self, 'async_loop') and not self.async_loop.is_closed():
+                self.async_loop.close()
             # Clear emotion tracker history
             self.emotion_processor.emotion_tracker.emotion_history.clear()
             self.emotion_processor.emotion_tracker.confidence_history.clear()
