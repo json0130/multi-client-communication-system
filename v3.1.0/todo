@@ -2,6 +2,7 @@ MVP:
 [✅] Add logging into db from server side
 [✅] Build local vector DB at startup from existing logs in DB
 [✅] Add RAG and test on postman with server endpoints
+[] Topic analysis - BERTopic --> Visualise using wordcloud script (https://maartengr.github.io/BERTopic/getting_started/tips_and_tricks/tips_and_tricks.html)
 
 for testing:
 [] Add endpoint for dumping (ie. preload) sample data into the DB
