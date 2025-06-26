@@ -2,6 +2,8 @@ MVP:
 [✅] Add logging into db from server side
 [✅] Build local vector DB at startup from existing logs in DB
 [✅] Add RAG and test on postman with server endpoints
+[] Add bertopic
+[] Only use mongodb as the vector db too, no local FAISS
 
 for testing:
 [] Add endpoint for dumping (ie. preload) sample data into the DB
