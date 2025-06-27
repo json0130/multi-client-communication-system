@@ -208,8 +208,8 @@ Drugs from this message: [Drug A, Drug B]
 Extracted drugs: [Drug A, Drug B]
 Checking Database: Drug A vs Drug B
 Match Found: Drug A + Drug B
-GPT Prompt: "[sad] I'm feeling overwhelmed"
-Bot Response: "[COMFORT] Hi! Drug A and Drug B has a Major Interaction, Do not take these medications together ..."
+GPT Prompt: "[neutral] You are a medically-informed assistant responding to a patient"
+Bot Response: "[CONFUSED] Hi! Drug A and Drug B has a Major Interaction, Do not take these medications together ..."
 ```
 
 ### Action Tags for Arduino
