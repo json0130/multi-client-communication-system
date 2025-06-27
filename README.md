@@ -10,7 +10,7 @@ This project develops a comprehensive human-robot interaction (HRI) system that 
 - **Contextual AI Responses**: ChatGPT integration with emotion-aware prompting
 - **Hardware Integration**: Chatbot integrated with Arduino-controlled physical responses and feedback
 - **Live Video Streaming**: WebSocket-based real-time video transmission
-- **Server Hosted**: Streaming hosted on the Server through Google Colab
+- **Server Hosted**: Streaming hosted on the Server through AWS Cloud
 - **Portability**: Chatbot is portable through implementation on the Jetson Nano board
 
 ### System Architecture
@@ -74,6 +74,11 @@ This project develops a comprehensive human-robot interaction (HRI) system that 
 
 - **Change**: Improved monitoring interface with comprehensive visual feedback
 - **Features**: Chat history, face detection bounding boxes, emotion confidence display, improved monitoring interface
+
+### V2.3.2.HC - Health Care Specific System (Ongoing Development)
+
+- **Change**: Added Health Care Specific functions such as, Drug-Drug Interaction.
+- **Features**: Chat history, face detection bounding boxes, emotion confidence display, improved monitoring interface, Drug-Drug Interaction Checker, Patient database through SQLite.
   <br>**_This is the current stable version_**</br>
 
 ## System Architecture
@@ -85,23 +90,11 @@ This project develops a comprehensive human-robot interaction (HRI) system that 
 ### Prerequisites
 
 - **Jetson Nano Devkit/Orin** with Intel RealSense camera
-- **Google Colab**
 - **Arduino** (optional, for physical feedback)
 - **Python 3.8+** on Jetson
 - **OpenAI API Key**
 
-### 1. Colab Server Setup
-
-1. Open `colab_server.py` in Google Colab - setting up a "cell" with the colab_server.py code
-2. Add your OpenAI API key to Colab secrets
-3. Create an ngrok auth token [here](https://ngrok.com) (create an account, and navigate to Your Authtoken)
-4. Copy your AuthToken to colab_server.py:
-
-```python
-ngrok.set_auth_token("AUTH_TOKEN_HERE")
-```
-
-### 2. Jetson Setup
+### 1. Jetson Setup
 
 On the Jetson Nano (with Ubuntu)
 
@@ -121,8 +114,6 @@ touch .env
 **_Important:_** The ngrok URL from the Colab Server Setup stage should be added to this .env file
 
 ```env
-# Colab Server
-COLAB_SERVER_URL=https://your-ngrok-url.ngrok.io
 
 # Hardware
 ARDUINO_PORT=/dev/ttyUSB0
@@ -136,20 +127,11 @@ STREAM_FPS=30
 FRAME_SKIP_RATIO=1
 ```
 
-### 3. Arduino Setup
+### 2. Arduino Setup
 
-1. Connect the Arduino Uno board to the Jetson Board through a USB port connection.
+Connect the Arduino Uno board to the Jetson Board through a USB port connection.
 
-### 4. Run the System
-
-**On Google Colab**
-
-1. Run all cells to start the server
-2. Copy the ngrok URL provided in the terminal output to input into the jetson .env file:
-   `https://aaaa-bb-cc-dd-e.ngrok-free.app`
-   This section:
-   `COLAB_SERVER_URL=https://aaaa-bb-cc-dd-e.ngrok-free.app`
-3. Make sure that the server is running
+### 3. Run the System
 
 **On Jetson:**
 
@@ -164,7 +146,7 @@ python3 jetson_client.py
 
 ```
 
-**Once the jetson_client.py and colab_server.py is running:**
+**Once the jetson_client.py is running:**
 
 1. Chat/input into the Jetson board, to receive a GPT output
 2. You can access the live stream through: `https://aaaa-bb-cc-dd-e.ngrok-free.app/monitor`
@@ -172,13 +154,12 @@ python3 jetson_client.py
 ## Project Structure (FIX w Versions)
 
 ```
-cs731-2025-project-jscript/
 ├── emotion_understanding/          # Main application code
 │   ├── model/                      # Pre-trained models
 │   ├── dataset/                    # Dataset
 │   ├── yolo_v8/                    # YOLO
 │   └── openCV/                     # OpenCV 
-│        ├── test.py                     # Testing script
+│        ├── test.py                # Testing script
 │        ├── train.py
 │        ├── train1.py
 │        ├── train_effi.py
@@ -186,7 +167,7 @@ cs731-2025-project-jscript/
 │        ├── train_im.py  
 │        ├── train_V2.py
 │        ├── train_V3.py    
-│        └── train_final.py              # Latest Version
+│        └── train_final.py       
 ├── v1.0.0/                       # Version 1.0.0 release
 ├── v2.0.0/                       # Version 2.0.0 release
 ├── v2.1.0/                       # Version 2.1.0 release
@@ -196,7 +177,6 @@ cs731-2025-project-jscript/
 ├── jetson_client.py           # Main Jetson client with WebSocket integration
 │   ├── realsense_stream.py        # Optimised RealSense camera streaming
 │   ├── arduino_handler.py         # Arduino communication and control
-│   ├── colab_server.py            # Colab server with emotion detection
 │   ├── dockerfile                 # Docker configuration
 │   ├── efficientnet_opencv.pth    # Pre-trained model weights
 │   ├── emotion_file.txt           # Emotion data file
@@ -211,13 +191,13 @@ cs731-2025-project-jscript/
 
 The system recognises 7 primary emotions:
 
+- **Neutral** 😐
 - **Happy** 😊
 - **Sad** 😢
 - **Angry** 😠
 - **Fear** 😨
 - **Surprise** 😲
 - **Disgust** 🤢
-- **Neutral** 😐
 
 ## ChatGPT Integration
 
@@ -227,8 +207,12 @@ The system uses emotion-aware prompting to generate contextually appropriate res
 # Example emotion tag usage
 User Input: "I'm feeling overwhelmed"
 Detected Emotion: sad (confidence: 78%)
+Drugs from this message: [Drug A, Drug B]
+Extracted drugs: [Drug A, Drug B]
+Checking Database: Drug A vs Drug B
+Match Found: Drug A + Drug B
 GPT Prompt: "[sad] I'm feeling overwhelmed"
-Bot Response: "[COMFORT] I understand that feeling overwhelmed can be really difficult..."
+Bot Response: "[COMFORT] Hi! Drug A and Drug B has a Major Interaction, Do not take these medications together ..."
 ```
 
 ### Action Tags for Arduino
@@ -263,5 +247,6 @@ The bot responds with emotion tags that trigger Arduino actions:
 
 For any queries or for general contact
 
-- Jay Song | Email: json941@aucklanduni.ac.nz
-- Seth Yoo | Email: syoo881@aucklanduni.ac.nz
+- Jay Song  | Email: json941@aucklanduni.ac.nz
+- Seth Yoo  | Email: syoo881@aucklanduni.ac.nz
+- Isaac Lee | Email: mlee633@aucklanduni.ac.nz
