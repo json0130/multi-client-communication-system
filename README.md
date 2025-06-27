@@ -111,8 +111,6 @@ touch .env
 
 #### .env file setup:
 
-**_Important:_** The ngrok URL from the Colab Server Setup stage should be added to this .env file
-
 ```env
 
 # Hardware
@@ -143,7 +141,6 @@ docker build -t docker-chatbot-socket .
 docker run -it --runtime nvidia --gpus all --rm docker-chatbot-socket
 
 python3 jetson_client.py
-
 ```
 
 **Once the jetson_client.py is running:**
@@ -154,12 +151,12 @@ python3 jetson_client.py
 ## Project Structure (FIX w Versions)
 
 ```
-├── emotion_understanding/          # Main application code
-│   ├── model/                      # Pre-trained models
-│   ├── dataset/                    # Dataset
-│   ├── yolo_v8/                    # YOLO
-│   └── openCV/                     # OpenCV 
-│        ├── test.py                # Testing script
+├── emotion_understanding/            # Main application code
+│   ├── model/                        # Pre-trained models
+│   ├── dataset/                      # Dataset
+│   ├── yolo_v8/                      # YOLO
+│   └── openCV/                       # OpenCV 
+│        ├── test.py                  # Testing script
 │        ├── train.py
 │        ├── train1.py
 │        ├── train_effi.py
@@ -168,23 +165,23 @@ python3 jetson_client.py
 │        ├── train_V2.py
 │        ├── train_V3.py    
 │        └── train_final.py       
-├── v1.0.0/                       # Version 1.0.0 release
-├── v2.0.0/                       # Version 2.0.0 release
-├── v2.1.0/                       # Version 2.1.0 release
-├── v2.2.0/                       # Version 2.2.0 release
-├── v2.3.0/                       # Version 2.3.0 release
-├── v2.3.2/                       # Version 2.3.2 release (latest)
-├── jetson_client.py           # Main Jetson client with WebSocket integration
-│   ├── realsense_stream.py        # Optimised RealSense camera streaming
-│   ├── arduino_handler.py         # Arduino communication and control
-│   ├── dockerfile                 # Docker configuration
-│   ├── efficientnet_opencv.pth    # Pre-trained model weights
-│   ├── emotion_file.txt           # Emotion data file
+├── v1.0.0/                           # Version 1.0.0 release
+├── v2.0.0/                           # Version 2.0.0 release
+├── v2.1.0/                           # Version 2.1.0 release
+├── v2.2.0/                           # Version 2.2.0 release
+├── v2.3.0/                           # Version 2.3.0 release
+├── v2.3.2/                           # Version 2.3.2 release (latest)
+├── jetson_client.py               # Main Jetson client with WebSocket integration
+│   ├── realsense_stream.py          # Optimised RealSense camera streaming
+│   ├── arduino_handler.py           # Arduino communication and control
+│   ├── dockerfile                   # Docker configuration
+│   ├── efficientnet_opencv.pth      # Pre-trained model weights
+│   ├── emotion_file.txt             # Emotion data file
 │   ├── haarcascade_frontalface_default.xml  # Face detection cascade
-│   ├── requirements.txt           # Python dependencies
-│   └── run_docker.sh              # Docker execution script
-├── .gitignore                     # Git ignore patterns
-└── README.md                      # Main project documentation
+│   ├── requirements.txt             # Python dependencies
+│   └── run_docker.sh                # Docker execution script
+├── .gitignore                       # Git ignore patterns
+└── README.md                        # Main project documentation
 ```
 
 ## Emotion Detection
@@ -247,6 +244,6 @@ The bot responds with emotion tags that trigger Arduino actions:
 
 For any queries or for general contact
 
-- Jay Song  | Email: json941@aucklanduni.ac.nz
+- Jay Song   | Email: json941@aucklanduni.ac.nz
 - Seth Yoo   | Email: syoo881@aucklanduni.ac.nz
-- Isaac Lee | Email: mlee633@aucklanduni.ac.nz
+- Isaac Lee  | Email: mlee633@aucklanduni.ac.nz
