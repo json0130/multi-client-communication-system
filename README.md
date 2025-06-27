@@ -83,7 +83,7 @@ This project develops a comprehensive human-robot interaction (HRI) system that 
 
 ## System Architecture
 
-(Insert System Architecture Diagram here)
+![Project Diagrams_v3_multi](https://github.com/user-attachments/assets/98f52a0f-b31b-418d-bc6b-d215cf9482ad)
 
 ## Setting Up
 
