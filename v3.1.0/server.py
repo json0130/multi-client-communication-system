@@ -265,13 +265,12 @@ class EmotionServer:
                 return jsonify({"error": "Authentication required"}), 401
             
             try:
-                # Delegate everything (including min-log count) to the controller
-                result = self._run_async(generate_topics(logs_collection))
+                # pass the GPT client
+                result = self._run_async(generate_topics(logs_collection, self.gpt_client))
 
                 return jsonify({
-                    "topics":             result["topic_info"],
-                    "wordcloud":          result["top_topic_wordcloud"],
-                    "visualization_html": result["topics_visualization_html"]
+                    "topics":    result["topics"],     # list of {topic, count}
+                    "wordcloud": result["wordcloud"]   # base-64 PNG
                 }), 200
 
             except ValueError as ve:
