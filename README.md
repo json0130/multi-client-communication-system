@@ -248,5 +248,5 @@ The bot responds with emotion tags that trigger Arduino actions:
 For any queries or for general contact
 
 - Jay Song  | Email: json941@aucklanduni.ac.nz
-- Seth Yoo  | Email: syoo881@aucklanduni.ac.nz
+- Seth Yoo   | Email: syoo881@aucklanduni.ac.nz
 - Isaac Lee | Email: mlee633@aucklanduni.ac.nz
