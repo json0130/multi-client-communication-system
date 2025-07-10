@@ -1,0 +1,52 @@
+{
+    "robot_name": "ChatBox",
+    "client_id": "chatbox_jetson_001",
+    "server_url": "http://192.168.1.100:5000",
+    "modules": ["gpt", "emotion", "speech"],
+    "server_config": {
+        "confidence_threshold": 30.0,
+        "emotion_window_size": 5,
+        "whisper_model_size": "base",
+        "emotion_processing_interval": 0.1,
+        "emotion_change_threshold": 15.0
+    },
+    "hardware": {
+        "arduino_port": "/dev/ttyUSB0",
+        "camera_device": 0,
+        "usb_mic_device": 11,
+        "stream_port": 8080
+    },
+    "features": {
+        "voice_recording": true,
+        "text_to_speech": true,
+        "arduino_integration": true,
+        "camera_streaming": true,
+        "real_time_emotion": true
+    },
+    "tts_settings": {
+        "voice": "en+f2",
+        "rate": 155,
+        "volume": 100,
+        "pitch": 60,
+        "gap": 0
+    },
+    "audio_settings": {
+        "sample_rate": 48000,
+        "channels": 1,
+        "chunk_size": 1024,
+        "max_record_time": 30
+    },
+    "camera_settings": {
+        "width": 640,
+        "height": 480,
+        "fps": 30,
+        "emotion_detection_fps": 1,
+        "jpeg_quality": 85
+    },
+    "network": {
+        "connection_timeout": 10,
+        "request_timeout": 30,
+        "ping_interval": 30,
+        "reconnect_attempts": 5
+    }
+}
