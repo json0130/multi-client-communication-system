@@ -1,4 +1,4 @@
-# modified_server.py - Individual Client Server Instance
+# server.py - Individual Client Server Instance
 import os
 import time
 import threading

@@ -1,6 +1,9 @@
-# websocket_manager.py - FIXED VERSION
+# websocket_manager.py - Updated for Individual Client Monitoring
 import time
 import json
+import base64
+import cv2
+import numpy as np
 from typing import Dict, Any
 from flask import request, session
 from flask_socketio import emit, disconnect
@@ -12,6 +15,7 @@ class WebSocketManager:
     """
     Manages WebSocket connections and events for real-time communication.
     Handles client initialization via client_init.json and image frame processing.
+    Updated to support individual client monitoring.
     """
     
     def __init__(self, socketio, client_manager: ClientManager, request_router: RequestRouter):
@@ -19,8 +23,16 @@ class WebSocketManager:
         self.client_manager = client_manager
         self.request_router = request_router
         
+        # Reference to server controller for individual client monitoring
+        self.server_controller = None
+        
         # Setup WebSocket event handlers
         self.setup_handlers()
+    
+    def set_server_controller(self, controller):
+        """Set reference to server controller for individual client monitoring integration"""
+        self.server_controller = controller
+        print("🔗 WebSocket manager connected to server controller for individual monitoring")
     
     def setup_handlers(self):
         """Setup WebSocket event handlers"""
@@ -74,6 +86,7 @@ class WebSocketManager:
                         server = self.client_manager.get_or_create_server_instance(client_info.client_id)
                         if server:
                             print(f"🚀 {client_info.get_display_name()}: Server instance pre-created")
+                            print(f"🖥️ Individual monitor available at: /client/{client_info.client_id}/monitor")
                     except Exception as e:
                         print(f"⚠️ {client_info.get_display_name()}: Server pre-creation warning: {e}")
                 
@@ -113,7 +126,7 @@ class WebSocketManager:
         @self.socketio.on('image_frame')
         def handle_image_frame(data):
             """
-            Handle image frame for real-time processing
+            Handle image frame for real-time processing with individual client monitoring
             
             Expected data format:
             {
@@ -147,6 +160,17 @@ class WebSocketManager:
             try:
                 print(f"📸 DEBUG: Processing image frame for {client_info.get_display_name()}")
                 
+                # Decode frame for individual client monitoring
+                frame = None
+                try:
+                    if 'frame' in data:
+                        frame_data = base64.b64decode(data['frame'])
+                        frame_array = np.frombuffer(frame_data, dtype=np.uint8)
+                        frame = cv2.imdecode(frame_array, cv2.IMREAD_COLOR)
+                        print(f"📸 DEBUG: Decoded frame shape: {frame.shape if frame is not None else 'None'}")
+                except Exception as decode_error:
+                    print(f"⚠️ Frame decode warning: {decode_error}")
+                
                 # Process image frame using request router
                 result = self.request_router.handle_image_frame_processing(client_id, data)
                 
@@ -157,6 +181,27 @@ class WebSocketManager:
                         'timestamp': time.time()
                     })
                 else:
+                    # Extract emotion and confidence for individual monitoring
+                    emotion = result.get('emotion', 'neutral')
+                    confidence = result.get('confidence', 0.0)
+                    
+                    print(f"🎭 DEBUG: {client_info.get_display_name()}: {emotion} ({confidence:.1f}%)")
+                    
+                    # Update individual client's monitoring data via their RobotServer instance
+                    server_instance = self.client_manager.get_client_server(client_id)
+                    if server_instance and frame is not None:
+                        # Update the individual client's monitoring data
+                        if hasattr(server_instance, 'latest_frame'):
+                            server_instance.latest_frame = frame.copy()
+                        if hasattr(server_instance, 'latest_emotion'):
+                            server_instance.latest_emotion = emotion
+                        if hasattr(server_instance, 'latest_confidence'):
+                            server_instance.latest_confidence = confidence
+                        if hasattr(server_instance, 'last_update_time'):
+                            server_instance.last_update_time = time.time()
+                        
+                        print(f"📊 DEBUG: Updated individual monitoring data for {client_info.get_display_name()}")
+                    
                     # Send successful result back to client
                     emit('frame_result', {
                         'client_id': client_id,
@@ -217,7 +262,8 @@ class WebSocketManager:
                 server = self.client_manager.get_client_server(client_id)
                 server_active = server is not None
                 
-                emit('status_response', {
+                # Include individual monitoring URLs in status
+                status_response = {
                     'client_id': client_id,
                     'robot_name': client_info.robot_name,
                     'enabled_modules': list(client_info.modules),
@@ -225,8 +271,20 @@ class WebSocketManager:
                     'last_activity': client_info.last_activity,
                     'registration_time': client_info.registration_time,
                     'server_status': server.get_health_status() if server else None,
+                    'individual_monitor': f'/client/{client_id}/monitor',
+                    'live_stream': f'/client/{client_id}/live_stream',
                     'timestamp': time.time()
-                })
+                }
+                
+                # Add current emotion state if available
+                if server and hasattr(server, 'latest_emotion'):
+                    status_response['current_emotion'] = {
+                        'emotion': getattr(server, 'latest_emotion', 'neutral'),
+                        'confidence': getattr(server, 'latest_confidence', 0.0),
+                        'last_update': getattr(server, 'last_update_time', 0)
+                    }
+                
+                emit('status_response', status_response)
                 
             except Exception as e:
                 emit('status_response', {
@@ -308,6 +366,56 @@ class WebSocketManager:
                     'details': str(e),
                     'timestamp': time.time()
                 })
+        
+        @self.socketio.on('get_individual_monitor_info')
+        def handle_get_individual_monitor_info():
+            """Get information needed for individual client monitoring"""
+            client_id = session.get('client_id')
+            
+            if not client_id:
+                emit('monitor_info_response', {
+                    'error': 'Client not initialized',
+                    'timestamp': time.time()
+                })
+                return
+            
+            try:
+                client_info = self.client_manager.get_client_info(client_id)
+                server_instance = self.client_manager.get_client_server(client_id)
+                
+                if not client_info:
+                    emit('monitor_info_response', {
+                        'error': f'Client {client_id} not found',
+                        'timestamp': time.time()
+                    })
+                    return
+                
+                monitor_info = {
+                    'client_id': client_id,
+                    'robot_name': client_info.robot_name,
+                    'enabled_modules': list(client_info.modules),
+                    'monitor_url': f'/client/{client_id}/monitor',
+                    'stream_url': f'/client/{client_id}/live_stream',
+                    'has_web_interface': server_instance and hasattr(server_instance, 'web_interface') and server_instance.web_interface is not None,
+                    'timestamp': time.time()
+                }
+                
+                # Add current state if available
+                if server_instance:
+                    if hasattr(server_instance, 'latest_emotion'):
+                        monitor_info['current_emotion'] = server_instance.latest_emotion
+                    if hasattr(server_instance, 'latest_confidence'):
+                        monitor_info['current_confidence'] = server_instance.latest_confidence
+                    if hasattr(server_instance, 'last_update_time'):
+                        monitor_info['last_update'] = server_instance.last_update_time
+                
+                emit('monitor_info_response', monitor_info)
+                
+            except Exception as e:
+                emit('monitor_info_response', {
+                    'error': f'Failed to get monitor info: {e}',
+                    'timestamp': time.time()
+                })
     
     def broadcast_to_client(self, client_id: str, event: str, data: Dict[str, Any]):
         """Broadcast message to specific client if connected"""
@@ -333,3 +441,12 @@ class WebSocketManager:
             return len(self.client_manager.client_servers)
         except Exception:
             return 0
+    
+    def notify_individual_monitor_update(self, client_id: str, emotion: str, confidence: float):
+        """Notify individual client monitor of emotion updates"""
+        try:
+            if self.server_controller:
+                # This could be used for real-time monitor updates if needed
+                pass
+        except Exception as e:
+            print(f"❌ Failed to notify monitor update for client {client_id}: {e}")

@@ -407,7 +407,10 @@ class WebInterface:
             'neutral': '😐'
         };
 
-        videoStream.src = window.location.origin + '/live_stream';
+        # Extract client_id from current URL path
+        const pathParts = window.location.pathname.split('/');
+        const clientId = pathParts[2]; // /client/{client_id}/monitor
+        videoStream.src = window.location.origin + '/client/' + clientId + '/live_stream';
         videoStream.onload = () => {
             videoPlaceholder.style.display = 'none';
             videoStream.style.display = 'block';
