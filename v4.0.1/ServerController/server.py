@@ -967,8 +967,6 @@ def main():
     
     if server.initialize_components():
         print("✅ Standalone server ready")
-        print("   Note: This mode doesn't support HTTP/WebSocket APIs")
-        print("   Use server_controller.py for full functionality")
         
         # Keep running
         try:

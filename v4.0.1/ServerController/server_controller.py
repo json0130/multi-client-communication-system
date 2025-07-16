@@ -1,4 +1,4 @@
-# server_controller.py - Main Multi-Client Server Controller (Modular)
+# server_controller.py - Main Multi-Client Server Controller (Production)
 import time
 import json
 from flask import Flask, request, jsonify, Response
@@ -32,9 +32,9 @@ class ServerController:
             async_mode='threading',
             logger=False,
             engineio_logger=False,
-            ping_timeout=60,
-            ping_interval=25,
-            max_http_buffer_size=2000000,  # For image frames
+            ping_timeout=30,
+            ping_interval=15,
+            max_http_buffer_size=1000000,  # Optimized buffer size
             transports=['websocket', 'polling'],
             allow_upgrades=True,
             cookie=False
@@ -55,46 +55,40 @@ class ServerController:
         # Setup monitor WebSocket handlers directly
         self.setup_monitor_websocket_handlers()
         
-        print("🏗️ Server Controller initialized with modular architecture")
+        print("🏗️ Server Controller initialized")
 
     def setup_monitor_websocket_handlers(self):
         """Direct setup of monitor WebSocket handlers"""
-        print("🔧 Setting up monitor WebSocket handlers directly...")
-
-        self.socketio.server.eio.ping_interval = 15  # Reduce ping frequency
-        self.socketio.server.eio.ping_timeout = 30   # Reduce timeout
+        # Performance optimizations
+        self.socketio.server.eio.ping_interval = 15
+        self.socketio.server.eio.ping_timeout = 30
         
         try:
             # Monitor namespace handlers
             @self.socketio.on('connect', namespace='/monitor')
             def handle_monitor_connect():
-                print(f"🖥️ Monitor client connected: {request.sid} from {request.remote_addr}")
                 return True
 
             @self.socketio.on('disconnect', namespace='/monitor')
             def handle_monitor_disconnect():
-                print(f"🖥️ Monitor client disconnected: {request.sid}")
+                pass
 
             @self.socketio.on('join_client_room', namespace='/monitor')
             def handle_join_client_room(data):
                 client_id = data.get('client_id')
-                print(f"🚪 Monitor {request.sid} requesting to join room for client '{client_id}'")
                 
                 if not client_id:
-                    print(f"⚠️ Monitor {request.sid} tried to join without client_id")
                     emit('error', {'message': 'client_id is required'}, namespace='/monitor')
                     return
                 
                 # Verify client exists
                 client_info = self.client_manager.get_client_info(client_id)
                 if not client_info:
-                    print(f"❌ Monitor {request.sid} tried to join room for non-existent client '{client_id}'")
                     emit('error', {'message': f'Client {client_id} not found'}, namespace='/monitor')
                     return
                 
                 # Join the room
                 join_room(client_id, namespace='/monitor')
-                print(f"✅ Monitor {request.sid} successfully joined room for client '{client_id}'")
                 
                 # Get current client status
                 server = self.client_manager.get_client_server(client_id)
@@ -123,24 +117,11 @@ class ServerController:
             @self.socketio.on('ping', namespace='/monitor')
             def handle_monitor_ping(data):
                 client_id = data.get('client_id')
-                # 🚀 PERFORMANCE: Reduce ping logging spam
-                if hasattr(self, '_last_ping_log'):
-                    if time.time() - self._last_ping_log < 30:  # Log ping only every 30 seconds
-                        pass
-                    else:
-                        print(f"🏓 Monitor ping for client: {client_id}")
-                        self._last_ping_log = time.time()
-                else:
-                    print(f"🏓 Monitor ping for client: {client_id}")
-                    self._last_ping_log = time.time()
-                    
                 emit('pong', {
                     'timestamp': time.time(),
                     'client_id': client_id,
                     'message': 'Monitor connection alive'
                 }, namespace='/monitor')
-            
-            print("✅ Monitor WebSocket handlers registered successfully!")
             
             # Enhance frame broadcasting
             self._enhance_frame_broadcasting()
@@ -149,51 +130,47 @@ class ServerController:
             
         except Exception as e:
             print(f"❌ Failed to setup monitor handlers: {e}")
-            import traceback
-            traceback.print_exc()
             return False
 
     def _enhance_frame_broadcasting(self):
-        """Enhance frame processing to broadcast to monitors"""
-        print("🔧 Enhancing frame broadcasting...")
-        
+        """Enhance frame processing to broadcast to monitors with throttling"""
         try:
             # Store original method
             if not hasattr(self, '_original_handle_image_frame'):
                 self._original_handle_image_frame = self.request_router.handle_image_frame_processing
             
-            # 🚀 PERFORMANCE: Add throttling variables
-            self.last_broadcast_times = {}  # Track last broadcast time per client
+            # Performance throttling variables
+            self.last_broadcast_times = {}
             self.broadcast_throttle_time = 0.2  # 5 broadcasts per second max
-            self.last_emotions = {}  # Track last emotion per client to avoid duplicate broadcasts
+            self.last_emotions = {}
             
             def enhanced_handle_image_frame(client_id, frame_data):
                 # Process frame normally
                 result = self._original_handle_image_frame(client_id, frame_data)
                 
-                # 🚀 PERFORMANCE: Smart broadcasting with throttling
+                # Smart broadcasting with throttling
                 if 'error' not in result and 'emotion' in result:
                     try:
                         current_time = time.time()
                         
-                        # Check if enough time has passed since last broadcast
+                        # Check throttling
                         last_broadcast = self.last_broadcast_times.get(client_id, 0)
                         time_since_last = current_time - last_broadcast
                         
-                        # Check if emotion has changed significantly
+                        # Check emotion changes
                         current_emotion = result.get('emotion', 'neutral')
                         current_confidence = result.get('confidence', 0)
                         last_emotion_data = self.last_emotions.get(client_id, {'emotion': None, 'confidence': 0})
                         
                         emotion_changed = (
                             current_emotion != last_emotion_data['emotion'] or
-                            abs(current_confidence - last_emotion_data['confidence']) > 10  # 10% confidence change
+                            abs(current_confidence - last_emotion_data['confidence']) > 10
                         )
                         
-                        # Broadcast if enough time passed OR emotion changed significantly
+                        # Broadcast conditions
                         should_broadcast = (
                             time_since_last >= self.broadcast_throttle_time or
-                            (emotion_changed and time_since_last >= 0.1)  # Minimum 100ms between any broadcasts
+                            (emotion_changed and time_since_last >= 0.1)
                         )
                         
                         if should_broadcast:
@@ -208,10 +185,6 @@ class ServerController:
                                 'timestamp': current_time
                             }
                             
-                            # Only log significant changes to reduce spam
-                            if emotion_changed or time_since_last >= 2.0:  # Log every 2 seconds or on change
-                                print(f"📡 Broadcasting frame update to monitors for {client_id}: {current_emotion} ({current_confidence}%)")
-                            
                             self.socketio.emit('client_frame_update', update_data, room=client_id, namespace='/monitor')
                             
                             # Update tracking
@@ -221,14 +194,13 @@ class ServerController:
                                 'confidence': current_confidence
                             }
                             
-                    except Exception as broadcast_error:
-                        print(f"⚠️ Frame broadcast error: {broadcast_error}")
+                    except Exception:
+                        pass  # Silent fail for broadcasts
                 
                 return result
             
             # Replace the method
             self.request_router.handle_image_frame_processing = enhanced_handle_image_frame
-            print("✅ Frame broadcasting enhanced with smart throttling!")
             
         except Exception as e:
             print(f"❌ Failed to enhance frame broadcasting: {e}")
@@ -268,23 +240,12 @@ class ServerController:
         
         @self.app.route('/register_client', methods=['POST'])
         def register_client():
-            """
-            Register a new client (alternative to WebSocket client_init)
-            
-            Request body should match client_init.json format:
-            {
-                "robot_name": "HomeAssistant_Robot",
-                "modules": ["gpt", "emotion", "speech"],
-                "client_id": "optional_custom_id",
-                "config": {"custom_param": "value"}
-            }
-            """
+            """Register a new client (alternative to WebSocket client_init)"""
             try:
                 data = request.json
                 if not data:
                     return jsonify({"error": "JSON data required"}), 400
                 
-                # Process client initialization using client manager
                 success, message, client_info = self.client_manager.process_client_init(data)
                 
                 if success:
@@ -309,30 +270,10 @@ class ServerController:
                     }), 400
                 
             except Exception as e:
-                print(f"❌ Client registration error: {e}")
                 return jsonify({
                     "success": False,
                     "message": f"Registration failed: {e}"
                 }), 500
-            
-        @self.app.route('/debug/client/<client_id>/monitor_html', methods=['GET'])
-        def debug_monitor_html(client_id):
-            """Debug monitor HTML generation"""
-            try:
-                client_info = self.client_manager.get_client_info(client_id)
-                if not client_info:
-                    return f"Client {client_id} not found", 404
-                
-                server = self.client_manager.get_or_create_server_instance(client_id)
-                if not server:
-                    return f"Server instance creation failed for {client_id}", 500
-                
-                # Get the HTML and return it as plain text to inspect
-                html = server.get_individual_monitor_html()
-                return f"<pre>{html.replace('<', '&lt;').replace('>', '&gt;')}</pre>", 200
-                
-            except Exception as e:
-                return f"Debug error: {e}", 500
         
         @self.app.route('/client/<client_id>/chat', methods=['POST'])
         def client_chat(client_id):
@@ -352,13 +293,9 @@ class ServerController:
         @self.app.route('/client/<client_id>/monitor', methods=['GET'])
         def client_monitor(client_id):
             """Serve individual client monitor page"""
-            print(f"🔍 DEBUG: Monitor route hit for client_id: {client_id}")
-            
             try:
-                # Get the server instance directly
                 server = self.client_manager.get_client_server(client_id)
                 if not server:
-                    # Try to create server instance if client exists
                     client_info = self.client_manager.get_client_info(client_id)
                     if client_info:
                         server = self.client_manager.get_or_create_server_instance(client_id)
@@ -366,20 +303,13 @@ class ServerController:
                     if not server:
                         return "Server not found", 404
                     
-                # Check if method exists
                 if hasattr(server, 'get_individual_monitor_html'):
-                    print(f"✅ Server has get_individual_monitor_html method")
                     html = server.get_individual_monitor_html()
-                    print(f"📄 HTML length: {len(html)}")
                     return Response(html, mimetype='text/html')
                 else:
-                    print(f"❌ Server missing get_individual_monitor_html method")
                     return "Method not found", 500
                     
             except Exception as e:
-                print(f"❌ Error: {e}")
-                import traceback
-                traceback.print_exc()
                 return f"Error: {e}", 500
 
         @self.app.route('/client/<client_id>/live_stream', methods=['GET'])
@@ -418,7 +348,6 @@ class ServerController:
                     }), 404
                     
             except Exception as e:
-                print(f"❌ Error removing client '{client_id}': {e}")
                 return jsonify({
                     "error": f"Failed to remove client: {e}"
                 }), 500
@@ -434,18 +363,16 @@ class ServerController:
         """Start the multi-client server controller"""
         try:
             print("🚀 Starting Multi-Client Server Controller...")
-            print("=" * 70)
-            print(f"🌐 Controller URL: http://0.0.0.0:{self.port}")
-            print(f"🔌 WebSocket URL: ws://0.0.0.0:{self.port}/socket.io/")
-            print(f"📦 Available Modules: {', '.join(self.client_manager.valid_modules)}")
-            print("=" * 70)
+            print("=" * 50)
+            print(f"🌐 Server: http://0.0.0.0:{self.port}")
+            print(f"🔌 WebSocket: ws://0.0.0.0:{self.port}/socket.io/")
+            print(f"📦 Modules: {', '.join(self.client_manager.valid_modules)}")
+            print("=" * 50)
             
             # Start background cleanup task
             self.client_manager.start_cleanup_task()
             
-            print("✅ Server Controller ready!")
-            
-            self._print_usage_examples()
+            print("✅ Server ready!")
             
             # Start the Flask-SocketIO server
             self.socketio.run(
@@ -459,63 +386,25 @@ class ServerController:
             )
             
         except KeyboardInterrupt:
-            print("\n🛑 Server Controller shutdown")
+            print("\n🛑 Server shutdown")
             self._shutdown()
                         
         except Exception as e:
-            print(f"❌ Server Controller error: {e}")
+            print(f"❌ Server error: {e}")
             self._shutdown()
     
     def _shutdown(self):
         """Cleanup resources on shutdown"""
         try:
-            print("🧹 Cleaning up resources...")
-            
-            # Stop cleanup task
             self.client_manager.stop_cleanup_task()
-            
-            # Cleanup all client servers
             self.client_manager.cleanup_all_clients()
-            
-            print("✅ Cleanup completed")
-            
         except Exception as e:
             print(f"❌ Cleanup error: {e}")
-    
-    def _print_usage_examples(self):
-        """Print usage examples for the API"""
-        print(f"\n📋 CLIENT INITIALIZATION:")
-        print(f"   WebSocket client_init event or POST /register_client:")
-        print(f"""   {{
-       "robot_name": "HomeAssistant_Robot",
-       "modules": ["gpt", "emotion"],
-       "client_id": "optional_id",
-       "config": {{"confidence_threshold": 40.0}}
-   }}""")
-        
-        print(f"\n💬 CHAT EXAMPLE:")
-        print(f"   POST http://localhost:{self.port}/client/homeassistant_robot_abc123/chat")
-        print(f'   {{"message": "How are you feeling today?"}}')
-        
-        print(f"\n🎤 SPEECH EXAMPLE:")
-        print(f"   POST http://localhost:{self.port}/client/homeassistant_robot_abc123/speech")
-        print(f'   {{"audio": "base64_encoded_audio_data"}}')
-        
-        print(f"\n📸 WEBSOCKET IMAGE FRAMES:")
-        print(f"   1. Connect: ws://localhost:{self.port}/socket.io/")
-        print(f"   2. Send: client_init event with robot info")
-        print(f"   3. Send: image_frame events with base64 image data")
-        
-        print(f"\n🏥 HEALTH CHECK:")
-        print(f"   GET http://localhost:{self.port}/client/homeassistant_robot_abc123/health")
-        
-        print(f"\n📊 LIST ALL CLIENTS:")
-        print(f"   GET http://localhost:{self.port}/clients")
 
 def main():
     """Main function to start the server controller"""
     print("🎯 Multi-Client Emotion Server Controller")
-    print("   Modular architecture with client_init.json support")
+    print("   Production optimized version")
     print()
     
     controller = ServerController(port=5000)
