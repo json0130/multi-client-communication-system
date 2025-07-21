@@ -71,8 +71,7 @@ class ClientManager:
             # Generate or use provided client_id
             client_id = client_init_data.get('client_id')
             if not client_id:
-                # client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
-                client_id = robot_name
+                client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
             
             # Validate modules
             modules_set = set(modules)
