@@ -18,6 +18,7 @@ class ClientInfo:
     config_overrides: Dict[str, Any]
     registration_time: float
     last_activity: float
+    user_id: int
     
     def get_display_name(self) -> str:
         """Get display name for logging: [client_id] robot_name"""
@@ -37,7 +38,7 @@ class ClientManager:
         self.db = database
 
         # Valid modules for validation
-        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial'}
+        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial', 'rag'}
         
         # Cleanup configuration
         self.cleanup_task_running = False
@@ -82,6 +83,13 @@ class ClientManager:
             # Get config overrides
             config_overrides = client_init_data.get('config', {})
             
+            # Ensure user exists first
+            if client_id not in self.id_map:
+                user_id = self.db.create_user(name=robot_name)
+                self.id_map[client_id] = user_id
+            else:
+                user_id = self.id_map[client_id]
+            
             # Create client info
             client_info = ClientInfo(
                 client_id=client_id,
@@ -89,7 +97,8 @@ class ClientManager:
                 modules=modules_set,
                 config_overrides=config_overrides,
                 registration_time=time.time(),
-                last_activity=time.time()
+                last_activity=time.time(),
+                user_id=user_id
             )
             
             # Register the client
@@ -171,6 +180,9 @@ class ClientManager:
             'max_audio_length': 30,
             'sample_rate': 16000,
             
+            "database": self.db,     # pass Database instance
+            "user_id": client_info.user_id,  # stored this earlier
+
                 **client_info.config_overrides  # Apply client-specific overrides
             }
             
