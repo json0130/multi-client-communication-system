@@ -1,9 +1,10 @@
 # request_router.py - Request Routing and Processing Logic
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from flask import jsonify, Response
 
 from client_manager import ClientManager
+from database import Database
 
 class RequestRouter:
     """
@@ -11,9 +12,10 @@ class RequestRouter:
     Contains all the business logic for processing different types of requests.
     """
     
-    def __init__(self, client_manager: ClientManager, socketio=None):  # ✅ FIXED: Add socketio parameter
+    def __init__(self, client_manager: ClientManager, socketio=None, database: Optional[Database] = None):
         self.client_manager = client_manager
         self.socketio = socketio  # ✅ FIXED: Store socketio for broadcasting
+        self.db = database or Database()
     
     def route_client_request(self, client_id: str, endpoint: str, flask_request) -> tuple:
         """Route request to appropriate client server instance"""
@@ -76,6 +78,14 @@ class RequestRouter:
             
             result = server.process_chat_message(message)
             
+            # persist the conversation
+            uid = self.client_manager.get_user_id(server.client_id)
+            if uid:
+                try:
+                    self.db.insert_chat_log(uid, message, result.get('response', ''))
+                except Exception as db_err:
+                    print(f"⚠️  Chat log insert failed: {db_err}")
+                    
             print(f"🤖 {display_name}: Response: '{result.get('response', 'No response')}'")
             
             # ✅ FIXED: Broadcast HTTP chat messages ONLY to the correct monitor via its room and namespace

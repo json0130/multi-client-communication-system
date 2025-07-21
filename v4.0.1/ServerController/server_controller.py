@@ -7,6 +7,7 @@ from flask_socketio import SocketIO, emit, join_room
 from client_manager import ClientManager
 from request_router import RequestRouter
 from websocket_manager import WebSocketManager
+from database import Database 
 
 class ServerController:
     """
@@ -43,10 +44,23 @@ class ServerController:
         # Initialize modular components
         self.client_manager = ClientManager()
         self.request_router = RequestRouter(self.client_manager, self.socketio)
+
+        # Initialize Supabase DB (single instance)
+        self.database = Database()
+
+        # Initialize modular components with DB
+        self.client_manager = ClientManager(self.database)
+        self.request_router = RequestRouter(
+            self.client_manager,
+            self.socketio,
+            self.database
+        )
+
         self.websocket_manager = WebSocketManager(
-            self.socketio, 
-            self.client_manager, 
-            self.request_router
+            self.socketio,
+            self.client_manager,
+            self.request_router,
+            self.database
         )
         
         # Setup HTTP routes

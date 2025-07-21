@@ -7,6 +7,7 @@ from typing import Dict, Optional, Set, Any
 from dataclasses import dataclass
 
 from server import RobotServer
+from database import Database
 
 @dataclass
 class ClientInfo:
@@ -27,12 +28,14 @@ class ClientManager:
     Manages client registration, server instance creation, and lifecycle.
     Handles client_init.json processing and server instance management.
     """
-    
-    def __init__(self):
+
+    def __init__(self, database: Optional[Database] = None):
         self.client_infos: Dict[str, ClientInfo] = {}       # client_id -> ClientInfo
         self.client_servers: Dict[str, RobotServer] = {}  # client_id -> server instance
         self.manager_lock = threading.RLock()
-        
+        self.db = database
+        self.id_map: Dict[str, int] = {}                # client_id → user_id
+
         # Valid modules for validation
         self.valid_modules = {'gpt', 'emotion', 'speech', 'facial'}
         
@@ -92,7 +95,12 @@ class ClientManager:
             # Register the client
             with self.manager_lock:
                 self.client_infos[client_id] = client_info
-            
+                
+            # ensure a user row exists / remember mapping
+            if client_id not in self.id_map:
+                user_id = self.db.create_user(name=robot_name)
+                self.id_map[client_id] = user_id
+
             print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
             
             return True, f"Client {client_info.get_display_name()} registered successfully", client_info
