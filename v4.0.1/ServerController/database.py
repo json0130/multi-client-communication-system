@@ -8,37 +8,34 @@ class Database:
 
     def create_user(
         self,
-        user_id: str,
         name: Optional[str] = None,
         interests: Optional[List[str]] = None,
         health_conditions: Optional[List[str]] = None
     ) -> int:
         """
-        Insert a new user row and return its user_id.
+        Insert a new user row and return its user_id (integer).
         Initializes interests and health_conditions to empty lists if not provided.
         """
         payload: Dict[str, Any] = {
-            "user_id": user_id,
             "name": name,
             "interests": interests or [],
             "health_conditions": health_conditions or []
         }
         resp = (
             self.client
-            .table("Users")
+            .table("users")
             .insert(payload)
             .execute()
         )
-        # resp.data is a list of inserted rows; grab the first one's user_id
-        return resp.data[0]["user_id"]
+        return resp.data[0]["user_id"]  # Returns integer user_id
 
-    def get_user_by_user_id(self, user_id: str) -> Optional[Dict[str, Any]]:
+    def get_user_by_user_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """
-        Return the user row matching this user_id, or None if not found.
+        Return the user row matching this user_id (integer), or None if not found.
         """
         resp = (
             self.client
-            .table("Users")
+            .table("users")
             .select("*")
             .eq("user_id", user_id)
             .single()
@@ -67,7 +64,7 @@ class Database:
 
         resp = (
             self.client
-            .table("Users")
+            .table("users")
             .update(updates)
             .eq("user_id", user_id)
             .execute()
@@ -96,14 +93,37 @@ class Database:
 
     def get_user_by_id(self, user_id: int) -> Optional[Dict[str, Any]]:
         """
-        Fetch a user row by its primary key.
+        Fetch a user row by its primary key (integer).
         """
         resp = (
             self.client
-            .table("Users")
+            .table("users")
             .select("*")
             .eq("user_id", user_id)
             .single()
             .execute()
         )
         return resp.data
+    
+    def insert_chat_log(
+        self,
+        user_id: int,  # Now consistently using integer
+        message: str,
+        response: str
+    ) -> int:
+        """
+        Insert a new chat log for a user
+        """
+        payload = {
+            "user_id": user_id,
+            "message": message,
+            "response": response
+        }
+        
+        resp = (
+            self.client
+            .table("chat_logs")
+            .insert(payload)
+            .execute()
+        )
+        return resp.data[0]["id"]
