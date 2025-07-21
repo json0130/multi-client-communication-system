@@ -33,8 +33,8 @@ class ClientManager:
         self.client_infos: Dict[str, ClientInfo] = {}       # client_id -> ClientInfo
         self.client_servers: Dict[str, RobotServer] = {}  # client_id -> server instance
         self.manager_lock = threading.RLock()
+        self.id_map: Dict[str, int] = {}
         self.db = database
-        self.id_map: Dict[str, int] = {}                # client_id → user_id
 
         # Valid modules for validation
         self.valid_modules = {'gpt', 'emotion', 'speech', 'facial'}
@@ -71,7 +71,8 @@ class ClientManager:
             # Generate or use provided client_id
             client_id = client_init_data.get('client_id')
             if not client_id:
-                client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
+                # client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
+                client_id = robot_name
             
             # Validate modules
             modules_set = set(modules)
@@ -208,6 +209,10 @@ class ClientManager:
         with self.manager_lock:
             client_info = self.client_infos.get(client_id)
             return client_info.modules if client_info else set()
+        
+    def get_user_id(self, client_id: str) -> Optional[int]:
+        """Return the numeric user_id for a given client_id, or None."""
+        return self.id_map.get(client_id)
     
     def update_client_activity(self, client_id: str):
         """Update last activity timestamp for client"""
