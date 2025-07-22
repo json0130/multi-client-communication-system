@@ -9,6 +9,10 @@ from request_router import RequestRouter
 from websocket_manager import WebSocketManager
 from database import Database 
 
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OpenMP initialization error
+
+
 class ServerController:
     """
     Main multi-client server controller using modular architecture.

@@ -104,11 +104,6 @@ class ClientManager:
             # Register the client
             with self.manager_lock:
                 self.client_infos[client_id] = client_info
-                
-            # ensure a user row exists / remember mapping
-            if client_id not in self.id_map:
-                user_id = self.db.create_user(name=robot_name)
-                self.id_map[client_id] = user_id
 
             print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
             
