@@ -58,8 +58,8 @@ class RobotServer:
         self.last_broadcast_time = 0  # For throttling broadcasts
         
         # Monitor-specific settings
-        self.monitor_quality = config.get('monitor_quality', 50)
-        self.monitor_resolution = config.get('monitor_resolution', (320, 240))
+        self.monitor_quality = config.get('monitor_quality', 85)
+        self.monitor_resolution = config.get('monitor_resolution', (1280, 720))
         self.broadcast_throttle = config.get('broadcast_throttle', 0.2)  # 5 updates per second max
         
         print(f"🎯 Created server instance for client '{self.client_id}' with modules: {list(self.enabled_modules)}")
@@ -189,7 +189,7 @@ class RobotServer:
             print(f"  🌐 Initializing individual web interface for client '{self.client_id}'...")
             try:
                 # Create web interface specifically for this client
-                stream_fps = self.config.get('stream_fps', 10)  # Lower FPS for individual monitoring
+                stream_fps = self.config.get('stream_fps', 15)  # Lower FPS for individual monitoring
                 self.web_interface = WebInterface(stream_fps=stream_fps)
                 
                 # Store client info in web interface
@@ -312,347 +312,20 @@ class RobotServer:
         except Exception as e:
             print(f"⚠️ {self.client_id}: Error preparing monitor frame: {e}")
             return original_frame.copy()
-
-    def get_individual_monitor_html(self):
-        """Get customized HTML for this client's individual monitor"""
-        print(f"🔍 DEBUG: get_individual_monitor_html called for client: {self.client_id}")
-
-        # Build the HTML with corrected JavaScript
-        html = f'''<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Monitor: {self.client_id}</title>
-        <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                margin: 0; padding: 20px; background-color: #f0f2f5; color: #1c1e21;
-            }}
-            .container {{ max-width: 1200px; margin: 0 auto; }}
-            .header, .card {{ background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-            .content {{ display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }}
-            .video-container {{ position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; }}
-            #videoStream {{ width: 100%; height: 100%; object-fit: contain; }}
-            .emotion-display {{ 
-                position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: white; 
-                padding: 15px; border-radius: 8px; font-weight: bold; min-width: 200px;
-            }}
-            .status {{ padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid; font-weight: bold; }}
-            .connected {{ background: #e8f5e8; border-color: #4caf50; color: #2e7d32; }}
-            .disconnected {{ background: #ffebee; border-color: #f44336; color: #c62828; }}
-            .connecting {{ background: #fff3e0; border-color: #ff9800; color: #ef6c00; }}
-            .chat-messages {{ 
-                height: 300px; overflow-y: auto; border: 1px solid #ddd; 
-                padding: 15px; margin: 15px 0; background: #fafafa; border-radius: 8px;
-            }}
-            .message {{ margin: 10px 0; padding: 12px; border-radius: 8px; }}
-            .user-message {{ background: #e3f2fd; text-align: right; margin-left: 20%; }}
-            .bot-message {{ background: #f3e5f5; margin-right: 20%; }}
-            .system-message {{ background: #fff3e0; font-style: italic; text-align: center; margin: 5px 0; padding: 8px; }}
-            .debug-panel {{ 
-                background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; 
-                padding: 15px; margin: 15px 0; font-family: monospace; font-size: 12px; 
-            }}
-            .debug-title {{ font-weight: bold; margin-bottom: 10px; color: #333; }}
-            .debug-line {{ margin: 2px 0; color: #666; }}
-            .emotion-value {{ font-size: 18px; margin: 5px 0; }}
-            .confidence-bar {{
-                width: 100%; height: 8px; background: #ddd; border-radius: 4px; 
-                overflow: hidden; margin: 8px 0;
-            }}
-            .confidence-fill {{ height: 100%; background: #4caf50; transition: width 0.3s ease; }}
-            @media (max-width: 1024px) {{
-                .content {{ grid-template-columns: 1fr; }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🤖 Monitor: {self.client_id}</h1>
-                <div id="connectionStatus" class="status connecting">🔄 Connecting...</div>
-                <div class="debug-panel">
-                    <div class="debug-title">🔍 Connection Debug</div>
-                    <div id="debugOutput">Initializing...</div>
-                </div>
-            </div>
-            
-            <div class="content">
-                <div class="card video-section">
-                    <h2>📺 Live Video Stream</h2>
-                    <div class="video-container">
-                        <img id="videoStream" src="/client/{self.client_id}/live_stream" alt="Live Stream">
-                        <div class="emotion-display">
-                            <div>Emotion: <span id="emotionText">neutral</span></div>
-                            <div class="emotion-value">
-                                Confidence: <span id="confidenceText">0%</span>
-                            </div>
-                            <div class="confidence-bar">
-                                <div class="confidence-fill" id="confidenceFill" style="width: 0%;"></div>
-                            </div>
-                            <div style="font-size: 12px; margin-top: 8px;">
-                                Last Update: <span id="lastUpdate">Never</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card info-section">
-                    <h2>ℹ️ Client Information</h2>
-                    <p><strong>Client ID:</strong> {self.client_id}</p>
-                    <p><strong>Modules:</strong> {", ".join(list(self.enabled_modules))}</p>
-                    <p><strong>Status:</strong> <span id="clientStatus">Loading...</span></p>
-                    
-                    <h2>💬 Live Chat</h2>
-                    <div class="chat-messages" id="chatMessages">
-                        <div class="system-message">Waiting for chat messages...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-        <script>
-            console.log('🚀 Starting enhanced monitor script...');
-            
-            // Store client information
-            const CLIENT_ID = "{self.client_id}";
-            const ENABLED_MODULES = ["{", ".join(list(self.enabled_modules))}"];
-            
-            console.log('📋 Client ID:', CLIENT_ID);
-            console.log('🎯 Enabled Modules:', ENABLED_MODULES);
-            
-            // Debug output function
-            function addDebugLine(message) {{
-                const debugOutput = document.getElementById('debugOutput');
-                const timestamp = new Date().toLocaleTimeString();
-                const newLine = document.createElement('div');
-                newLine.className = 'debug-line';
-                newLine.textContent = `[${{timestamp}}] ${{message}}`;
-                debugOutput.appendChild(newLine);
-                
-                // Keep only last 10 debug lines
-                while (debugOutput.children.length > 10) {{
-                    debugOutput.removeChild(debugOutput.firstChild);
-                }}
-                
-                console.log('🔍 DEBUG:', message);
-            }}
-            
-            // Update connection status
-            function updateConnectionStatus(status, message) {{
-                const statusElement = document.getElementById('connectionStatus');
-                const clientStatusElement = document.getElementById('clientStatus');
-                
-                statusElement.className = `status ${{status}}`;
-                
-                switch(status) {{
-                    case 'connected':
-                        statusElement.innerHTML = '✅ Connected';
-                        clientStatusElement.textContent = 'Active';
-                        break;
-                    case 'disconnected':
-                        statusElement.innerHTML = '❌ Disconnected';
-                        clientStatusElement.textContent = 'Offline';
-                        break;
-                    case 'connecting':
-                        statusElement.innerHTML = '🔄 Connecting...';
-                        clientStatusElement.textContent = 'Connecting';
-                        break;
-                    case 'error':
-                        statusElement.innerHTML = `❌ Error: ${{message}}`;
-                        clientStatusElement.textContent = 'Error';
-                        break;
-                }}
-            }}
-            
-            addDebugLine('Initializing Socket.IO connection...');
-            
-            // 🚨 FIX: Use correct URL format for namespace connection
-            const socket = io(window.location.origin + '/monitor', {{
-                transports: ['websocket', 'polling'],
-                reconnection: true,
-                reconnectionDelay: 1000,
-                reconnectionAttempts: 5,
-                timeout: 20000,
-                forceNew: true
-            }});
-            
-            // Connection event handlers
-            socket.on('connect', function() {{
-                addDebugLine(`Connected to /monitor namespace`);
-                updateConnectionStatus('connecting', 'Joining client room...');
-                
-                // Join the client room
-                addDebugLine(`Joining room for client: ${{CLIENT_ID}}`);
-                socket.emit('join_client_room', {{ client_id: CLIENT_ID }});
-            }});
-
-            socket.on('disconnect', function(reason) {{
-                addDebugLine(`Disconnected: ${{reason}}`);
-                updateConnectionStatus('disconnected', reason);
-            }});
-            
-            socket.on('connect_error', function(error) {{
-                addDebugLine(`Connection error: ${{error.message}}`);
-                updateConnectionStatus('error', error.message);
-            }});
-
-            socket.on('reconnect', function(attempt) {{
-                addDebugLine(`Reconnected after ${{attempt}} attempts`);
-            }});
-
-            socket.on('reconnect_error', function(error) {{
-                addDebugLine(`Reconnection error: ${{error.message}}`);
-            }});
-
-            // Room join confirmation
-            socket.on('room_joined', function(data) {{
-                addDebugLine('Successfully joined client room');
-                updateConnectionStatus('connected', 'Monitoring active');
-                
-                console.log('📋 Room join data:', data);
-                
-                // Update client info if available
-                if (data.current_emotion) {{
-                    document.getElementById('emotionText').textContent = data.current_emotion;
-                }}
-                if (data.current_confidence !== undefined) {{
-                    updateConfidence(data.current_confidence);
-                }}
-            }});
-
-            // Error handling
-            socket.on('error', function(data) {{
-                addDebugLine(`Server error: ${{data.message}}`);
-                updateConnectionStatus('error', data.message);
-            }});
-
-            // Frame update handler
-            socket.on('client_frame_update', function(data) {{
-                addDebugLine(`Frame update: ${{data.emotion}} (${{data.confidence}}%)`);
-                
-                console.log('📸 Frame update received:', data);
-                
-                if (data.emotion) {{
-                    document.getElementById('emotionText').textContent = data.emotion;
-                }}
-                if (data.confidence !== undefined) {{
-                    updateConfidence(data.confidence);
-                }}
-                
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-            }});
-
-            // Chat message handler
-            socket.on('client_chat_message', function(data) {{
-                addDebugLine(`Chat message: ${{data.type}} - ${{data.content.substring(0, 30)}}...`);
-                addChatMessage(data);
-            }});
-
-            // Client connection status updates
-            socket.on('client_connected', function(data) {{
-                addDebugLine(`Client connected: ${{data.robot_name}}`);
-                updateConnectionStatus('connected', 'Client active');
-            }});
-
-            socket.on('client_disconnected', function(data) {{
-                addDebugLine('Client disconnected');
-                updateConnectionStatus('disconnected', 'Client offline');
-            }});
-
-            // Utility functions
-            function updateConfidence(confidence) {{
-                const confidenceText = document.getElementById('confidenceText');
-                const confidenceFill = document.getElementById('confidenceFill');
-                
-                if (confidenceText) {{
-                    confidenceText.textContent = Math.round(confidence) + '%';
-                }}
-                
-                if (confidenceFill) {{
-                    confidenceFill.style.width = confidence + '%';
-                    
-                    // Update color based on confidence level
-                    if (confidence > 70) {{
-                        confidenceFill.style.backgroundColor = '#4caf50'; // Green
-                    }} else if (confidence > 40) {{
-                        confidenceFill.style.backgroundColor = '#ff9800'; // Orange  
-                    }} else {{
-                        confidenceFill.style.backgroundColor = '#f44336'; // Red
-                    }}
-                }}
-            }}
-
-            function addChatMessage(data) {{
-                const chatContainer = document.getElementById('chatMessages');
-                
-                // Remove "waiting" message if it exists
-                const waitingMessage = chatContainer.querySelector('.system-message');
-                if (waitingMessage && waitingMessage.textContent.includes('Waiting for')) {{
-                    waitingMessage.remove();
-                }}
-                
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message ' + (data.type === 'user' ? 'user-message' : 'bot-message');
-                
-                const author = data.type === 'user' ? 'User' : 'Bot';
-                const timestamp = new Date().toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit' }});
-                
-                messageDiv.innerHTML = `
-                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">
-                        <strong>${{author}}</strong> • ${{timestamp}}
-                        ${{data.emotion ? ` • ${{getEmotionEmoji(data.emotion)}}` : ''}}
-                    </div>
-                    <div>${{data.content}}</div>
-                `;
-
-                chatContainer.appendChild(messageDiv);
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }}
-
-            function getEmotionEmoji(emotion) {{
-                const emojis = {{
-                    'happy': '😊',
-                    'sad': '😢', 
-                    'angry': '😠',
-                    'fear': '😨',
-                    'surprise': '😲',
-                    'disgust': '🤢',
-                    'contempt': '😤',
-                    'neutral': '😐'
-                }};
-                return emojis[emotion] || '😐';
-            }}
-
-            // Video stream error handling
-            document.getElementById('videoStream').onerror = function() {{
-                console.error('❌ Video stream failed to load');
-                addDebugLine('Video stream error - check if emotion module is enabled');
-                this.alt = 'Video stream unavailable';
-            }};
-
-            document.getElementById('videoStream').onload = function() {{
-                addDebugLine('Video stream loaded successfully');
-            }};
-
-            // Ping to keep connection alive
-            setInterval(function() {{
-                if (socket.connected) {{
-                    socket.emit('ping', {{ client_id: CLIENT_ID }});
-                }}
-            }}, 30000); // Every 30 seconds
-
-            // Initial setup complete
-            addDebugLine('Monitor script initialized successfully');
-            console.log('✅ Enhanced monitor script loaded successfully');
-        </script>
-    </body>
-    </html>'''
         
-        print(f"📄 Generated enhanced monitor HTML for client: {self.client_id}")
-        return html
+    def get_individual_monitor_html(self):
+
+        template_path = os.path.join(os.path.dirname(__file__), "templates", "monitor.html")
+        with open(template_path, "r", encoding="utf-8") as f:
+            html = f.read()
+
+        client_id = self.client_id
+        enabled_modules = list(getattr(self, "enabled_modules", []))
+        enabled_modules_json = json.dumps(enabled_modules)
+
+        html = html.replace("{{client_id}}", client_id)
+        html = html.replace("{{enabled_modules_json}}", enabled_modules_json)
+        return html    
 
     def generate_individual_live_stream(self):
         """Generate optimized live video stream for monitors"""
@@ -685,7 +358,7 @@ class RobotServer:
             print(f"📺 {self.client_id}: Starting optimized live stream (quality: {self.monitor_quality}%, resolution: {self.monitor_resolution})")
             
             # 🚀 PERFORMANCE: Configure web interface for optimal performance
-            self.web_interface.stream_fps = 6  # Lower FPS for monitors
+            self.web_interface.stream_fps = 15  # Lower FPS for monitors
             self.web_interface.monitor_quality = self.monitor_quality
             self.web_interface.client_id = self.client_id  # For better logging
             
@@ -707,7 +380,8 @@ class RobotServer:
             placeholder[:] = (50, 50, 50)  # BGR format: (B, G, R)
             
             # 🚀 PERFORMANCE: Scale text size based on resolution
-            font_scale = min(monitor_width / 640, monitor_height / 480) * 0.8
+            # font_scale = min(monitor_width / 640, monitor_height / 480) * 0.8
+            font_scale = min(monitor_width / 1280, monitor_height / 720) * 0.8
             font_thickness = max(1, int(font_scale * 2))
             
             # Add text to placeholder
@@ -955,7 +629,10 @@ def main():
         'whisper_device': 'auto',
         'whisper_compute_type': 'float16',
         'max_audio_length': 30,
-        'sample_rate': 16000
+        'sample_rate': 16000,
+        # ADD THESE LINES:
+        'monitor_quality': 85,  # or 90 for even higher quality
+        'monitor_resolution': (1280, 720),  # or (640, 480) if that's your camera resolution
     }
     
     # Create and initialize server
