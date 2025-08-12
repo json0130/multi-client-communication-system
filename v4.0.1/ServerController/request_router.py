@@ -78,13 +78,14 @@ class RequestRouter:
             
             result = server.process_chat_message(message)
             
-            # persist the conversation
-            uid = self.client_manager.get_user_id(server.client_id)
-            if uid:
-                try:
-                    self.db.insert_chat_log(uid, message, result.get('response', ''))
-                except Exception as db_err:
-                    print(f"⚠️  Chat log insert failed: {db_err}")
+            # already persisted in RobotServer.process_chat_message so commented this block out
+            # # persist the conversation
+            # uid = self.client_manager.get_user_id(server.client_id)
+            # if uid:
+            #     try:
+            #         self.db.insert_chat_log(uid, message, result.get('response', ''))
+            #     except Exception as db_err:
+            #         print(f"⚠️  Chat log insert failed: {db_err}")
                     
             print(f"🤖 {display_name}: Response: '{result.get('response', 'No response')}'")
             

@@ -8,11 +8,18 @@ from dotenv import load_dotenv
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+
+# default config attributes
+from database import Database
+db = Database()
+uid = db.create_user(name="Standalone")  # Create a default user for standalone mode
+
 # Import modular components
 from Modules.emotion_processor import EmotionProcessor
 from Modules.gpt_client import GPTClient
 from Modules.web_interface import WebInterface
 from Modules.speech_processor import SpeechProcessor
+from Modules.rag_module import RagModule
 
 # Configuration - CORRECTED PATH FOR YOUR SETUP
 MODEL_PATH = '../models/efficientnet_HQRAF_improved_withCon.pth'  # Your existing model
@@ -32,11 +39,15 @@ class RobotServer:
         self.config = config
         self.robot_name = None
         
+        # user identification
+        self.user_id = config.get('user_id')
+        
         # Module instances (initialized based on enabled_modules)
         self.emotion_processor = None
         self.gpt_client = None
         self.speech_processor = None
         self.web_interface = None  # Individual web interface for this client
+        self.rag = None
         
         # Individual client monitoring data
         self.latest_frame = None
@@ -149,6 +160,20 @@ class RobotServer:
                 # Create mock GPT client for compatibility
                 self.gpt_client = GPTClient()
                 print(f"  🤖 GPT module disabled")
+                
+            # Initialize RAG Module
+            if 'rag' in self.enabled_modules:
+                try:
+                    if self.user_id is not None and self.config.get("database"):
+                        self.rag = RagModule(self.user_id, self.config["database"].client)
+                        print("    ✅ RAG module initialized")
+                        success_count += 1
+                    else:
+                        print("    ❌ RAG init skipped (missing user_id or database)")
+                except Exception as e:
+                    print(f"    ❌ RAG initialization failed: {e}")
+            else:
+                print("  📄 RAG module disabled")
             
             # Initialize Speech Processing Module
             if 'speech' in self.enabled_modules:
@@ -758,7 +783,28 @@ class RobotServer:
             print(f"💬 Processing chat for '{self.client_id}': [{self.latest_emotion}] {message}")
             
             # Process with GPT using current emotion state
-            response_text = self.gpt_client.ask_chatgpt_optimized(message, self.latest_emotion, self.latest_confidence)
+            # RAG context
+            rag_block = ""
+            if self.rag:
+                ctx_docs = self.rag.search(message, top_k=8)
+                if ctx_docs:
+                    rag_block = "Relevant Conversation Context:\n" + "\n".join(f"- {d}" for d in ctx_docs) + "\n\n"
+
+            full_prompt = f"{rag_block}{message}"
+
+            response_text = self.gpt_client.ask_chatgpt_optimized(
+                full_prompt, self.latest_emotion, self.latest_confidence
+            )
+            
+            if self.config.get("database") and self.user_id is not None:
+                try:
+                    row_id = self.config["database"].insert_chat_log(self.user_id, message, response_text)
+                    if self.rag:
+                        self.rag.add(message)  # only user message; response optional
+                except Exception as e:
+                    print(f"[RAG] Failed to log/add embedding: {e}")
+
+
             bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
             
             result = {
@@ -942,7 +988,7 @@ def main():
     print()
     
     # Create a default client configuration
-    default_modules = {'gpt', 'emotion', 'speech', 'facial'}
+    default_modules = {'gpt', 'emotion', 'speech', 'facial', 'rag'}
     default_config = {
         'emotion_processing_interval': 0.1,
         'stream_fps': 30,
@@ -955,7 +1001,9 @@ def main():
         'whisper_device': 'auto',
         'whisper_compute_type': 'float16',
         'max_audio_length': 30,
-        'sample_rate': 16000
+        'sample_rate': 16000,
+        'database': db,
+        'user_id': uid,  # Default user ID for standalone mode
     }
     
     # Create and initialize server
