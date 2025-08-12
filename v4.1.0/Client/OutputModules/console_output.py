@@ -19,14 +19,14 @@ class ConsoleOutputModule(OutputModule):
     
     def initialize(self) -> bool:
         """Initialize console output module"""
-        logger.info("🖥️ Initializing console output module")
+        # logger.info("🖥️ Initializing console output module")
         return True
     
     def start(self) -> bool:
         """Start console output module"""
         if not self.enabled:
             self.enabled = True
-            logger.info("🖥️ Console output started")
+            # logger.info("🖥️ Console output started")
             return True
         return False
     
@@ -34,46 +34,43 @@ class ConsoleOutputModule(OutputModule):
         """Stop console output module"""
         if self.enabled:
             self.enabled = False
-            logger.info("🖥️ Console output stopped")
+            # logger.info("🖥️ Console output stopped")
     
     def process_output(self, data: Any) -> bool:
-        """Process and display output data"""
+        """Process output with debugging info"""
         if not self.enabled:
             return False
-        
+    
         try:
-            # Extract text from data
+        
+            # Extract text for display
             if isinstance(data, dict):
-                text = data.get('text', str(data))
-                response_type = data.get('type', 'unknown')
-            elif isinstance(data, str):
-                text = data
-                response_type = 'text'
+                text = data.get('text', data.get('response', data.get('content', str(data))))
             else:
                 text = str(data)
-                response_type = 'other'
-            
-            # Truncate if needed
-            if self.max_length and len(text) > self.max_length:
-                text = text[:self.max_length] + "..."
-            
-            # Build display message
-            display_parts = []
-            
-            if self.prefix:
-                display_parts.append(self.prefix)
-            
-            if self.show_response_type:
-                display_parts.append(f"[{response_type}]")
-            
-            display_parts.append(text)
-            
-            # Display the message
-            display_message = " ".join(display_parts)
-            print(display_message)
-            
+        
+            # Clean text for display
+            display_text = text
+            if hasattr(self, 'remove_emotion_tags') and self.config.get('remove_emotion_tags', True):
+                display_text = re.sub(r"^\[(.*?)\]\s*", "", display_text)
+        
+            # Display the text
+            timestamp = ""
+            if self.config.get('show_timestamps', False):
+                from datetime import datetime
+                timestamp = f"[{datetime.now().strftime('%H:%M:%S')}] "
+        
+            response_type = ""
+            if self.config.get('show_response_type', False) and isinstance(data, dict):
+                resp_type = data.get('type', data.get('input_type', 'unknown'))
+                response_type = f"[{resp_type}] "
+        
+            prefix = self.config.get('prefix', '🤖')
+        
+            # print(f"{prefix} {timestamp}{response_type}{display_text}")
+        
             return True
-            
+        
         except Exception as e:
-            logger.error(f"❌ Console output error: {e}")
+            print(f"❌ Console output error: {e}")
             return False

@@ -27,7 +27,7 @@ class CameraInputModule(InputModule):
         self.width = self.config.get('width', 640)
         self.height = self.config.get('height', 480)
         self.fps = self.config.get('fps', 30)
-        self.send_fps = self.config.get('send_fps', 1)  # Send to server FPS
+        self.send_fps = self.config.get('send_fps', 30)  # Send to server FPS
         self.jpeg_quality = self.config.get('jpeg_quality', 85)
         
         # Camera object
@@ -35,8 +35,6 @@ class CameraInputModule(InputModule):
         self.capture_thread = None
         self.last_send_time = 0
         self.stop_event = threading.Event()
-
-        self.cap_lock = threading.Lock()
     
     def initialize(self) -> bool:
         """Initialize camera"""
@@ -72,9 +70,6 @@ class CameraInputModule(InputModule):
                 
         except Exception as e:
             logger.error(f"❌ Camera initialization error: {e}")
-            if self.cap:
-                self.cap.release()
-                self.cap = None
             return False
     
     def start(self) -> bool:
@@ -101,18 +96,16 @@ class CameraInputModule(InputModule):
     
     def get_data(self) -> Optional[str]:
         """Get current frame as base64 encoded string"""
-        with self.cap_lock:
-            if not self.cap or not self.cap.isOpened():
-                return None
-            
-            ret, frame = self.cap.read()
-            
-            if ret and frame is not None and frame.size > 0:
-                # Encode frame to base64
-                _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
-                frame_b64 = base64.b64encode(buffer).decode('utf-8')
-                return frame_b64
+        if not self.cap:
             return None
+        
+        ret, frame = self.cap.read()
+        if ret:
+            # Encode frame to base64
+            _, buffer = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, self.jpeg_quality])
+            frame_b64 = base64.b64encode(buffer).decode('utf-8')
+            return frame_b64
+        return None
     
     def _capture_loop(self):
         """Main capture loop"""
@@ -129,7 +122,7 @@ class CameraInputModule(InputModule):
                         self.client.send_to_server('frame', frame_data)
                         self.last_send_time = current_time
                 
-                time.sleep(1)  # Maintain capture FPS
+                time.sleep(1.0 / self.fps)  # Maintain capture FPS
                 
             except Exception as e:
                 logger.error(f"❌ Capture error: {e}")

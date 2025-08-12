@@ -11,16 +11,17 @@ from client import BasicClient
 # Import all available modules
 from InputModules.text_input import TextInputModule
 from InputModules.voice_input import VoiceInputModule
-from InputModules.camera_input import CameraInputModule
+#from InputModules.camera_input import CameraInputModule
 from InputModules.realsense_input import RealSenseInputModule
 
 from OutputModules.console_output import ConsoleOutputModule
+from OutputModules.edge_tts_output import EdgeTTSOutputModule
 from OutputModules.tts_output import TTSOutputModule, PyttsxTTSOutputModule
-from OutputModules.arduino_output import ArduinoOutputModule
+#from OutputModules.arduino_output import ArduinoOutputModule
 
 logger = logging.getLogger(__name__)
-
-class SetupClient(BasicClient):
+ 
+class SimpleConcurrentClient(BasicClient):
     """
     Client that uses simple config format and applies sensible defaults
     Works with minimal config: robot_name, client_id, server_url, modules
@@ -36,9 +37,9 @@ class SetupClient(BasicClient):
         # === INPUT MODULES ===
         
         # 1. Text Input (always available)
-        logger.info("🔤 Setting up text input...")
-        text_input = TextInputModule("text_input")
-        self.register_input_module(text_input)
+        # logger.info("🔤 Setting up text input...")
+        # text_input = TextInputModule("text_input")
+        # self.register_input_module(text_input)
         
         # 2. Voice Input (if speech module enabled)
         if 'speech' in self.config.get('modules', []):
@@ -60,16 +61,16 @@ class SetupClient(BasicClient):
             # Default camera settings
             camera_config = {
                 'camera_index': 0,
-                'width': 640,
-                'height': 480,
-                'fps': 30,
-                'send_fps': 1,  # Send 1 frame per second to server
+                'width': 1280, #was 640
+                'height': 720, #was 480
+                'fps': 15,	# was 30
+                'send_fps': 15,  # Send 1 frame per second to server
                 'jpeg_quality': 85
             }
             
             # Try RealSense first (for Jetson setups), fallback to regular camera
-            logger.info("   🎯 Attempting RealSense camera...")
-            realsense_input = RealSenseInputModule("realsense_input", camera_config)
+            logger.info("   🎯 Attempting camera...")
+            realsense_input = RealSenseInputModule("camera_input", camera_config)
             if not self.register_input_module(realsense_input):
                 logger.info("   📸 RealSense failed, using regular camera...")
                 camera_input = CameraInputModule("camera_input", camera_config)
@@ -77,7 +78,7 @@ class SetupClient(BasicClient):
         
         # === OUTPUT MODULES ===
         
-        # 1. Console Output (always available)
+        # 1. Console Output
         logger.info("🖥️ Setting up console output...")
         console_config = {
             'show_timestamps': True,
@@ -87,23 +88,45 @@ class SetupClient(BasicClient):
         console_output = ConsoleOutputModule("console_output", console_config)
         self.register_output_module(console_output)
         
-        # 2. TTS Output (always try to enable for better UX)
-        logger.info("🔊 Setting up text-to-speech...")
-        tts_config = {
-            'voice': 'en+f2',
-            'rate': 155,
-            'volume': 100,
-            'remove_emotion_tags': True
+        # 2. EDGE TTS Output
+        logger.info("🎙️ Setting up Edge text-to-speech...")
+        
+        # Edge TTS
+        edge_config = {
+            'voice': 'en-US-AriaNeural',  # Very natural female voice
+            # Other good options:
+            # 'en-US-JennyNeural' - Natural female
+            # 'en-US-GuyNeural' - Natural male  
+            # 'en-US-DavisNeural' - Warm male
+            'rate': '+0%',
+            'pitch': '+0Hz',
+            'remove_emotion_tags': True,
         }
         
-        # Try espeak first (Linux), fallback to pyttsx3 (cross-platform)
-        tts_output = TTSOutputModule("tts_output", tts_config)
-        if not self.register_output_module(tts_output):
-            logger.info("   🔄 espeak not available, trying pyttsx3...")
-            pyttsx_output = PyttsxTTSOutputModule("pyttsx_tts_output", tts_config)
-            self.register_output_module(pyttsx_output)
+        edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
+        if self.register_output_module(edge_tts):
+            logger.info("   ✅ Using Microsoft Edge TTS (plughw:3,0)")
+        else:
+            logger.info("   🔄 Edge TTS not available, trying espeak...")
+            
+            # Final fallback to espeak
+            espeak_config = {
+                'voice': 'en+f2',
+                'rate': 155,
+                'volume': 100,
+                'remove_emotion_tags': True
+            }
+                
+            from OutputModules.tts_output import TTSOutputModule
+            tts_output = TTSOutputModule("tts_output", espeak_config)
+            self.register_output_module(tts_output)
     
     def print_startup_info(self):
+        """Print information about what's running"""
+        print("\n" + "="*60)
+        print("🤖 CHATBOX CLIENT STARTED")
+        print("="*60)
+        
         print(f"🏷️  Robot: {self.config.get('robot_name', 'Unknown')}")
         print(f"🆔 Client ID: {self.config.get('client_id', 'Unknown')}")
         print(f"🌐 Server: {self.config.get('server_url', 'Unknown')}")
@@ -128,13 +151,17 @@ class SetupClient(BasicClient):
             print("   📸 Camera automatically sends emotion data")
         
         print("   🛑 Type 'exit' or press Ctrl+C to stop")
+        print("="*60)
         print()
 
 def main():
+    """Simple main function - no configuration needed!"""
+    print("🤖 ChatBox Client System")
+    print("📋 Using simple configuration format...")
     
     try:
         # Create client with simple config
-        client = SetupClient("client_config.json")
+        client = SimpleConcurrentClient("client_config.json")
         
         # Show what's running
         client.print_startup_info()
@@ -165,3 +192,4 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
+

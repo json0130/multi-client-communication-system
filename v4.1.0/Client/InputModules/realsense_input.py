@@ -30,10 +30,10 @@ class RealSenseInputModule(InputModule):
         super().__init__(name, config)
         
         # RealSense configuration
-        self.width = self.config.get('width', 640)
-        self.height = self.config.get('height', 480)
-        self.fps = self.config.get('fps', 30)
-        self.send_fps = self.config.get('send_fps', 1)  # Send to server FPS
+        self.width = self.config.get('width', 1280)
+        self.height = self.config.get('height', 720)
+        self.fps = self.config.get('fps', 15)
+        self.send_fps = self.config.get('send_fps', 15)  # Send to server FPS
         self.jpeg_quality = self.config.get('jpeg_quality', 85)
         self.enable_depth = self.config.get('enable_depth', False)
         
@@ -80,6 +80,7 @@ class RealSenseInputModule(InputModule):
             # Test capture
             frames = self.pipeline.wait_for_frames(timeout_ms=5000)
             color_frame = frames.get_color_frame()
+            logger.info(f"✅ RealSense camera initialized: {device_name}")
             
             if color_frame:
                 logger.info(f"✅ RealSense camera initialized: {device_name}")
@@ -101,7 +102,7 @@ class RealSenseInputModule(InputModule):
             self.stop_event.clear()
             self.capture_thread = threading.Thread(target=self._capture_loop, daemon=True)
             self.capture_thread.start()
-            logger.info("📸 RealSense capture started")
+            # logger.info("📸 RealSense capture started")
             return True
         return False
     
@@ -169,7 +170,7 @@ class RealSenseInputModule(InputModule):
     
     def _capture_loop(self):
         """Main RealSense capture loop"""
-        logger.info("📹 RealSense capture loop started")
+        # logger.info("📹 RealSense capture loop started")
         
         while not self.stop_event.is_set() and self.enabled:
             try:

@@ -293,6 +293,7 @@ class BasicClient:
         elif data_type == 'speech':
             return self.server_connection.send_speech_data(data)
         elif data_type == 'frame':
+            # logger.info(f"frame send")
             success = self.server_connection.send_frame_data(data)
             return {'success': success}
         else:
