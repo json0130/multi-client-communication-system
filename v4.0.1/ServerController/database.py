@@ -127,3 +127,19 @@ class Database:
             .execute()
         )
         return resp.data[0]["id"]
+    
+    def get_chat_messages(
+        self, user_id: int, limit: int = 100
+    ) -> List[str]:
+        """
+        Return the newest <limit> user messages (string only) for topic inference.
+        """
+        resp = (
+            self.client.table("chat_logs")
+            .select("message")
+            .eq("user_id", user_id)
+            .order("id", desc=True)
+            .limit(limit)
+            .execute()
+        )
+        return [row["message"] for row in resp.data or [] if row.get("message")]

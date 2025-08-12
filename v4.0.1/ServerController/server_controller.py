@@ -246,7 +246,8 @@ class ServerController:
                     "client_health": "/client/{client_id}/health (GET)",
                     "client_monitor": "/client/{client_id}/monitor (GET)",
                     "client_live_stream": "/client/{client_id}/live_stream (GET)",
-                    "websocket": "/socket.io/ (send client_init event first)"
+                    "websocket": "/socket.io/ (send client_init event first)",
+                    "infer_topics": "/user/<int:user_id>/infer_topics (POST)",
                 },
                 "websocket_events": {
                     "client_init": "Initialize client with robot_name and modules",
@@ -369,6 +370,12 @@ class ServerController:
                 return jsonify({
                     "error": f"Failed to remove client: {e}"
                 }), 500
+                
+        @self.app.route('/user/<int:user_id>/infer_topics', methods=['POST'])
+        def user_infer_topics(user_id):
+            """Run GPT topic/condition extraction and update the users table."""
+            return self.request_router.route_user_request(user_id, 'infer_topics', request)
+
         
         @self.app.after_request
         def after_request(response):
