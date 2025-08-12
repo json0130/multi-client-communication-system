@@ -146,9 +146,9 @@ class ClientManager:
             'emotion_window_size': 3,              # Changed from 5 - smaller window for faster processing
             
             # 🚀 SPEED IMPROVEMENTS - Video Streaming for Monitors
-            'stream_fps': 6,                       # Changed from 30 - much lower FPS for monitors
-            'monitor_quality': 50,                 # NEW - lower JPEG quality for faster encoding
-            'monitor_resolution': (320, 240),      # NEW - smaller resolution for much faster streaming
+            'stream_fps': 15,                       # Changed from 30 - much lower FPS for monitors
+            'monitor_quality': 85,                 # NEW - lower JPEG quality for faster encoding
+            'monitor_resolution': (1280, 720),      # NEW - smaller resolution for much faster streaming
             'frame_skip_ratio': 3,                 # NEW - skip 2 out of every 3 frames for monitors
             'frame_cache_duration': 0.15,         # NEW - cache frames for 150ms to avoid re-encoding
             
