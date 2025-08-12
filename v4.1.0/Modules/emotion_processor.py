@@ -13,6 +13,8 @@ import torch.nn as nn
 from PIL import Image
 from collections import deque
 
+from gpu_lock import gpu_lock
+
 class EmotionTracker:
     """Enhanced emotion tracking with proper moving average"""
     
@@ -292,24 +294,21 @@ class EmotionProcessor:
         return False
     
     def process_emotion_detection_realtime(self, frame):
-        """Enhanced real-time emotion detection with proper moving average"""
+        """Enhanced real-time emotion detection with GPU lock"""
         if not all([self.transform_loaded, self.model_loaded, self.face_cascade_loaded,
                     self.transform is not None, self.model is not None, self.face_cascade is not None]):
             return self.current_emotion, self.current_confidence, "components_not_loaded"
 
         try:
-            # ✅ NEW: Store the frame for live streaming (with face overlay)
             processed_frame = frame.copy()
             
             if not self.should_process_emotion():
-                # ✅ NEW: Still store frame even if not processing emotion
                 processed_frame = self.add_face_overlay(processed_frame)
                 with self.frame_storage_lock:
                     self.latest_processed_frame = processed_frame
                 return self.current_emotion, self.current_confidence, "throttled"
 
             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-
             faces = self.face_cascade.detectMultiScale(
                 gray,
                 scaleFactor=1.15,
@@ -318,7 +317,6 @@ class EmotionProcessor:
             )
 
             if len(faces) == 0:
-                # ✅ NEW: Store frame even when no faces detected
                 with self.frame_storage_lock:
                     self.latest_processed_frame = processed_frame
                 return self.current_emotion, self.current_confidence, "no_faces"
@@ -331,13 +329,25 @@ class EmotionProcessor:
                 face_img = Image.fromarray(cv2.cvtColor(face, cv2.COLOR_BGR2RGB))
                 face_tensor = self.transform(face_img).unsqueeze(0).to(self.device)
 
-                with torch.no_grad():
-                    output = self.model(face_tensor)
-                    probabilities = F.softmax(output, dim=1)[0]
-                    pred_idx = torch.argmax(probabilities).item()
-                    confidence = probabilities[pred_idx].item() * 100
-                    emotion = self.emotion_labels[pred_idx]
+                # 🔒 GPU LOCK: Only lock during actual GPU inference
+                client_id = getattr(self, 'client_id', 'unknown')
+                with gpu_lock.acquire(client_id, "emotion", timeout=5) as gpu_acquired:
+                    if gpu_acquired:
+                        with torch.no_grad():
+                            output = self.model(face_tensor)
+                            probabilities = F.softmax(output, dim=1)[0]
+                            pred_idx = torch.argmax(probabilities).item()
+                            confidence = probabilities[pred_idx].item() * 100
+                            emotion = self.emotion_labels[pred_idx]
+                    else:
+                        # GPU timeout - return cached emotion
+                        print(f"⚠️ {client_id} emotion GPU timeout, using cached result")
+                        processed_frame = self.add_face_overlay(processed_frame)
+                        with self.frame_storage_lock:
+                            self.latest_processed_frame = processed_frame
+                        return self.current_emotion, self.current_confidence, "gpu_timeout"
 
+                # Continue with the rest of your existing logic...
                 self.emotion_tracker.add_detection(emotion, confidence, self.confidence_threshold)
                 stable_emotion, stable_confidence, emotion_changed = self.emotion_tracker.get_stable_emotion(
                     self.emotion_change_threshold, self.emotion_update_threshold)
@@ -348,10 +358,6 @@ class EmotionProcessor:
                         self.current_confidence = stable_confidence
                         self.last_emotion_update = time.time()
 
-                        distribution = self.emotion_tracker.get_emotion_distribution()
-                        # print(f"Emotion: {stable_emotion} ({stable_confidence:.1f}%) | Raw: {emotion} ({confidence:.1f}%)")
-
-                # ✅ NEW: Add face overlay and store processed frame
                 processed_frame = self.add_face_overlay(processed_frame)
                 with self.frame_storage_lock:
                     self.latest_processed_frame = processed_frame
@@ -360,18 +366,15 @@ class EmotionProcessor:
 
             except Exception as e:
                 print(f"Error processing face: {e}")
-                # ✅ NEW: Store frame even when face processing fails
                 with self.frame_storage_lock:
                     self.latest_processed_frame = processed_frame
                 return self.current_emotion, self.current_confidence, f"face_processing_error: {e}"
 
         except Exception as e:
             print(f"Error in emotion processing: {e}")
-            # ✅ NEW: Store frame even when general processing fails
             with self.frame_storage_lock:
                 self.latest_processed_frame = frame.copy()
             return self.current_emotion, self.current_confidence, f"general_error: {e}"
-    
     def get_current_emotion(self):
         """Get current emotion state thread-safely"""
         with self.emotion_lock:
