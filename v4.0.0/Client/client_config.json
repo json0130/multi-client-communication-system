@@ -1,0 +1,6 @@
+{
+    "robot_name": "ChatBox",
+    "client_id": "chatbox_jetson_001",
+    "server_url": "http://192.168.1.100:5000",
+    "modules": ["gpt", "emotion", "speech"]
+}

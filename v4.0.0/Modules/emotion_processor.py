@@ -84,8 +84,10 @@ class EmotionTracker:
 class EmotionProcessor:
     """Main emotion processing class"""
     
-    def __init__(self, model_path, config=None):
+    def __init__(self, model_path=None, config=None):
         # Configuration
+        if model_path is None:
+            model_path = os.path.join("models", "efficientnet_HQRAF_improved_withCon.pth")
         self.model_path = model_path
         self.config = config or {}
         
@@ -127,21 +129,19 @@ class EmotionProcessor:
         # Initialize emotion tracker
         self.emotion_tracker = EmotionTracker(self.emotion_window_size)
         
-    def get_model(self, name):
+    def get_model(self):
         """Load emotion detection model with classifier structure matching training."""
         num_classes = 7
         dropout_rate = 0.2
 
-        if name == 'efficientnet':
-            model = models.efficientnet_b0(weights=None)
-            model.classifier = nn.Sequential(
-                nn.Linear(model.classifier[1].in_features, 256),
-                nn.ReLU(),
-                nn.Dropout(dropout_rate),
-                nn.Linear(256, num_classes)
-            )
-        else:
-            raise ValueError(f"Unsupported model name: {name}")
+        # Use EfficientNet B0 model
+        model = models.efficientnet_b0(weights=None)
+        model.classifier = nn.Sequential(
+            nn.Linear(model.classifier[1].in_features, 256),
+            nn.ReLU(),
+            nn.Dropout(dropout_rate),
+            nn.Linear(256, num_classes)
+        )
 
         return model
     
@@ -171,15 +171,32 @@ class EmotionProcessor:
                 print("Please ensure the model file is in the correct location")
                 return False
 
-            print(f"Loading model from {self.model_path}...")
+            print(f"Loading EfficientNet B0 model from {self.model_path}...")
 
-            self.model = self.get_model('efficientnet').to(self.device)
+            # Load EfficientNet B0 model
+            self.model = self.get_model().to(self.device)
+            
+            # Load the checkpoint
             checkpoint = torch.load(self.model_path, map_location=self.device)
-            self.model.load_state_dict(checkpoint)
+            
+            # Handle different checkpoint formats
+            if isinstance(checkpoint, dict):
+                if 'model_state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['model_state_dict'])
+                    print("Loaded model from 'model_state_dict' key")
+                elif 'state_dict' in checkpoint:
+                    self.model.load_state_dict(checkpoint['state_dict'])
+                    print("Loaded model from 'state_dict' key")
+                else:
+                    self.model.load_state_dict(checkpoint)
+                    print("Loaded model state dict directly")
+            else:
+                self.model.load_state_dict(checkpoint)
+                print("Loaded model state dict directly")
+            
             self.model.eval()
-
             self.model_loaded = True
-            print(f"Model loaded successfully on {self.device}")
+            print(f"EfficientNet B0 model loaded successfully on {self.device}")
 
             if not self.initialize_transform():
                 return False
