@@ -1,12 +1,13 @@
 # websocket_manager.py - Production Version
 import time
 import json
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from flask import request, session
 from flask_socketio import emit, disconnect, join_room, leave_room
 
 from client_manager import ClientManager
 from request_router import RequestRouter
+from database import Database
 
 class WebSocketManager:
     """
@@ -14,10 +15,11 @@ class WebSocketManager:
     Handles client initialization via client_init.json and image frame processing.
     """
     
-    def __init__(self, socketio, client_manager: ClientManager, request_router: RequestRouter):
+    def __init__(self, socketio, client_manager: ClientManager, request_router: RequestRouter, database: Optional[Database] = None):
         self.socketio = socketio
         self.client_manager = client_manager
         self.request_router = request_router
+        self.database = database
         
         # Track monitor connections
         self.monitor_connections = {}
@@ -284,7 +286,15 @@ class WebSocketManager:
                 
                 # Process chat message
                 result = server.process_chat_message(message)
-                
+
+                # persist chat
+                uid = self.client_manager.get_user_id(client_id)
+                if uid:
+                    try:
+                        self.db.insert_chat_log(uid, message, result.get('response', ''))
+                    except Exception as db_err:
+                        print(f"⚠️  Chat log insert failed: {db_err}")
+
                 # Send to robot client
                 emit('chat_response', {
                     'client_id': client_id,

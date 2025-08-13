@@ -7,6 +7,11 @@ from flask_socketio import SocketIO, emit, join_room
 from client_manager import ClientManager
 from request_router import RequestRouter
 from websocket_manager import WebSocketManager
+from database import Database 
+
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OpenMP initialization error
+
 
 class ServerController:
     """
@@ -43,10 +48,23 @@ class ServerController:
         # Initialize modular components
         self.client_manager = ClientManager()
         self.request_router = RequestRouter(self.client_manager, self.socketio)
+
+        # Initialize Supabase DB (single instance)
+        self.database = Database()
+
+        # Initialize modular components with DB
+        self.client_manager = ClientManager(self.database)
+        self.request_router = RequestRouter(
+            self.client_manager,
+            self.socketio,
+            self.database
+        )
+
         self.websocket_manager = WebSocketManager(
-            self.socketio, 
-            self.client_manager, 
-            self.request_router
+            self.socketio,
+            self.client_manager,
+            self.request_router,
+            self.database
         )
         
         # Setup HTTP routes
@@ -228,7 +246,8 @@ class ServerController:
                     "client_health": "/client/{client_id}/health (GET)",
                     "client_monitor": "/client/{client_id}/monitor (GET)",
                     "client_live_stream": "/client/{client_id}/live_stream (GET)",
-                    "websocket": "/socket.io/ (send client_init event first)"
+                    "websocket": "/socket.io/ (send client_init event first)",
+                    "infer_topics": "/user/<int:user_id>/infer_topics (POST)",
                 },
                 "websocket_events": {
                     "client_init": "Initialize client with robot_name and modules",
@@ -343,6 +362,12 @@ class ServerController:
                 return jsonify({
                     "error": f"Failed to remove client: {e}"
                 }), 500
+                
+        @self.app.route('/user/<int:user_id>/infer_topics', methods=['POST'])
+        def user_infer_topics(user_id):
+            """Run GPT topic/condition extraction and update the users table."""
+            return self.request_router.route_user_request(user_id, 'infer_topics', request)
+
         
         @self.app.after_request
         def after_request(response):

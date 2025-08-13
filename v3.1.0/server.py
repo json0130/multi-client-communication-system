@@ -15,6 +15,7 @@ from gpt_client import GPTClient
 from web_interface import WebInterface
 from websocket_handler import WebSocketHandler
 from speech_processor import SpeechProcessor
+from topics_controller import generate_topics
 
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OMP conflict
 
@@ -254,6 +255,34 @@ class EmotionServer:
                 import traceback
                 print(f"   Traceback: {traceback.format_exc()}")
                 return jsonify({"error": "Internal server error", "details": str(e)}), 500
+            
+        @self.app.route('/topics', methods=['GET'])
+        def topics():
+            """Generate topics from logs using BERTopic"""
+            # Auth check
+            auth_header = request.headers.get('Authorization')
+            if not auth_header or not auth_header.startswith('Bearer ') or auth_header.split(' ')[1] != self.api_key:
+                return jsonify({"error": "Authentication required"}), 401
+            
+            try:
+                # pass the GPT client
+                result = self._run_async(generate_topics(logs_collection, self.gpt_client))
+
+                return jsonify({
+                    "topics":    result["topics"],     # list of {topic, count}
+                    "wordcloud": result["wordcloud"]   # base-64 PNG
+                }), 200
+
+            except ValueError as ve:
+                # Not enough logs
+                return jsonify({"error": str(ve)}), 400
+
+            except Exception as e:
+                print(f"❌ Topics generation error: {e}")
+                return jsonify({
+                    "error":   "Failed to generate topics",
+                    "details": str(e)
+                }), 500
 
         @self.app.route('/stats')
         def stats():
