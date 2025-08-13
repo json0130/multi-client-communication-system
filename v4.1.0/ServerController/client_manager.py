@@ -7,7 +7,6 @@ from typing import Dict, Optional, Set, Any
 from dataclasses import dataclass
 
 from server import RobotServer
-from database import Database
 
 @dataclass
 class ClientInfo:
@@ -18,7 +17,6 @@ class ClientInfo:
     config_overrides: Dict[str, Any]
     registration_time: float
     last_activity: float
-    user_id: int
     
     def get_display_name(self) -> str:
         """Get display name for logging: [client_id] robot_name"""
@@ -29,16 +27,14 @@ class ClientManager:
     Manages client registration, server instance creation, and lifecycle.
     Handles client_init.json processing and server instance management.
     """
-
-    def __init__(self, database: Optional[Database] = None):
+    
+    def __init__(self):
         self.client_infos: Dict[str, ClientInfo] = {}       # client_id -> ClientInfo
         self.client_servers: Dict[str, RobotServer] = {}  # client_id -> server instance
         self.manager_lock = threading.RLock()
-        self.id_map: Dict[str, int] = {}
-        self.db = database
-
+        
         # Valid modules for validation
-        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial', 'rag'}
+        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial'}
         
         # Cleanup configuration
         self.cleanup_task_running = False
@@ -83,13 +79,6 @@ class ClientManager:
             # Get config overrides
             config_overrides = client_init_data.get('config', {})
             
-            # Ensure user exists first
-            if client_id not in self.id_map:
-                user_id = self.db.create_user(name=robot_name)
-                self.id_map[client_id] = user_id
-            else:
-                user_id = self.id_map[client_id]
-            
             # Create client info
             client_info = ClientInfo(
                 client_id=client_id,
@@ -97,14 +86,13 @@ class ClientManager:
                 modules=modules_set,
                 config_overrides=config_overrides,
                 registration_time=time.time(),
-                last_activity=time.time(),
-                user_id=user_id
+                last_activity=time.time()
             )
             
             # Register the client
             with self.manager_lock:
                 self.client_infos[client_id] = client_info
-
+            
             print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
             
             return True, f"Client {client_info.get_display_name()} registered successfully", client_info
@@ -158,9 +146,9 @@ class ClientManager:
             'emotion_window_size': 3,              # Changed from 5 - smaller window for faster processing
             
             # 🚀 SPEED IMPROVEMENTS - Video Streaming for Monitors
-            'stream_fps': 15,                       # Changed from 30 - much lower FPS for monitors
-            'monitor_quality': 85,                 # NEW - lower JPEG quality for faster encoding
-            'monitor_resolution': (1280, 720),      # NEW - smaller resolution for much faster streaming
+            'stream_fps': 6,                       # Changed from 30 - much lower FPS for monitors
+            'monitor_quality': 50,                 # NEW - lower JPEG quality for faster encoding
+            'monitor_resolution': (320, 240),      # NEW - smaller resolution for much faster streaming
             'frame_skip_ratio': 3,                 # NEW - skip 2 out of every 3 frames for monitors
             'frame_cache_duration': 0.15,         # NEW - cache frames for 150ms to avoid re-encoding
             
@@ -175,9 +163,6 @@ class ClientManager:
             'max_audio_length': 30,
             'sample_rate': 16000,
             
-            "database": self.db,     # pass Database instance
-            "user_id": client_info.user_id,  # stored this earlier
-
                 **client_info.config_overrides  # Apply client-specific overrides
             }
             
@@ -215,10 +200,6 @@ class ClientManager:
         with self.manager_lock:
             client_info = self.client_infos.get(client_id)
             return client_info.modules if client_info else set()
-        
-    def get_user_id(self, client_id: str) -> Optional[int]:
-        """Return the numeric user_id for a given client_id, or None."""
-        return self.id_map.get(client_id)
     
     def update_client_activity(self, client_id: str):
         """Update last activity timestamp for client"""

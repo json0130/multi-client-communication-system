@@ -77,36 +77,3 @@ IMPORTANT:
             'available': self.available,
             'client_initialized': self.client is not None
         }
-        
-    def infer_topics_and_conditions(self, messages: list[str]) -> tuple[list[str], list[str]]:
-        """
-        Given a list of user messages → return (interests[], health_conditions[]).
-        Uses a short JSON-only response format to keep parsing trivial.
-        """
-        if not self.available:
-            raise RuntimeError("OpenAI client not initialised")
-
-        joined = "\n".join(f"- {m}" for m in messages[:100])  # safety cap
-        sys_prompt = (
-            "You are an analyst. From the USER’S sentences below, extract:\n"
-            "1. up to 10 distinct long-term interests or hobbies\n"
-            "2. any explicit or strongly implied health conditions.\n"
-            "Return **ONLY** valid JSON like:\n"
-            '{ "interests": ["..."], "health_conditions": ["..."] }'
-        )
-
-        resp = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": sys_prompt},
-                {"role": "user", "content": joined}
-            ],
-            temperature=0.3,
-            timeout=15,
-        )
-        import json, re
-        txt = resp.choices[0].message.content.strip()
-        # tolerate code-block fencing
-        txt = re.sub(r"^```(json)?|```$", "", txt).strip()
-        data = json.loads(txt)
-        return data.get("interests", []), data.get("health_conditions", [])

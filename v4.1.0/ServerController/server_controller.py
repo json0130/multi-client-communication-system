@@ -7,11 +7,6 @@ from flask_socketio import SocketIO, emit, join_room
 from client_manager import ClientManager
 from request_router import RequestRouter
 from websocket_manager import WebSocketManager
-from database import Database 
-
-import os
-os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OpenMP initialization error
-
 
 class ServerController:
     """
@@ -26,7 +21,7 @@ class ServerController:
     Clients connect by sending client_init.json with their requirements.
     """
     
-    def __init__(self, port=5002):
+    def __init__(self, port=5000):
         self.port = port
         
         # Initialize Flask app and SocketIO
@@ -48,23 +43,10 @@ class ServerController:
         # Initialize modular components
         self.client_manager = ClientManager()
         self.request_router = RequestRouter(self.client_manager, self.socketio)
-
-        # Initialize Supabase DB (single instance)
-        self.database = Database()
-
-        # Initialize modular components with DB
-        self.client_manager = ClientManager(self.database)
-        self.request_router = RequestRouter(
-            self.client_manager,
-            self.socketio,
-            self.database
-        )
-
         self.websocket_manager = WebSocketManager(
-            self.socketio,
-            self.client_manager,
-            self.request_router,
-            self.database
+            self.socketio, 
+            self.client_manager, 
+            self.request_router
         )
         
         # Setup HTTP routes
@@ -246,8 +228,7 @@ class ServerController:
                     "client_health": "/client/{client_id}/health (GET)",
                     "client_monitor": "/client/{client_id}/monitor (GET)",
                     "client_live_stream": "/client/{client_id}/live_stream (GET)",
-                    "websocket": "/socket.io/ (send client_init event first)",
-                    "infer_topics": "/user/<int:user_id>/infer_topics (POST)",
+                    "websocket": "/socket.io/ (send client_init event first)"
                 },
                 "websocket_events": {
                     "client_init": "Initialize client with robot_name and modules",
@@ -311,15 +292,23 @@ class ServerController:
 
         @self.app.route('/client/<client_id>/monitor', methods=['GET'])
         def client_monitor(client_id):
+            """Serve individual client monitor page"""
             try:
                 server = self.client_manager.get_client_server(client_id)
                 if not server:
-                    # If not found, create a temporary RobotServer instance (no modules)
-                    from server import RobotServer
-                    server = RobotServer.create_for_client(client_id, set(), {})
-                # Always call the method (even if modules is empty)
-                html = server.get_individual_monitor_html()
-                return Response(html, mimetype='text/html')
+                    client_info = self.client_manager.get_client_info(client_id)
+                    if client_info:
+                        server = self.client_manager.get_or_create_server_instance(client_id)
+                    
+                    if not server:
+                        return "Server not found", 404
+                    
+                if hasattr(server, 'get_individual_monitor_html'):
+                    html = server.get_individual_monitor_html()
+                    return Response(html, mimetype='text/html')
+                else:
+                    return "Method not found", 500
+                    
             except Exception as e:
                 return f"Error: {e}", 500
 
@@ -362,12 +351,6 @@ class ServerController:
                 return jsonify({
                     "error": f"Failed to remove client: {e}"
                 }), 500
-                
-        @self.app.route('/user/<int:user_id>/infer_topics', methods=['POST'])
-        def user_infer_topics(user_id):
-            """Run GPT topic/condition extraction and update the users table."""
-            return self.request_router.route_user_request(user_id, 'infer_topics', request)
-
         
         @self.app.after_request
         def after_request(response):
@@ -390,7 +373,6 @@ class ServerController:
             self.client_manager.start_cleanup_task()
             
             print("✅ Server ready!")
-            print(f"🖥️  Test Monitor UI: http://localhost:{self.port}/client/test/monitor")
             
             # Start the Flask-SocketIO server
             self.socketio.run(
@@ -425,7 +407,7 @@ def main():
     print("   Production optimized version")
     print()
     
-    controller = ServerController(port=5002)
+    controller = ServerController(port=5000)
     controller.start()
 
 if __name__ == "__main__":

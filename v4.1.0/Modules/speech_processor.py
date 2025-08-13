@@ -7,6 +7,8 @@ import threading
 from typing import Optional, Tuple
 import numpy as np
 
+from gpu_lock import gpu_lock  # Import the GPU lock manager
+
 class SpeechProcessor:
     """Speech-to-text processor using faster-whisper"""
     
@@ -42,33 +44,41 @@ class SpeechProcessor:
             # Determine device with safer fallback logic
             device = 'cpu'  # Default to CPU for stability
             compute_type = 'int8'  # Safe default
+
+            self.model = WhisperModel(
+                self.model_size,
+                device=device,
+                compute_type=compute_type,
+                download_root=self.config.get('model_cache_dir')
+            )
             
-            if self.device == 'auto':
-                try:
-                    import torch
-                    if torch.cuda.is_available():
-                        # Test CUDA compatibility before using it
-                        try:
-                            torch.cuda.get_device_name(0)
-                            device = 'cuda'
-                            compute_type = 'float16'
-                            print("🔍 CUDA detected, will attempt GPU acceleration")
-                        except Exception as cuda_e:
-                            print(f"⚠️ CUDA available but not working properly: {cuda_e}")
-                            print("   Falling back to CPU")
-                            device = 'cpu'
-                            compute_type = 'int8'
-                    else:
-                        print("ℹ️ CUDA not available, using CPU")
-                except ImportError:
-                    print("ℹ️ PyTorch not available, using CPU")
-            elif self.device == 'cuda':
-                device = 'cuda'
-                compute_type = self.compute_type
-                print("🔍 Forcing CUDA usage as requested")
-            else:
-                device = self.device
-                compute_type = self.compute_type
+            
+            # if self.device == 'auto':
+            #     try:
+            #         import torch
+            #         if torch.cuda.is_available():
+            #             # Test CUDA compatibility before using it
+            #             try:
+            #                 torch.cuda.get_device_name(0)
+            #                 device = 'cuda'
+            #                 compute_type = 'float16'
+            #                 print("🔍 CUDA detected, will attempt GPU acceleration")
+            #             except Exception as cuda_e:
+            #                 print(f"⚠️ CUDA available but not working properly: {cuda_e}")
+            #                 print("   Falling back to CPU")
+            #                 device = 'cpu'
+            #                 compute_type = 'int8'
+            #         else:
+            #             print("ℹ️ CUDA not available, using CPU")
+            #     except ImportError:
+            #         print("ℹ️ PyTorch not available, using CPU")
+            # elif self.device == 'cuda':
+            #     device = 'cuda'
+            #     compute_type = self.compute_type
+            #     print("🔍 Forcing CUDA usage as requested")
+            # else:
+            #     device = self.device
+            #     compute_type = self.compute_type
             
             # Try to load model with GPU first, fallback to CPU if it fails
             try:
@@ -166,42 +176,43 @@ class SpeechProcessor:
             return False
     
     def transcribe_audio(self, audio_bytes: bytes) -> Tuple[bool, str, float]:
-        """
-        Transcribe audio to text using faster-whisper
-        Returns: (success, transcription, confidence)
-        """
+        """Transcribe audio to text using faster-whisper with GPU lock"""
         if not self.model_loaded:
             return False, "Speech-to-text model not loaded", 0.0
-        
+
         with self.processing_lock:
             try:
-                # Validate audio
                 if not self.validate_wav_file(audio_bytes):
                     return False, "Invalid audio file", 0.0
-                
-                # Create temporary file for whisper
+
                 with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
                     tmp_file.write(audio_bytes)
                     tmp_file_path = tmp_file.name
-                
-                # print(f"🎤 Transcribing audio file: {tmp_file_path}")
-                
+
                 try:
-                    # Transcribe with faster-whisper
-                    segments, info = self.model.transcribe(
-                        tmp_file_path,
-                        language=self.language,
-                        beam_size=5,
-                        best_of=5,
-                        temperature=0.0,
-                        condition_on_previous_text=False,
-                        vad_filter=True,  # Voice activity detection
-                        vad_parameters=dict(min_silence_duration_ms=500)
-                    )
-                    
+                    # 🔒 GPU LOCK: Only lock during actual transcription
+                    client_id = getattr(self, 'client_id', 'unknown')
+                    with gpu_lock.acquire(client_id, "speech", timeout=30) as gpu_acquired:
+                        if gpu_acquired:
+                            # Your existing transcription code here
+                            segments, info = self.model.transcribe(
+                                tmp_file_path,
+                                language=self.language,
+                                beam_size=5,
+                                best_of=5,
+                                temperature=0.0,
+                                condition_on_previous_text=False,
+                                vad_filter=True,
+                                vad_parameters=dict(min_silence_duration_ms=500)
+                            )
+                        else:
+                            # GPU timeout - return error
+                            os.unlink(tmp_file_path)
+                            return False, "GPU busy - speech processing timeout", 0.0
+
                     print(f"🔍 Transcription info - Language: {info.language}, Probability: {info.language_probability:.2f}")
                     
-                    # Extract text and confidence
+                    # Rest of your existing transcription logic...
                     transcription_parts = []
                     confidences = []
                     
@@ -209,58 +220,40 @@ class SpeechProcessor:
                     for segment in segments:
                         segment_count += 1
                         text = segment.text.strip()
-                        # print(f"   Segment {segment_count}: '{text}' (start: {segment.start:.1f}s, end: {segment.end:.1f}s, prob: {segment.avg_logprob:.2f})")
-                        
                         if text:
                             transcription_parts.append(text)
-                            # Use average log probability as confidence proxy
                             confidences.append(segment.avg_logprob)
-                    
-                    # print(f"📊 Found {segment_count} segments, {len(transcription_parts)} with text")
-                    
-                    # Clean up temporary file
+
                     os.unlink(tmp_file_path)
                     
                     if not transcription_parts:
                         print("⚠️ No speech segments with text found")
                         return False, "No speech detected in audio", 0.0
-                    
-                    # Combine transcription
+
                     full_transcription = " ".join(transcription_parts).strip()
                     
-                    # Calculate overall confidence (convert log prob to percentage)
                     if confidences:
                         avg_logprob = np.mean(confidences)
-                        # Convert log probability to confidence percentage (rough approximation)
                         confidence = max(0, min(100, (avg_logprob + 1) * 100))
                     else:
-                        confidence = 50.0  # Default confidence
-                    
+                        confidence = 50.0
+
                     print(f"🎯 Final transcription: '{full_transcription}'")
                     print(f"📊 Confidence: {confidence:.1f}%")
-                    # print(f"🌍 Detected language: {info.language} (probability: {info.language_probability:.2f})")
                     
                     return True, full_transcription, confidence
                     
                 except Exception as transcription_error:
-                    # Clean up temporary file on error
                     try:
                         os.unlink(tmp_file_path)
                     except:
                         pass
                     
                     print(f"❌ Transcription error: {transcription_error}")
-                    print(f"   Error type: {type(transcription_error).__name__}")
-                    import traceback
-                    print(f"   Traceback: {traceback.format_exc()}")
-                    
                     return False, f"Transcription failed: {str(transcription_error)}", 0.0
                 
             except Exception as e:
                 print(f"❌ Error during transcription setup: {e}")
-                print(f"   Error type: {type(e).__name__}")
-                import traceback
-                print(f"   Traceback: {traceback.format_exc()}")
                 return False, f"Transcription error: {str(e)}", 0.0
     
     def transcribe_audio_base64(self, audio_b64: str) -> Tuple[bool, str, float]:
@@ -289,42 +282,3 @@ class SpeechProcessor:
     def is_available(self):
         """Check if speech processor is available"""
         return self.model_loaded
-
-# Test function for standalone testing
-# def test_speech_processor():
-#     """Test the speech processor with a sample file"""
-#     import sys
-    
-#     if len(sys.argv) != 2:
-#         print("Usage: python speech_processor.py <audio_file.wav>")
-#         return
-    
-#     audio_file = sys.argv[1]
-    
-#     if not os.path.exists(audio_file):
-#         print(f"Audio file not found: {audio_file}")
-#         return
-    
-#     # Initialize processor
-#     processor = SpeechProcessor()
-    
-#     if not processor.initialize():
-#         print("Failed to initialize speech processor")
-#         return
-    
-#     # Read audio file
-#     with open(audio_file, 'rb') as f:
-#         audio_bytes = f.read()
-    
-#     # Transcribe
-#     success, transcription, confidence = processor.transcribe_audio(audio_bytes)
-    
-#     if success:
-#         print(f"✅ Transcription successful!")
-#         print(f"📝 Text: {transcription}")
-#         print(f"📊 Confidence: {confidence:.1f}%")
-#     else:
-#         print(f"❌ Transcription failed: {transcription}")
-
-if __name__ == "__main__":
-    test_speech_processor()
