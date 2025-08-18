@@ -3,6 +3,8 @@ import time
 import json
 from flask import Flask, request, jsonify, Response
 from flask_socketio import SocketIO, emit, join_room
+import os
+os.environ['KMP_DUPLICATE_LIB_OK'] = 'True'
 
 from client_manager import ClientManager
 from request_router import RequestRouter

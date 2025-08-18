@@ -7,6 +7,7 @@ from typing import Dict, Optional, Set, Any
 from dataclasses import dataclass
 
 from server import RobotServer
+from database import Database
 
 @dataclass
 class ClientInfo:
@@ -17,6 +18,7 @@ class ClientInfo:
     config_overrides: Dict[str, Any]
     registration_time: float
     last_activity: float
+    user_id: int
     
     def get_display_name(self) -> str:
         """Get display name for logging: [client_id] robot_name"""
@@ -27,19 +29,21 @@ class ClientManager:
     Manages client registration, server instance creation, and lifecycle.
     Handles client_init.json processing and server instance management.
     """
-    
-    def __init__(self):
+
+    def __init__(self, database: Optional[Database] = None):
         self.client_infos: Dict[str, ClientInfo] = {}       # client_id -> ClientInfo
         self.client_servers: Dict[str, RobotServer] = {}  # client_id -> server instance
         self.manager_lock = threading.RLock()
+        self.id_map: Dict[str, int] = {}
+        self.db = database
         
         # Valid modules for validation
-        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial'}
-        
+        self.valid_modules = {'gpt', 'emotion', 'speech', 'facial', 'rag'}
+
         # Cleanup configuration
         self.cleanup_task_running = False
         self.inactive_threshold = 30 * 60  # 30 minutes
-    
+
     def process_client_init(self, client_init_data: Dict[str, Any]) -> tuple[bool, str, Optional[ClientInfo]]:
         """
         Process client_init.json data and register client
@@ -79,6 +83,13 @@ class ClientManager:
             # Get config overrides
             config_overrides = client_init_data.get('config', {})
             
+            # Ensure user exists first
+            if client_id not in self.id_map:
+                user_id = self.db.create_user(name=robot_name)
+                self.id_map[client_id] = user_id
+            else:
+                user_id = self.id_map[client_id]
+            
             # Create client info
             client_info = ClientInfo(
                 client_id=client_id,
@@ -86,7 +97,8 @@ class ClientManager:
                 modules=modules_set,
                 config_overrides=config_overrides,
                 registration_time=time.time(),
-                last_activity=time.time()
+                last_activity=time.time(),
+                user_id=user_id
             )
             
             # Register the client
@@ -163,6 +175,9 @@ class ClientManager:
             'max_audio_length': 30,
             'sample_rate': 16000,
             
+            "database": self.db,  # Pass database instance for server to use
+            "user_id": client_info.user_id,  # Pass user ID for database operations
+            
                 **client_info.config_overrides  # Apply client-specific overrides
             }
             
@@ -200,6 +215,10 @@ class ClientManager:
         with self.manager_lock:
             client_info = self.client_infos.get(client_id)
             return client_info.modules if client_info else set()
+        
+    def get_user_id(self, client_id: str) -> Optional[int]:
+        """Return the numeric user_id for a given client_id, or None."""
+        return self.id_map.get(client_id)
     
     def update_client_activity(self, client_id: str):
         """Update last activity timestamp for client"""
