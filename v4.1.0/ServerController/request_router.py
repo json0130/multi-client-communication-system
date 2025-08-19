@@ -1,9 +1,10 @@
 # request_router.py - Request Routing and Processing Logic
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 from flask import jsonify, Response
 
 from client_manager import ClientManager
+from database import Database
 
 class RequestRouter:
     """
@@ -11,9 +12,10 @@ class RequestRouter:
     Contains all the business logic for processing different types of requests.
     """
     
-    def __init__(self, client_manager: ClientManager, socketio=None):  # ✅ FIXED: Add socketio parameter
+    def __init__(self, client_manager: ClientManager, socketio=None, database: Optional[Database] = None):  # ✅ FIXED: Add socketio parameter
         self.client_manager = client_manager
         self.socketio = socketio  # ✅ FIXED: Store socketio for broadcasting
+        self.db = database or Database()
     
     def route_client_request(self, client_id: str, endpoint: str, flask_request) -> tuple:
         """Route request to appropriate client server instance"""
