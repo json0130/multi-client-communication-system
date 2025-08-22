@@ -5,6 +5,7 @@ from flask import jsonify, Response
 
 from client_manager import ClientManager
 from database import Database
+from Modules.gpt_client import GPTClient
 
 class RequestRouter:
     """
@@ -56,6 +57,18 @@ class RequestRouter:
             print(f"❌ Request routing error for {display_name}: {e}")
             return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
+    def route_user_request(self, user_id: int, endpoint: str, flask_request):
+        """
+        Handle routes that operate on the user record itself (no client server).
+        """
+        try:
+            if endpoint == "infer_topics":
+                return self._handle_infer_topics(user_id, flask_request)
+            return jsonify({"error": f"Unknown user endpoint: {endpoint}"}), 404
+        except Exception as e:
+            print(f"❌ User-route error for {user_id}: {e}")
+            return jsonify({"error": "Internal server error", "details": str(e)}), 500
+    
 
     def _handle_chat_request(self, server, flask_request, display_name: str) -> tuple:
         """Handle chat request - requires GPT module"""
@@ -333,3 +346,28 @@ class RequestRouter:
                 "error": "Frame processing failed",
                 "details": str(e)
             }
+            
+    def _handle_infer_topics(self, user_id: int, flask_request):
+        sample_size = int(flask_request.json.get("sample_size", 100)) if flask_request.is_json else 100
+
+        # 1) fetch latest messages
+        messages = self.db.get_chat_messages(user_id, limit=sample_size)
+        if not messages:
+            return jsonify({"error": "No chat logs for user"}), 404
+
+        # 2) GPT inference
+        gpt = GPTClient()
+        if not gpt.setup_openai():
+            return jsonify({"error": "OPENAI_API_KEY not configured"}), 500
+
+        interests, conditions = gpt.infer_topics_and_conditions(messages)
+
+        # 3) update Supabase
+        self.db.update_user(user_id, interests=interests, health_conditions=conditions)
+
+        return jsonify({
+            "user_id": user_id,
+            "interests": interests,
+            "health_conditions": conditions,
+            "updated": True
+        }), 200
