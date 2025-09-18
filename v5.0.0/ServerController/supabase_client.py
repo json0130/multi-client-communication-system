@@ -1,13 +1,15 @@
 from supabase import create_client
 from datetime import datetime
-import json
-import os
 
 class SupabaseClient:
     def __init__(self, url, key):
         self.supabase = create_client(url, key)
     
-    async def register_robot(self, config: dict) -> dict:
+    def register_robot(self, config: dict) -> dict:
+        """
+        Register or update a robot in the database
+        Returns the registered robot data or None if failed
+        """
         try:
             robot_data = {
                 "client_id": config["client_id"],
@@ -23,7 +25,10 @@ class SupabaseClient:
                 .upsert(robot_data, on_conflict="client_id")\
                 .execute()
 
-            return result.data[0] if result.data else None
+            if result.data:
+                print(f"Robot {config['robot_name']} registered successfully")
+                return result.data[0]
+            return None
 
         except Exception as e:
             print(f"Error registering robot: {e}")

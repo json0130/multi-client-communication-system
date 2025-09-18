@@ -271,10 +271,10 @@ class ServerController:
             })
         
         @self.app.route('/register_client', methods=['POST'])
-        async def register_client():
+        def register_client():
             try:
                 config = request.json
-                result = await self.supabase_client.register_robot(config)
+                result = self.supabase_client.register_robot(config)
                 
                 if result:
                     return jsonify({
