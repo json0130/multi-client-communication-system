@@ -9,6 +9,7 @@ from request_router import RequestRouter
 from websocket_manager import WebSocketManager
 from database import Database 
 from shared_config import get_robot_registry
+from supabase_client import SupabaseClient
 
 import os
 os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OpenMP initialization error
@@ -27,8 +28,19 @@ class ServerController:
     Clients connect by sending client_init.json with their requirements.
     """
     
-    def __init__(self, port=5000):
+    def __init__(self, port=5000, supabase_url=None, supabase_key=None):
         self.port = port
+        
+        # Initialize Supabase client
+        if not supabase_url or not supabase_key:
+            supabase_url = os.getenv('SUPABASE_URL')
+            supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise ValueError("Supabase URL and key are required. Set them in environment variables or pass them as arguments.")
+        
+        self.supabase_client = SupabaseClient(supabase_url, supabase_key)
+        self.database = Database()
         
         # Initialize Flask app and SocketIO
         self.app = Flask(__name__)
@@ -45,17 +57,15 @@ class ServerController:
             allow_upgrades=True,
             cookie=False
         )
-        
-        # Initialize modular components
-        self.client_manager = ClientManager()
-        self.request_router = RequestRouter(self.client_manager, self.socketio)
 
          # 1. Load the robot registry once
         robot_registry = get_robot_registry()
 
         # 2. Pass it to the ClientManager
-        self.database = Database()
-        self.client_manager = ClientManager(self.database, robot_registry=robot_registry) # <-- PASS IT HERE
+        self.client_manager = ClientManager(
+            database=self.database,
+            robot_registry=robot_registry
+        )
         
         # The RequestRouter doesn't need it
         self.request_router = RequestRouter(
@@ -262,39 +272,26 @@ class ServerController:
         
         @self.app.route('/register_client', methods=['POST'])
         def register_client():
-            """Register a new client (alternative to WebSocket client_init)"""
             try:
-                data = request.json
-                if not data:
-                    return jsonify({"error": "JSON data required"}), 400
+                config = request.json
+                result = self.supabase_client.register_robot(config)
                 
-                success, message, client_info = self.client_manager.process_client_init(data)
-                
-                if success:
+                if result:
                     return jsonify({
                         "success": True,
-                        "message": message,
-                        "client_id": client_info.client_id,
-                        "robot_name": client_info.robot_name,
-                        "display_name": client_info.get_display_name(),
-                        "enabled_modules": list(client_info.modules),
-                        "endpoints": {
-                            "chat": f"/client/{client_info.client_id}/chat",
-                            "speech": f"/client/{client_info.client_id}/speech",
-                            "emotion": f"/client/{client_info.client_id}/emotion",
-                            "health": f"/client/{client_info.client_id}/health"
-                        }
-                    }), 201
+                        "message": f"Robot {config['robot_name']} registered successfully",
+                        "data": result
+                    }), 200
                 else:
                     return jsonify({
                         "success": False,
-                        "message": message
+                        "message": "Failed to register robot"
                     }), 400
-                
+                    
             except Exception as e:
                 return jsonify({
                     "success": False,
-                    "message": f"Registration failed: {e}"
+                    "message": str(e)
                 }), 500
         
         @self.app.route('/client/<client_id>/chat', methods=['POST'])
@@ -435,7 +432,16 @@ def main():
     print("   Production optimized version")
     print()
     
-    controller = ServerController(port=5000)
+    # Load from environment variables
+    supabase_url = os.getenv('SUPABASE_URL')
+    supabase_key = os.getenv('SUPABASE_KEY')
+    
+    controller = ServerController(
+        port=5000,
+        supabase_url=supabase_url,
+        supabase_key=supabase_key
+    )
+    
     controller.start()
 
 if __name__ == "__main__":

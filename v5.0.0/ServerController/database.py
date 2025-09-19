@@ -1,10 +1,20 @@
 # database.py
+import os
+from dotenv import load_dotenv
 from typing import Optional, List, Dict, Any
-from supabase_client import supabase
+from supabase_client import SupabaseClient
 
 class Database:
     def __init__(self):
-        self.client = supabase
+        load_dotenv()  # Load environment variables from .env file
+        
+        supabase_url = os.getenv('SUPABASE_URL')
+        supabase_key = os.getenv('SUPABASE_KEY')
+        
+        if not supabase_url or not supabase_key:
+            raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env file")
+            
+        self.client = SupabaseClient(url=supabase_url, key=supabase_key)
 
     def create_user(
         self,
@@ -22,7 +32,7 @@ class Database:
             "health_conditions": health_conditions or []
         }
         resp = (
-            self.client
+            self.client.supabase
             .table("users")
             .insert(payload)
             .execute()
@@ -34,7 +44,7 @@ class Database:
         Return the user row matching this user_id (integer), or None if not found.
         """
         resp = (
-            self.client
+            self.client.supabase
             .table("users")
             .select("*")
             .eq("user_id", user_id)
@@ -63,7 +73,7 @@ class Database:
             updates["health_conditions"] = health_conditions
 
         resp = (
-            self.client
+            self.client.supabase
             .table("users")
             .update(updates)
             .eq("user_id", user_id)
@@ -96,7 +106,7 @@ class Database:
         Fetch a user row by its primary key (integer).
         """
         resp = (
-            self.client
+            self.client.supabase
             .table("users")
             .select("*")
             .eq("user_id", user_id)
@@ -121,7 +131,7 @@ class Database:
         }
         
         resp = (
-            self.client
+            self.client.supabase
             .table("chat_logs")
             .insert(payload)
             .execute()
@@ -135,7 +145,7 @@ class Database:
         Return the newest <limit> user messages (string only) for topic inference.
         """
         resp = (
-            self.client.table("chat_logs")
+            self.client.supabase.table("chat_logs")
             .select("message")
             .eq("user_id", user_id)
             .order("id", desc=True)
