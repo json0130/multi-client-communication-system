@@ -349,7 +349,7 @@ class EmotionProcessor:
                         self.last_emotion_update = time.time()
 
                         distribution = self.emotion_tracker.get_emotion_distribution()
-                        print(f"Emotion: {stable_emotion} ({stable_confidence:.1f}%) | Raw: {emotion} ({confidence:.1f}%)")
+                        # print(f"Emotion: {stable_emotion} ({stable_confidence:.1f}%) | Raw: {emotion} ({confidence:.1f}%)")
 
                 # ✅ NEW: Add face overlay and store processed frame
                 processed_frame = self.add_face_overlay(processed_frame)

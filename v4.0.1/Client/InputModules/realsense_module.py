@@ -43,7 +43,7 @@ class RealSenseInputModule:
         
         # Camera settings
         self.camera_settings = self.config.get('camera_settings', {})
-        self.send_fps = self.camera_settings.get('send_fps', 1)
+        self.send_fps = self.camera_settings.get('send_fps', 10)  # Increased from 1 to 10 FPS
         self.jpeg_quality = self.camera_settings.get('jpeg_quality', 85)
         self.width = self.camera_settings.get('width', 640)
         self.height = self.camera_settings.get('height', 480)

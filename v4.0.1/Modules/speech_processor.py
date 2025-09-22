@@ -146,7 +146,7 @@ class SpeechProcessor:
                 sample_rate = wav_file.getframerate()
                 duration = frames / sample_rate
                 
-                print(f"🎵 Audio info: {duration:.2f}s, {sample_rate}Hz, {frames} frames")
+                # print(f"🎵 Audio info: {duration:.2f}s, {sample_rate}Hz, {frames} frames")
                 
                 # Check duration
                 if duration > self.max_audio_length:
@@ -184,7 +184,7 @@ class SpeechProcessor:
                     tmp_file.write(audio_bytes)
                     tmp_file_path = tmp_file.name
                 
-                print(f"🎤 Transcribing audio file: {tmp_file_path}")
+                # print(f"🎤 Transcribing audio file: {tmp_file_path}")
                 
                 try:
                     # Transcribe with faster-whisper
@@ -209,14 +209,14 @@ class SpeechProcessor:
                     for segment in segments:
                         segment_count += 1
                         text = segment.text.strip()
-                        print(f"   Segment {segment_count}: '{text}' (start: {segment.start:.1f}s, end: {segment.end:.1f}s, prob: {segment.avg_logprob:.2f})")
+                        # print(f"   Segment {segment_count}: '{text}' (start: {segment.start:.1f}s, end: {segment.end:.1f}s, prob: {segment.avg_logprob:.2f})")
                         
                         if text:
                             transcription_parts.append(text)
                             # Use average log probability as confidence proxy
                             confidences.append(segment.avg_logprob)
                     
-                    print(f"📊 Found {segment_count} segments, {len(transcription_parts)} with text")
+                    # print(f"📊 Found {segment_count} segments, {len(transcription_parts)} with text")
                     
                     # Clean up temporary file
                     os.unlink(tmp_file_path)
@@ -238,7 +238,7 @@ class SpeechProcessor:
                     
                     print(f"🎯 Final transcription: '{full_transcription}'")
                     print(f"📊 Confidence: {confidence:.1f}%")
-                    print(f"🌍 Detected language: {info.language} (probability: {info.language_probability:.2f})")
+                    # print(f"🌍 Detected language: {info.language} (probability: {info.language_probability:.2f})")
                     
                     return True, full_transcription, confidence
                     
@@ -291,40 +291,40 @@ class SpeechProcessor:
         return self.model_loaded
 
 # Test function for standalone testing
-def test_speech_processor():
-    """Test the speech processor with a sample file"""
-    import sys
+# def test_speech_processor():
+#     """Test the speech processor with a sample file"""
+#     import sys
     
-    if len(sys.argv) != 2:
-        print("Usage: python speech_processor.py <audio_file.wav>")
-        return
+#     if len(sys.argv) != 2:
+#         print("Usage: python speech_processor.py <audio_file.wav>")
+#         return
     
-    audio_file = sys.argv[1]
+#     audio_file = sys.argv[1]
     
-    if not os.path.exists(audio_file):
-        print(f"Audio file not found: {audio_file}")
-        return
+#     if not os.path.exists(audio_file):
+#         print(f"Audio file not found: {audio_file}")
+#         return
     
-    # Initialize processor
-    processor = SpeechProcessor()
+#     # Initialize processor
+#     processor = SpeechProcessor()
     
-    if not processor.initialize():
-        print("Failed to initialize speech processor")
-        return
+#     if not processor.initialize():
+#         print("Failed to initialize speech processor")
+#         return
     
-    # Read audio file
-    with open(audio_file, 'rb') as f:
-        audio_bytes = f.read()
+#     # Read audio file
+#     with open(audio_file, 'rb') as f:
+#         audio_bytes = f.read()
     
-    # Transcribe
-    success, transcription, confidence = processor.transcribe_audio(audio_bytes)
+#     # Transcribe
+#     success, transcription, confidence = processor.transcribe_audio(audio_bytes)
     
-    if success:
-        print(f"✅ Transcription successful!")
-        print(f"📝 Text: {transcription}")
-        print(f"📊 Confidence: {confidence:.1f}%")
-    else:
-        print(f"❌ Transcription failed: {transcription}")
+#     if success:
+#         print(f"✅ Transcription successful!")
+#         print(f"📝 Text: {transcription}")
+#         print(f"📊 Confidence: {confidence:.1f}%")
+#     else:
+#         print(f"❌ Transcription failed: {transcription}")
 
 if __name__ == "__main__":
     test_speech_processor()

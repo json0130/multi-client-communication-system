@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Emotion-Aware Robot Monitor</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <link href="https://fonts.googleapis.com/css?family=Inter:400,600,700&display=swap" rel="stylesheet">
+  <style>
+    body {
+      background: #f7f9fc;
+      font-family: 'Inter', Arial, sans-serif;
+      margin: 0;
+      padding: 0;
+      color: #232a37;
+    }
+    .container {
+      max-width: 1100px;
+      margin: 18px auto 0 auto;
+      padding: 0 8px;
+    }
+    .header {
+      font-size: 1.55rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 6px;
+    }
+    .status-bar {
+      background: #fff;
+      border-radius: 11px;
+      box-shadow: 0 2px 8px rgba(44,64,131,0.07);
+      padding: 8px 18px;
+      font-size: 1rem;
+      margin-bottom: 13px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .status-dot {
+      width: 12px; height: 12px; border-radius: 50%;
+      background: #ffcb05;
+      display: inline-block;
+      margin-right: 7px;
+    }
+    .main-grid {
+      display: grid;
+      grid-template-columns: 2.2fr 1fr;
+      gap: 15px;
+    }
+    .card {
+      background: #fff;
+      border-radius: 13px;
+      box-shadow: 0 2px 8px rgba(44,64,131,0.07);
+      padding: 13px 12px 14px 18px;
+      margin-bottom: 0;
+      position: relative;
+    }
+    .card h2 {
+      font-size: 1.09rem;
+      font-weight: 700;
+      margin: 0 0 8px 0;
+      letter-spacing: -0.5px;
+    }
+    .video-placeholder {
+      width: 100%;
+      height: 252px;
+      background: linear-gradient(135deg,#e8eaed,#c1c7d0);
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #7d869c;
+      font-size: 1rem;
+      margin-bottom: 9px;
+    }
+    .video-placeholder svg {
+      width: 60px;
+      height: 60px;
+      margin-bottom: 8px;
+    }
+    .emotion-label {
+      margin-top: 7px;
+      font-weight: 600;
+      font-size: 0.97rem;
+    }
+    .confidence-bar-bg {
+      width: 100%;
+      height: 7px;
+      background: #eceff3;
+      border-radius: 5px;
+      margin-top: 6px;
+    }
+    .confidence-bar {
+      width: 0%;
+      height: 100%;
+      background: #3ecf8e;
+      border-radius: 5px;
+      transition: width 0.4s;
+    }
+    .info-list {
+      font-size: 0.98rem;
+      margin: 0;
+      padding: 0;
+      list-style: none;
+    }
+    .info-list li { margin-bottom: 5px; }
+    .waiting { font-size: 0.94rem; color: #b7bac3; margin-top: 5px; }
+    .chat-list { font-size: 0.99rem; margin-top: 5px; }
+    .chat-bubble {
+      background: #f1f5fb;
+      border-radius: 11px 11px 11px 4px;
+      padding: 8px 13px;
+      color: #444;
+      display: inline-block;
+      max-width: 95%;
+      margin-bottom: 4px;
+    }
+    @media (max-width: 980px) {
+      .main-grid { grid-template-columns: 1fr; }
+      .video-placeholder { height: 140px; }
+    }
+    @media (max-width: 660px) {
+      .container { padding: 0 2vw; }
+      .card { padding: 10px 4px 11px 7px; }
+      .video-placeholder { height: 80px; }
+      .header { font-size: 1.12rem; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <span style="font-size:1.6rem;">🤖</span> Emotion-Aware Robot Monitor
+    </div>
+    <div class="status-bar">
+      <span class="status-dot"></span>
+      <span>⏳ Waiting for client connection (<strong>test</strong>)</span>
+    </div>
+    <div class="main-grid">
+      <div>
+        <div class="card">
+          <h2>📺 Live Video Stream</h2>
+          <div class="video-placeholder">
+            <svg fill="none" viewBox="0 0 60 60">
+              <rect x="10" y="15" width="40" height="30" rx="10" fill="#D6E6F2"/>
+              <circle cx="22" cy="30" r="6" fill="#98AFC7"/>
+              <circle cx="38" cy="30" r="6" fill="#98AFC7"/>
+              <rect x="28" y="46" width="4" height="2" rx="1" fill="#7D869C"/>
+            </svg>
+            <div style="margin-top:5px;">No video feed yet.<br><span style="font-size:0.95em;">Waiting for client to connect...</span></div>
+          </div>
+          <div class="emotion-label">Emotion: <span style="font-weight:400;">neutral</span></div>
+          <div class="confidence-bar-bg">
+            <div class="confidence-bar"></div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <div class="card" style="margin-bottom:8px;">
+          <h2>ℹ️ Client Information</h2>
+          <ul class="info-list">
+            <li><strong>Client ID:</strong> <span>test</span></li>
+            <li><strong>Modules:</strong> <span style="color:#bbb;">—</span></li>
+            <li><strong>Status:</strong> <span style="color:#b6bac8;">Waiting for client...</span></li>
+          </ul>
+        </div>
+        <div class="card">
+          <h2>💬 Live Chat</h2>
+          <div class="chat-list">
+            <div class="waiting">Waiting for chat messages...</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <!-- Optional: Remove footer for more vertical space
+    <div style="text-align:center;color:#b6bac8;font-size:0.94rem;margin-top:11px;">
+      <span>&copy; 2025</span>
+    </div>
+    -->
+  </div>
+</body>
+</html>

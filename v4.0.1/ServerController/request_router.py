@@ -213,7 +213,7 @@ class RequestRouter:
             
             emotion_data = server.get_current_emotion_state()
             
-            print(f"🎭 {display_name}: Current emotion: {emotion_data.get('emotion')} ({emotion_data.get('confidence', 0):.1f}%)")
+            # print(f"🎭 {display_name}: Current emotion: {emotion_data.get('emotion')} ({emotion_data.get('confidence', 0):.1f}%)")
             
             return jsonify({
                 "client_id": server.client_id,
@@ -336,7 +336,7 @@ class RequestRouter:
             # Log the result
             emotion = result.get('emotion', 'unknown')
             confidence = result.get('confidence', 0)
-            print(f"📸 {display_name}: Frame processed - {emotion} ({confidence:.1f}%)")
+            # print(f"📸 {display_name}: Frame processed - {emotion} ({confidence:.1f}%)")
             
             # Add client info to result
             result.update({

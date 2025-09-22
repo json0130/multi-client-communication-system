@@ -26,7 +26,7 @@ class ServerController:
     Clients connect by sending client_init.json with their requirements.
     """
     
-    def __init__(self, port=5000):
+    def __init__(self, port=5002):
         self.port = port
         
         # Initialize Flask app and SocketIO
@@ -311,23 +311,15 @@ class ServerController:
 
         @self.app.route('/client/<client_id>/monitor', methods=['GET'])
         def client_monitor(client_id):
-            """Serve individual client monitor page"""
             try:
                 server = self.client_manager.get_client_server(client_id)
                 if not server:
-                    client_info = self.client_manager.get_client_info(client_id)
-                    if client_info:
-                        server = self.client_manager.get_or_create_server_instance(client_id)
-                    
-                    if not server:
-                        return "Server not found", 404
-                    
-                if hasattr(server, 'get_individual_monitor_html'):
-                    html = server.get_individual_monitor_html()
-                    return Response(html, mimetype='text/html')
-                else:
-                    return "Method not found", 500
-                    
+                    # If not found, create a temporary RobotServer instance (no modules)
+                    from server import RobotServer
+                    server = RobotServer.create_for_client(client_id, set(), {})
+                # Always call the method (even if modules is empty)
+                html = server.get_individual_monitor_html()
+                return Response(html, mimetype='text/html')
             except Exception as e:
                 return f"Error: {e}", 500
 
@@ -398,6 +390,7 @@ class ServerController:
             self.client_manager.start_cleanup_task()
             
             print("✅ Server ready!")
+            print(f"🖥️  Test Monitor UI: http://localhost:{self.port}/client/test/monitor")
             
             # Start the Flask-SocketIO server
             self.socketio.run(
@@ -432,7 +425,7 @@ def main():
     print("   Production optimized version")
     print()
     
-    controller = ServerController(port=5000)
+    controller = ServerController(port=5002)
     controller.start()
 
 if __name__ == "__main__":
