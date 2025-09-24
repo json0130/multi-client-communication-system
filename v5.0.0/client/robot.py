@@ -35,7 +35,6 @@ class SimpleConcurrentClient(BasicClient):
         super().__init__(config_file)
 
         def on_chat_response(data):
-            print(f"\n>>> DEBUG: 'on_chat_response' HANDLER TRIGGERED! Data received: {data}\n")
             response = data.get('response')
             if response:
                 # Use the registered console_output module to display the message
@@ -87,7 +86,6 @@ class SimpleConcurrentClient(BasicClient):
         logger.warning(f"⚠️ Cannot send command '{command}' - Arduino not connected") 
         return False
 
-    # --- NEW, MORE ROBUST DETECTION METHOD ---
     def _detect_arduino_port(self) -> Optional[str]:
         """
         Auto-detect the Arduino/ESP32 port by looking for common identifiers.

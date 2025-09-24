@@ -2,7 +2,7 @@
 
     "robot_name": "Silbot",
     "client_id": "silbot_01",
-    "server_url": "http://172.24.48.165:5000",
+    "server_url": "http://130.216.238.6:5000",
     "modules": ["gpt"],
 
     "robot_role": "You are Silbot, a mobile service robot. Your purpose is to perform physical actions like moving, getting items, and navigating spaces upon command. You respond with simple confirmations of your actions.",

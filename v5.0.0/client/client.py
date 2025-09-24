@@ -1,4 +1,3 @@
-
 # client.py - Base Client and Abstract Classes
 import json
 import time
@@ -363,7 +362,10 @@ class BasicClient:
             if not self._check_server_health():
                 logger.error("❌ Server is not healthy")
                 return False
-            
+
+            # Register client via HTTP before WebSocket connection
+            self.register_via_http()
+
             if not self.server_connection.connect():
                 logger.error("❌ Failed to connect to server")
                 return False
@@ -442,3 +444,15 @@ class BasicClient:
         except Exception as e:
             logger.error(f"❌ Cannot connect to server: {e}")
             return False
+    
+    def register_via_http(self):
+        print("📡 Registering client via HTTP...")
+        url = f"{self.server_connection.server_url}/register_client"
+        payload = {
+            "robot_name": self.config.get('robot_name', 'BasicClient'),
+            "modules": self.config.get('modules', ['gpt']),
+            "client_id": self.config.get('client_id', 'basic_client_001'),
+            "robot_role": self.config.get('robot_role', 'default')
+        }
+        response = requests.post(url, json=payload)
+        print("HTTP registration response:", response.json())

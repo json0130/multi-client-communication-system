@@ -105,7 +105,6 @@ class RequestRouter:
                                                room=target_server.client_id)
                         except Exception as e:
                             print(f"❌ Error in background task for '{target_server.client_id}': {e}")
-                    # --- End of background task ---
                     
                     # 1. Define a function to handle the broadcast in the background
                     def broadcast_command_async(command, source_name, target_name):

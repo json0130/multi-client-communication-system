@@ -162,18 +162,16 @@ class RobotServer:
                 print(f"  🤖 GPT module disabled")
                 
             # Initialize RAG Module
-            if 'rag' in self.enabled_modules:
-                try:
-                    if self.user_id is not None and self.config.get("database"):
-                        self.rag = RagModule(self.user_id, self.config["database"].client)
-                        print("    ✅ RAG module initialized")
-                        success_count += 1
-                    else:
-                        print("    ❌ RAG init skipped (missing user_id or database)")
-                except Exception as e:
-                    print(f"    ❌ RAG initialization failed: {e}")
-            else:
-                print("  📄 RAG module disabled")
+            
+            try:
+                if self.user_id is not None and self.config.get("database"):
+                    self.rag = RagModule(self.user_id, self.config["database"].client)
+                    print("    ✅ RAG module initialized")
+                    success_count += 1
+                else:
+                    print("    ❌ RAG init skipped (missing user_id or database)")
+            except Exception as e:
+                print(f"    ❌ RAG initialization failed: {e}")
             
             # Initialize Speech Processing Module
             if 'speech' in self.enabled_modules:

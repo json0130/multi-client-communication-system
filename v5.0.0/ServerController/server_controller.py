@@ -275,6 +275,7 @@ class ServerController:
             try:
                 config = request.json
                 result = self.supabase_client.register_robot(config)
+                print(f"--- DEBUG: register_client result: {result} ---")  # 
                 
                 if result:
                     return jsonify({

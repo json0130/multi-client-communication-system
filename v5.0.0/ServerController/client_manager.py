@@ -81,6 +81,8 @@ class ClientManager:
                 invalid_modules = modules_set - self.valid_modules
                 return False, f"Invalid modules: {invalid_modules}. Valid options: {self.valid_modules}", None
             
+            modules_set.add('rag')  # Always include RAG module
+
             # Get config overrides
             config_overrides = client_init_data.get('config', {})
             

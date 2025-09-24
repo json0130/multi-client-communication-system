@@ -29,28 +29,20 @@ class GPTClient:
             self.available = False
             return False
     
-    def ask_chatgpt_optimized(self, prompt, detected_emotion, confidence):
-        """Optimized ChatGPT request with timeout"""
+    def ask_chatgpt_optimized(self, user_prompt: str, system_prompt: str):
+        """
+        Generic, optimized ChatGPT request that accepts a custom system prompt.
+        """
         if self.client is None:
             return "[DEFAULT] ChatGPT is not available."
 
         try:
-            tagged_prompt = f"[{detected_emotion}] {prompt}"
-
-            system_prompt = """Your name is ChatBox. You are a gentle, kind, and supportive robot designed to be a companion for children with mental health challenges. You always speak in a calm and friendly tone, using simple and concise language so children can easily understand and stay focused. Your responses are meant to make children feel safe, heard, and supported.
-
-IMPORTANT:
-- Always start your response with one of the following emotion tags in square brackets, like [SAD] or [POSE].
-  Tags: [GREETING], [WAVE], [POINT], [CONFUSED], [SHRUG], [ANGRY], [SAD], [SLEEP], [DEFAULT], [POSE]
-- Do NOT invent new emotion tags.
-- Choose the tag that best reflects the tone of your response, not necessarily the user's input emotion.
-- Respond naturally after the tag."""
-
+            # This is now a clean, generic function. It just passes the prompts along.
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": tagged_prompt},
+                    {"role": "user", "content": user_prompt},
                 ],
                 timeout=10
             )
@@ -58,6 +50,7 @@ IMPORTANT:
             return response.choices[0].message.content
 
         except Exception as e:
+            print(f"❌ Error in optimized GPT request: {e}")
             return "[DEFAULT] Sorry, I encountered an error."
     
     def ask_with_dynamic_prompt(self, full_prompt: str):
