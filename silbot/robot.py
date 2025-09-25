@@ -29,8 +29,26 @@ class SimpleConcurrentClient(BasicClient):
     
     def __init__(self, config_file: str = "client_config.json"):
         super().__init__(config_file)
+
+        def on_chat_response(data):
+            response = data.get('response')
+            if response:
+                if 'console_output' in self.output_modules:
+                    # This calls the method in your console_output.py to print the message
+                    self.output_modules['console_output'].process_output(response)
+                else:
+                    print(f"\n🤖 Server Response: {response}")
+
+                if 'edge_tts_output' in self.output_modules:
+                    self.output_modules['edge_tts_output'].process_output(response)        
+
+        # Register the handler with the socketio client instance
+        if self.server_connection and self.server_connection.sio:
+            self.server_connection.sio.on('chat_response', on_chat_response)
+        
+        # This line runs after the handler is set up
         self.setup_all_modules()
-    
+
     def setup_all_modules(self):
         """Setup all modules with sensible defaults based on simple config"""
         
@@ -53,6 +71,7 @@ class SimpleConcurrentClient(BasicClient):
             }
             voice_input = VoiceInputModule("voice_input", voice_config)
             self.register_input_module(voice_input)
+            voice_input.start()
         
         # 3. Camera Input (if emotion module enabled)
         if 'emotion' in self.config.get('modules', []):
@@ -87,7 +106,8 @@ class SimpleConcurrentClient(BasicClient):
         }
         console_output = ConsoleOutputModule("console_output", console_config)
         self.register_output_module(console_output)
-        
+        console_output.start()
+
         # 2. EDGE TTS Output
         logger.info("🎙️ Setting up Edge text-to-speech...")
         
@@ -106,6 +126,7 @@ class SimpleConcurrentClient(BasicClient):
         edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
         if self.register_output_module(edge_tts):
             logger.info("   ✅ Using Microsoft Edge TTS (plughw:3,0)")
+            edge_tts.start()
         else:
             logger.info("   🔄 Edge TTS not available, trying espeak...")
             

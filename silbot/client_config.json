@@ -1,15 +1,25 @@
 {
 
     "robot_name": "Silbot",
-    "client_id": "silbot_001",
+    "client_id": "silbot_01",
     "server_url": "http://130.216.238.6:5000",
-    "modules": ["gpt","speech"],
+    "modules": ["gpt","speech","facial"],
+
+    "robot_role": "You are Silbot, a mobile service robot. Your purpose is to perform physical actions like moving, getting items, and navigating spaces upon command. You respond with simple confirmations of your actions.",
+
     "voice_config": {
-        "input_device_index": 11,
+        "input_device_index": 0,
         "sample_rate": 48000,
         "channels": 1,
         "chunk_size": 1024,
         "max_record_time": 30,
         "prefer_usb": true
+    },
+   
+    "hardware": {
+        "arduino_port": "/dev/ttyUSB0",
+        "arduino_baud": 115200,
+        "arduino_timeout": 2.0
     }
 }
+
