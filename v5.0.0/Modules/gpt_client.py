@@ -2,6 +2,14 @@
 import os
 import re
 from openai import OpenAI
+from collections import deque
+from dataclasses import dataclass
+from typing import Deque
+
+@dataclass
+class Message:
+    role: str
+    content: str
 
 class GPTClient:
     """OpenAI GPT client for emotion-aware chat responses"""
@@ -9,6 +17,8 @@ class GPTClient:
     def __init__(self):
         self.client = None
         self.available = False
+        self.conversation_history: Deque[Message] = deque(maxlen=20)
+
         
     def setup_openai(self):
         """Setup OpenAI client"""
@@ -37,17 +47,26 @@ class GPTClient:
             return "[DEFAULT] ChatGPT is not available."
 
         try:
+            # Add user message to history
+            self.conversation_history.append(Message("user", user_prompt))
+            # Convert history to message format
+            messages = [{"role": "system", "content": system_prompt}]
+            # Add conversation history
+            for msg in self.conversation_history:
+                messages.append({"role": msg.role, "content": msg.content})
+            
             # This is now a clean, generic function. It just passes the prompts along.
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                messages=messages,
                 timeout=10
             )
 
-            return response.choices[0].message.content
+            assistant_response = response.choices[0].message.content
+            # Store assistant's response in history
+            self.conversation_history.append(Message("assistant", assistant_response))
+            
+            return assistant_response
 
         except Exception as e:
             print(f"❌ Error in optimized GPT request: {e}")
@@ -74,20 +93,38 @@ class GPTClient:
                 system_content = "You are a helpful AI assistant."
                 user_content = full_prompt
 
+            # Add user message to history
+            self.conversation_history.append(Message("user", user_content))
+
+            # Convert history to message format
+            messages = [{"role": "system", "content": system_content}]
+            # Add conversation history
+            for msg in self.conversation_history:
+                messages.append({"role": msg.role, "content": msg.content})
+
             response = self.client.chat.completions.create(
                 model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": user_content},
-                ],
+                messages=messages,
                 timeout=20
             )
 
-            return response.choices[0].message.content
+            assistant_response = response.choices[0].message.content
+            # Store assistant's response in history
+            self.conversation_history.append(Message("assistant", assistant_response))
+
+            return assistant_response
 
         except Exception as e:
             print(f"❌ Error in dynamic prompt request: {e}")
             return "[DEFAULT] Sorry, I encountered an error during the advanced request."
+    
+    def clear_history(self):
+        """Clear conversation history"""
+        self.conversation_history.clear()
+
+    def get_conversation_history(self) -> list[Message]:
+        """Get current conversation history"""
+        return list(self.conversation_history)
     
     def extract_emotion_tag(self, text):
         """Extract emotion tag from response"""
