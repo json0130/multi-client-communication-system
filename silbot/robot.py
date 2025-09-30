@@ -14,6 +14,7 @@ from InputModules.voice_input import VoiceInputModule
 #from InputModules.camera_input import CameraInputModule
 from InputModules.realsense_input import RealSenseInputModule
 
+from OutputModules.robotics_output import RoboticsOutputModule
 from OutputModules.console_output import ConsoleOutputModule
 from OutputModules.edge_tts_output import EdgeTTSOutputModule
 from OutputModules.tts_output import TTSOutputModule, PyttsxTTSOutputModule
@@ -141,6 +142,17 @@ class SimpleConcurrentClient(BasicClient):
             from OutputModules.tts_output import TTSOutputModule
             tts_output = TTSOutputModule("tts_output", espeak_config)
             self.register_output_module(tts_output)
+            
+        # 3. Robotics Output
+        logger.info("🤖 Setting up Robotics control...")
+        robotics_config = {
+            'host': 'localhost',  # Because of --network=host, localhost works.
+            'port': 7790          # Port we chose for the server
+        }
+        robotics_output = RoboticsOutputModule("robotics_output", robotics_config)
+        self.register_output_module(robotics_output)
+        robotics_output.start()
+        
     
     def print_startup_info(self):
         """Print information about what's running"""
