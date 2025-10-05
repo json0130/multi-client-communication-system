@@ -34,6 +34,8 @@ class SimpleConcurrentClient(BasicClient):
         def on_chat_response(data):
             response = data.get('response')
             if response:
+                if 'robotics_output' in self.output_modules:
+                    self.output_modules['robotics_output'].process_output(response)
                 if 'console_output' in self.output_modules:
                     # This calls the method in your console_output.py to print the message
                     self.output_modules['console_output'].process_output(response)

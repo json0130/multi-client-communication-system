@@ -42,9 +42,12 @@ if __name__ == '__main__':
                 data = conn.recv(1024)
                 if not data:
                     break
-                message = data.decode('utf-8')
-                if message == "Think":
-                    gesture_pub.publish("Think")
-                elif message == "wave":
+                message = data.decode('utf-8').lower()
+                print(f"Received full response: {message}")
+                
+                if "hello" in message or "hi" in message:
                     gesture_pub.publish("wave")
-                # Add more logic here to handle other commands
+                elif "i think" in message or "i believe" in message:
+                    gesture_pub.publish("Think")
+                else:
+                    gesture_pub.publish("Speak_Start")
