@@ -44,7 +44,7 @@ if __name__ == '__main__':
                     # Wrap in try/except to handle socket errors, but let recv block
                     try:
                         data = conn.recv(1024)
-                        # ✅ CRITICAL FIX: Check for zero bytes (client disconnect)
+                        # CRITICAL FIX: Check for zero bytes (client disconnect)
                         if not data:
                             print("Client {} disconnected.".format(addr))
                             break # Exit inner loop
