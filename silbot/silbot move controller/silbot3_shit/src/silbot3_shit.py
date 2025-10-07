@@ -42,6 +42,8 @@ if __name__ == '__main__':
                 # Inner loop: Handle communication with the current client
                 while not rospy.is_shutdown():
                     data = conn.recv(1024)
+                    if data:
+                        print("Received data: {}".format(data))
                     
                     # If data is empty (b''), the client has disconnected
                     # if not data:
@@ -49,7 +51,8 @@ if __name__ == '__main__':
                     #     break # Exit inner loop, go back to s.accept()
                         
                     message = data.decode('utf-8').lower()
-                    print("Received full response: {}".format(message))
+                    if message:
+                        print("Received full response: {}".format(message))
                     
                     # --- FIX: Handle the handshake message sent by the client ---
                     if message == "client_connected_ok":
@@ -58,11 +61,13 @@ if __name__ == '__main__':
                     # -------------------------------------------------------------
                     
                     if "hello" in message or "hi" in message:
+                        print("received hello or hi")
                         gesture_pub.publish("wave")
-                    elif "i think" in message or "i believe" in message:
+                    elif "think" in message or "believe" in message:
                         gesture_pub.publish("Think")
-                    else:
-                        gesture_pub.publish("Speak_Start")
+                        print("received i think")
+                    #else:
+                        #gesture_pub.publish("Speak_Start")
                         
             except KeyboardInterrupt:
                 # Allow outer loop to break cleanly
