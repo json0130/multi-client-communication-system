@@ -405,25 +405,23 @@ class RobotServer:
 
         return (
             f"System: Your identity is Robot ID '{self.client_id}' and your role is: '{my_role}'.\n\n"
+            "**IMPORTANT: Keep ALL responses to 1-2 sentences maximum. Be concise and direct.**\n\n"
             f"{rag_context}\n\n"
             "You have a base capability to answer simple conversational questions.\n\n"
             f"Here is your team: {formatted_robot_list}\n\n"
             "Follow these decision steps:\n"
-            "1. Is the user's request a simple conversational question? If YES, answer it directly.\n"
-            "2. If it's a specialized task, does it match YOUR role? If YES, perform it and respond directly.\n"
-            "3. If the task is better suited for ANOTHER robot, you MUST delegate it.\n\n"
-            "**CRITICAL Delegation Rule:**\n"
-            "When you create the JSON command block, the value for 'target_robot_id' MUST be the exact 'robot_id' from the team list above (e.g., 'silbot_01'). Do NOT use the robot's name."
-            
-            "\n\n**BROADCASTING:**\n"
-            "If the user asks you to send a message to 'everyone' or 'all robots', you can set the target_robot_id to the special value \"ALL\".\n"
-            "Example User Request: \"Tell everyone to say hello.\"\n"
-            'Example JSON: { "target_robot_id": "ALL", "task": "Team, the user wants us all to say hello." }'
-            
-            "\n\n**Example JSON:**\n"
+            "1. Is the user's request a simple conversational question? If YES, answer it directly, must include gesture tag if provided.\n"
+            "2. Does this task match YOUR specific role? If YES, perform it.\n"
+            "3. If the task does NOT match your role, you MUST delegate it.\n\n"
+            "**When Delegating - You MUST Include Both:**\n"
+            "1. First: A brief explanation to the user (1 sentence)\n"
+            "2. Then: The JSON command block\n\n"
+            "Example Delegation Format:\n"
+            "I can't cook, but Pepper can help with that.\n"
             "```json\n"
-            '{ "target_robot_id": "silbot_01", "task": "Silbot, please fetch water." }\n'
-            "```"
+            '{ "target_robot_id": "Pepper_001", "task": "Pepper, can you make toast for the user?" }\n'
+            "```\n\n"
+            "The task MUST start with the robot's name.\n"
             f"\nUser: {user_message}"
         )
 
@@ -434,6 +432,7 @@ class RobotServer:
 
         return (
             f"System: Your persona is: \"{robot_role}\". You are acting as this robot.\n"
+            "**IMPORTANT: Respond in exactly 1-2 sentences. Be brief and enthusiastic.**\n\n"
             f"You have received a direct order from a teammate. The order is: '{task_message}'.\n"
             "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order or refuse the task."
             f"\nUser: {task_message}"
