@@ -5,7 +5,7 @@ import logging
 from typing import Optional
 
 # --- NEW IMPORTS ---
-import serial.tools.list_ports
+#import serial.tools.list_ports
 
 # Add modules to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
