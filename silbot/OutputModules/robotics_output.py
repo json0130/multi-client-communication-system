@@ -37,6 +37,7 @@ class RoboticsOutputModule:
         if isinstance(command, dict):
             # This handles the call from BasicClient.process_server_response
             command_to_send = command.get('text', '')
+            print(f"Extracted command from dict: {command_to_send.lower()}")
             if "hello" in command_to_send.lower() or "hi" in command_to_send.lower():
                 command_to_send = "hello"
             elif "think" in command_to_send.lower() or "believe" in command_to_send.lower():
