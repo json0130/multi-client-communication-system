@@ -17,37 +17,48 @@ from gptpy2.chat_server import ChatServer
 from gptpy2.stt import RecordAudio
 
 if __name__ == '__main__':
-    rospy.init_node('gptpy', anonymous=True)
-    gesture_pub = rospy.Publisher('gpttopic', String, queue_size=1000)
-    # gesture_sub = rospy.Subscriber('gesturetopic', Int32, thunk_callback)
-    
-    # Set up a server on the host to listen for the Docker container
-    HOST = '0.0.0.0' # Listen on all available network interfaces
-    PORT = 7790      # Choose a new port for this communication
-
-    
-    # while True:
-    #     gesture_pub.publish("Think")
-    #     time.sleep(3)
-    #     gesture_pub.publish("wave")
+    try:
+        rospy.init_node('gptpy', anonymous=True)
+        gesture_pub = rospy.Publisher('gpttopic', String, queue_size=1000)
         
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        HOST = '0.0.0.0'
+        PORT = 7790
+        
+        # Create socket without 'with' statement
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         s.bind((HOST, PORT))
         s.listen()
-        print(f"Listening for Docker connection on {HOST}:{PORT}")
+        print("Listening for Docker connection on {}:{}".format(HOST, PORT))
+        
         conn, addr = s.accept()
-        with conn:
-            print(f"Connected by {addr}")
-            while True:
-                data = conn.recv(1024)
-                if not data:
-                    break
-                message = data.decode('utf-8').lower()
-                print(f"Received full response: {message}")
+        print("Connected by {}".format(addr))
+        
+        while True:
+            data = conn.recv(1024)
+            if not data:
+                break
+            message = data.decode('utf-8').lower()
+            print("Received full response: {}".format(message))
+            
+            if "hello" in message or "hi" in message:
+                gesture_pub.publish("wave")
+            elif "i think" in message or "i believe" in message:
+                gesture_pub.publish("Think")
+            else:
+                gesture_pub.publish("Speak_Start")
                 
-                if "hello" in message or "hi" in message:
-                    gesture_pub.publish("wave")
-                elif "i think" in message or "i believe" in message:
-                    gesture_pub.publish("Think")
-                else:
-                    gesture_pub.publish("Speak_Start")
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
+    except Exception as e:
+        print("Error: {}".format(e))
+    finally:
+        # Clean up
+        try:
+            conn.close()
+        except:
+            pass
+        try:
+            s.close()
+        except:
+            pass
