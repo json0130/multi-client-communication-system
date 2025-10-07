@@ -33,8 +33,9 @@ class RoboticsOutputModule:
         try:
             logger.info(f"🔄 Connecting to Silbot at {self.host}:{self.port}...")
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            self.conn.settimeout(None)
             self.conn.connect((self.host, self.port))
-            self.conn.settimeout(None) 
             
             # --- FIX: Send an immediate handshake/ping ---
             handshake_message = "client_connected_ok"

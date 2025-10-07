@@ -36,6 +36,7 @@ if __name__ == '__main__':
             try:
                 # Blocks until a client connects
                 conn, addr = s.accept()
+                conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
                 print("Connected by {}".format(addr))
                 
                 # Inner loop: Handle communication with the current client
