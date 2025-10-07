@@ -10,6 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # default config attributes
 from database import Database
+from supabase_client import SupabaseClient
 db = Database()
 uid = db.create_user(name="Standalone")  # Create a default user for standalone mode
 
@@ -72,6 +73,10 @@ class RobotServer:
         self.monitor_quality = config.get('monitor_quality', 50)
         self.monitor_resolution = config.get('monitor_resolution', (320, 240))
         self.broadcast_throttle = config.get('broadcast_throttle', 0.2)  # 5 updates per second max
+
+        # ✅ ADD THIS DEBUG LINE:
+        print(f"🔍 DEBUG [{client_id}]: config keys = {list(config.keys())}")
+        print(f"🔍 DEBUG [{client_id}]: robot_role = {config.get('robot_role', 'NOT FOUND')}")
         
         print(f"🎯 Created server instance for client '{self.client_id}' with modules: {list(self.enabled_modules)}")
         print(f"🚀 Performance settings: {self.monitor_resolution} @ {self.monitor_quality}% quality, skip ratio: {self.frame_skip_ratio}")
@@ -162,16 +167,18 @@ class RobotServer:
                 print(f"  🤖 GPT module disabled")
                 
             # Initialize RAG Module
-            
-            try:
-                if self.user_id is not None and self.config.get("database"):
-                    self.rag = RagModule(self.user_id, self.config["database"].client)
-                    print("    ✅ RAG module initialized")
-                    success_count += 1
-                else:
-                    print("    ❌ RAG init skipped (missing user_id or database)")
-            except Exception as e:
-                print(f"    ❌ RAG initialization failed: {e}")
+            if 'rag' in self.enabled_modules:
+                try:
+                    if self.user_id is not None and self.config.get("database"):
+                        self.rag = RagModule(self.user_id, self.config["database"].client)
+                        print("    ✅ RAG module initialized")
+                        success_count += 1
+                    else:
+                        print("    ❌ RAG init skipped (missing user_id or database)")
+                except Exception as e:
+                    print(f"    ❌ RAG initialization failed: {e}")
+            else:
+                print("  📄 RAG module disabled")
             
             # Initialize Speech Processing Module
             if 'speech' in self.enabled_modules:
@@ -305,533 +312,31 @@ class RobotServer:
             print(f"❌ Image processing error for '{self.client_id}': {e}")
             raise RuntimeError(f"Image processing failed: {e}")
 
-    def _prepare_monitor_frame(self, original_frame):
-        """Prepare optimized frame for monitor display"""
-        try:
-            import cv2
-            
-            # 🚀 PERFORMANCE: Resize frame to monitor resolution for faster streaming
-            height, width = original_frame.shape[:2]
-            monitor_width, monitor_height = self.monitor_resolution
-            
-            # Only resize if the frame is larger than monitor resolution
-            if width > monitor_width or height > monitor_height:
-                # Calculate aspect ratio preserving resize
-                aspect_ratio = width / height
-                if aspect_ratio > monitor_width / monitor_height:
-                    new_width = monitor_width
-                    new_height = int(monitor_width / aspect_ratio)
-                else:
-                    new_height = monitor_height
-                    new_width = int(monitor_height * aspect_ratio)
-                
-                # 🚀 PERFORMANCE: Use faster interpolation method
-                resized_frame = cv2.resize(original_frame, (new_width, new_height), 
-                                        interpolation=cv2.INTER_LINEAR)
-                return resized_frame
-            else:
-                return original_frame.copy()
-                
-        except Exception as e:
-            print(f"⚠️ {self.client_id}: Error preparing monitor frame: {e}")
-            return original_frame.copy()
-
-    def get_individual_monitor_html(self):
-        """Get customized HTML for this client's individual monitor"""
-        print(f"🔍 DEBUG: get_individual_monitor_html called for client: {self.client_id}")
-
-        # Build the HTML with corrected JavaScript
-        html = f'''<!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Monitor: {self.client_id}</title>
-        <style>
-            body {{
-                font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-                margin: 0; padding: 20px; background-color: #f0f2f5; color: #1c1e21;
-            }}
-            .container {{ max-width: 1200px; margin: 0 auto; }}
-            .header, .card {{ background: #fff; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-            .content {{ display: grid; grid-template-columns: 2fr 1fr; gap: 20px; }}
-            .video-container {{ position: relative; background: #000; border-radius: 8px; overflow: hidden; aspect-ratio: 4/3; }}
-            #videoStream {{ width: 100%; height: 100%; object-fit: contain; }}
-            .emotion-display {{ 
-                position: absolute; top: 10px; left: 10px; background: rgba(0,0,0,0.8); color: white; 
-                padding: 15px; border-radius: 8px; font-weight: bold; min-width: 200px;
-            }}
-            .status {{ padding: 10px; margin: 10px 0; border-radius: 5px; border: 1px solid; font-weight: bold; }}
-            .connected {{ background: #e8f5e8; border-color: #4caf50; color: #2e7d32; }}
-            .disconnected {{ background: #ffebee; border-color: #f44336; color: #c62828; }}
-            .connecting {{ background: #fff3e0; border-color: #ff9800; color: #ef6c00; }}
-            .chat-messages {{ 
-                height: 300px; overflow-y: auto; border: 1px solid #ddd; 
-                padding: 15px; margin: 15px 0; background: #fafafa; border-radius: 8px;
-            }}
-            .message {{ margin: 10px 0; padding: 12px; border-radius: 8px; }}
-            .user-message {{ background: #e3f2fd; text-align: right; margin-left: 20%; }}
-            .bot-message {{ background: #f3e5f5; margin-right: 20%; }}
-            .system-message {{ background: #fff3e0; font-style: italic; text-align: center; margin: 5px 0; padding: 8px; }}
-            .debug-panel {{ 
-                background: #f5f5f5; border: 1px solid #ddd; border-radius: 8px; 
-                padding: 15px; margin: 15px 0; font-family: monospace; font-size: 12px; 
-            }}
-            .debug-title {{ font-weight: bold; margin-bottom: 10px; color: #333; }}
-            .debug-line {{ margin: 2px 0; color: #666; }}
-            .emotion-value {{ font-size: 18px; margin: 5px 0; }}
-            .confidence-bar {{
-                width: 100%; height: 8px; background: #ddd; border-radius: 4px; 
-                overflow: hidden; margin: 8px 0;
-            }}
-            .confidence-fill {{ height: 100%; background: #4caf50; transition: width 0.3s ease; }}
-            @media (max-width: 1024px) {{
-                .content {{ grid-template-columns: 1fr; }}
-            }}
-        </style>
-    </head>
-    <body>
-        <div class="container">
-            <div class="header">
-                <h1>🤖 Monitor: {self.client_id}</h1>
-                <div id="connectionStatus" class="status connecting">🔄 Connecting...</div>
-                <div class="debug-panel">
-                    <div class="debug-title">🔍 Connection Debug</div>
-                    <div id="debugOutput">Initializing...</div>
-                </div>
-            </div>
-            
-            <div class="content">
-                <div class="card video-section">
-                    <h2>📺 Live Video Stream</h2>
-                    <div class="video-container">
-                        <img id="videoStream" src="/client/{self.client_id}/live_stream" alt="Live Stream">
-                        <div class="emotion-display">
-                            <div>Emotion: <span id="emotionText">neutral</span></div>
-                            <div class="emotion-value">
-                                Confidence: <span id="confidenceText">0%</span>
-                            </div>
-                            <div class="confidence-bar">
-                                <div class="confidence-fill" id="confidenceFill" style="width: 0%;"></div>
-                            </div>
-                            <div style="font-size: 12px; margin-top: 8px;">
-                                Last Update: <span id="lastUpdate">Never</span>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="card info-section">
-                    <h2>ℹ️ Client Information</h2>
-                    <p><strong>Client ID:</strong> {self.client_id}</p>
-                    <p><strong>Modules:</strong> {", ".join(list(self.enabled_modules))}</p>
-                    <p><strong>Status:</strong> <span id="clientStatus">Loading...</span></p>
-                    
-                    <h2>💬 Live Chat</h2>
-                    <div class="chat-messages" id="chatMessages">
-                        <div class="system-message">Waiting for chat messages...</div>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script src="https://cdn.socket.io/4.5.4/socket.io.min.js"></script>
-        <script>
-            console.log('🚀 Starting enhanced monitor script...');
-            
-            // Store client information
-            const CLIENT_ID = "{self.client_id}";
-            const ENABLED_MODULES = ["{", ".join(list(self.enabled_modules))}"];
-            
-            console.log('📋 Client ID:', CLIENT_ID);
-            console.log('🎯 Enabled Modules:', ENABLED_MODULES);
-            
-            // Debug output function
-            function addDebugLine(message) {{
-                const debugOutput = document.getElementById('debugOutput');
-                const timestamp = new Date().toLocaleTimeString();
-                const newLine = document.createElement('div');
-                newLine.className = 'debug-line';
-                newLine.textContent = `[${{timestamp}}] ${{message}}`;
-                debugOutput.appendChild(newLine);
-                
-                // Keep only last 10 debug lines
-                while (debugOutput.children.length > 10) {{
-                    debugOutput.removeChild(debugOutput.firstChild);
-                }}
-                
-                console.log('🔍 DEBUG:', message);
-            }}
-            
-            // Update connection status
-            function updateConnectionStatus(status, message) {{
-                const statusElement = document.getElementById('connectionStatus');
-                const clientStatusElement = document.getElementById('clientStatus');
-                
-                statusElement.className = `status ${{status}}`;
-                
-                switch(status) {{
-                    case 'connected':
-                        statusElement.innerHTML = '✅ Connected';
-                        clientStatusElement.textContent = 'Active';
-                        break;
-                    case 'disconnected':
-                        statusElement.innerHTML = '❌ Disconnected';
-                        clientStatusElement.textContent = 'Offline';
-                        break;
-                    case 'connecting':
-                        statusElement.innerHTML = '🔄 Connecting...';
-                        clientStatusElement.textContent = 'Connecting';
-                        break;
-                    case 'error':
-                        statusElement.innerHTML = `❌ Error: ${{message}}`;
-                        clientStatusElement.textContent = 'Error';
-                        break;
-                }}
-            }}
-            
-            addDebugLine('Initializing Socket.IO connection...');
-            
-            // 🚨 FIX: Use correct URL format for namespace connection
-            const socket = io(window.location.origin + '/monitor', {{
-                transports: ['websocket', 'polling'],
-                reconnection: true,
-                reconnectionDelay: 1000,
-                reconnectionAttempts: 5,
-                timeout: 20000,
-                forceNew: true
-            }});
-            
-            // Connection event handlers
-            socket.on('connect', function() {{
-                addDebugLine(`Connected to /monitor namespace`);
-                updateConnectionStatus('connecting', 'Joining client room...');
-                
-                // Join the client room
-                addDebugLine(`Joining room for client: ${{CLIENT_ID}}`);
-                socket.emit('join_client_room', {{ client_id: CLIENT_ID }});
-            }});
-
-            socket.on('disconnect', function(reason) {{
-                addDebugLine(`Disconnected: ${{reason}}`);
-                updateConnectionStatus('disconnected', reason);
-            }});
-            
-            socket.on('connect_error', function(error) {{
-                addDebugLine(`Connection error: ${{error.message}}`);
-                updateConnectionStatus('error', error.message);
-            }});
-
-            socket.on('reconnect', function(attempt) {{
-                addDebugLine(`Reconnected after ${{attempt}} attempts`);
-            }});
-
-            socket.on('reconnect_error', function(error) {{
-                addDebugLine(`Reconnection error: ${{error.message}}`);
-            }});
-
-            // Room join confirmation
-            socket.on('room_joined', function(data) {{
-                addDebugLine('Successfully joined client room');
-                updateConnectionStatus('connected', 'Monitoring active');
-                
-                console.log('📋 Room join data:', data);
-                
-                // Update client info if available
-                if (data.current_emotion) {{
-                    document.getElementById('emotionText').textContent = data.current_emotion;
-                }}
-                if (data.current_confidence !== undefined) {{
-                    updateConfidence(data.current_confidence);
-                }}
-            }});
-
-            // Error handling
-            socket.on('error', function(data) {{
-                addDebugLine(`Server error: ${{data.message}}`);
-                updateConnectionStatus('error', data.message);
-            }});
-
-            // Frame update handler
-            socket.on('client_frame_update', function(data) {{
-                addDebugLine(`Frame update: ${{data.emotion}} (${{data.confidence}}%)`);
-                
-                console.log('📸 Frame update received:', data);
-                
-                if (data.emotion) {{
-                    document.getElementById('emotionText').textContent = data.emotion;
-                }}
-                if (data.confidence !== undefined) {{
-                    updateConfidence(data.confidence);
-                }}
-                
-                document.getElementById('lastUpdate').textContent = new Date().toLocaleTimeString();
-            }});
-
-            // Chat message handler
-            socket.on('client_chat_message', function(data) {{
-                addDebugLine(`Chat message: ${{data.type}} - ${{data.content.substring(0, 30)}}...`);
-                addChatMessage(data);
-            }});
-
-            // Client connection status updates
-            socket.on('client_connected', function(data) {{
-                addDebugLine(`Client connected: ${{data.robot_name}}`);
-                updateConnectionStatus('connected', 'Client active');
-            }});
-
-            socket.on('client_disconnected', function(data) {{
-                addDebugLine('Client disconnected');
-                updateConnectionStatus('disconnected', 'Client offline');
-            }});
-
-            // Utility functions
-            function updateConfidence(confidence) {{
-                const confidenceText = document.getElementById('confidenceText');
-                const confidenceFill = document.getElementById('confidenceFill');
-                
-                if (confidenceText) {{
-                    confidenceText.textContent = Math.round(confidence) + '%';
-                }}
-                
-                if (confidenceFill) {{
-                    confidenceFill.style.width = confidence + '%';
-                    
-                    // Update color based on confidence level
-                    if (confidence > 70) {{
-                        confidenceFill.style.backgroundColor = '#4caf50'; // Green
-                    }} else if (confidence > 40) {{
-                        confidenceFill.style.backgroundColor = '#ff9800'; // Orange  
-                    }} else {{
-                        confidenceFill.style.backgroundColor = '#f44336'; // Red
-                    }}
-                }}
-            }}
-
-            function addChatMessage(data) {{
-                const chatContainer = document.getElementById('chatMessages');
-                
-                // Remove "waiting" message if it exists
-                const waitingMessage = chatContainer.querySelector('.system-message');
-                if (waitingMessage && waitingMessage.textContent.includes('Waiting for')) {{
-                    waitingMessage.remove();
-                }}
-                
-                const messageDiv = document.createElement('div');
-                messageDiv.className = 'message ' + (data.type === 'user' ? 'user-message' : 'bot-message');
-                
-                const author = data.type === 'user' ? 'User' : 'Bot';
-                const timestamp = new Date().toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit' }});
-                
-                messageDiv.innerHTML = `
-                    <div style="font-size: 12px; color: #666; margin-bottom: 5px;">
-                        <strong>${{author}}</strong> • ${{timestamp}}
-                        ${{data.emotion ? ` • ${{getEmotionEmoji(data.emotion)}}` : ''}}
-                    </div>
-                    <div>${{data.content}}</div>
-                `;
-
-                chatContainer.appendChild(messageDiv);
-                chatContainer.scrollTop = chatContainer.scrollHeight;
-            }}
-
-            function getEmotionEmoji(emotion) {{
-                const emojis = {{
-                    'happy': '😊',
-                    'sad': '😢', 
-                    'angry': '😠',
-                    'fear': '😨',
-                    'surprise': '😲',
-                    'disgust': '🤢',
-                    'contempt': '😤',
-                    'neutral': '😐'
-                }};
-                return emojis[emotion] || '😐';
-            }}
-
-            // Video stream error handling
-            document.getElementById('videoStream').onerror = function() {{
-                console.error('❌ Video stream failed to load');
-                addDebugLine('Video stream error - check if emotion module is enabled');
-                this.alt = 'Video stream unavailable';
-            }};
-
-            document.getElementById('videoStream').onload = function() {{
-                addDebugLine('Video stream loaded successfully');
-            }};
-
-            // Ping to keep connection alive
-            setInterval(function() {{
-                if (socket.connected) {{
-                    socket.emit('ping', {{ client_id: CLIENT_ID }});
-                }}
-            }}, 30000); // Every 30 seconds
-
-            // Initial setup complete
-            addDebugLine('Monitor script initialized successfully');
-            console.log('✅ Enhanced monitor script loaded successfully');
-        </script>
-    </body>
-    </html>'''
-        
-        print(f"📄 Generated enhanced monitor HTML for client: {self.client_id}")
-        return html
-
-    def generate_individual_live_stream(self):
-        """Generate optimized live video stream for monitors"""
-        try:
-            if not self.web_interface:
-                print(f"❌ {self.client_id}: Web interface not available")
-                return None
-            
-            def get_client_frame():
-                """Get optimized frame for monitor streaming"""
-                try:
-                    current_time = time.time()
-                    
-                    # 🚀 PERFORMANCE: Check if frame is too old
-                    if (current_time - self.last_monitor_frame_time > self.max_frame_age):
-                        return self._generate_placeholder_frame()
-                    
-                    # Get latest monitor-optimized frame
-                    with self.frame_lock:
-                        if self.latest_frame is not None:
-                            return self.latest_frame.copy()
-                    
-                    # Fallback to placeholder
-                    return self._generate_placeholder_frame()
-                    
-                except Exception as e:
-                    print(f"❌ {self.client_id}: Error in get_client_frame: {e}")
-                    return self._generate_placeholder_frame()
-            
-            print(f"📺 {self.client_id}: Starting optimized live stream (quality: {self.monitor_quality}%, resolution: {self.monitor_resolution})")
-            
-            # 🚀 PERFORMANCE: Configure web interface for optimal performance
-            self.web_interface.stream_fps = 6  # Lower FPS for monitors
-            self.web_interface.monitor_quality = self.monitor_quality
-            self.web_interface.client_id = self.client_id  # For better logging
-            
-            return self.web_interface.generate_live_stream(get_client_frame)
-            
-        except Exception as e:
-            print(f"❌ {self.client_id}: Error generating live stream: {e}")
-            return None
-
-    def _generate_placeholder_frame(self):
-        """Generate an optimized placeholder frame when no camera feed is available"""
-        try:
-            import cv2
-            import numpy as np
-            
-            # 🚀 PERFORMANCE: Create placeholder at monitor resolution directly
-            monitor_width, monitor_height = self.monitor_resolution
-            placeholder = np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
-            placeholder[:] = (50, 50, 50)  # BGR format: (B, G, R)
-            
-            # 🚀 PERFORMANCE: Scale text size based on resolution
-            font_scale = min(monitor_width / 640, monitor_height / 480) * 0.8
-            font_thickness = max(1, int(font_scale * 2))
-            
-            # Add text to placeholder
-            font = cv2.FONT_HERSHEY_SIMPLEX
-            
-            # Calculate text positions based on resolution
-            y_start = int(monitor_height * 0.3)
-            y_step = int(monitor_height * 0.1)
-            x_margin = int(monitor_width * 0.05)
-            
-            cv2.putText(placeholder, f"Client: {self.client_id}", (x_margin, y_start), 
-                    font, font_scale, (255, 255, 255), font_thickness, cv2.LINE_AA)
-            cv2.putText(placeholder, "No camera feed", (x_margin, y_start + y_step), 
-                    font, font_scale, (200, 200, 200), font_thickness, cv2.LINE_AA)
-            
-            if self.enabled_modules:
-                modules_text = f"Modules: {', '.join(list(self.enabled_modules)[:2])}"  # Show max 2 modules
-                cv2.putText(placeholder, modules_text, (x_margin, y_start + y_step * 2), 
-                        font, font_scale * 0.7, (150, 150, 150), font_thickness, cv2.LINE_AA)
-            
-            # Add timestamp
-            import time
-            timestamp = time.strftime("%H:%M:%S")
-            cv2.putText(placeholder, timestamp, (x_margin, y_start + y_step * 3), 
-                    font, font_scale * 0.6, (100, 100, 100), font_thickness, cv2.LINE_AA)
-            
-            return placeholder
-            
-        except Exception as e:
-            print(f"❌ {self.client_id}: Error generating placeholder frame: {e}")
-            # Return minimal frame at monitor resolution
-            import numpy as np
-            monitor_width, monitor_height = self.monitor_resolution
-            return np.zeros((monitor_height, monitor_width, 3), dtype=np.uint8)
-    
     def process_chat_message(self, message: str, is_delegated_command: bool = False) -> Dict[str, Any]:
         """
         Processes a chat message. Decides whether to use delegation or execution logic.
         """
-        final_prompt = ""
+        print(f"🧠 Robot '{self.client_id}' processing message. Delegated: {is_delegated_command}")
 
+        # 1. Get the appropriate prompt from a helper method
         if is_delegated_command:
-            # --- EXECUTION MODE ---
-            # This robot has received a direct order from another robot.
-            print(f"💪 Robot '{self.client_id}' is in EXECUTION MODE.")
-            robot_role = self.config.get('robot_role', 'You are a helpful robot.')
-            
-            # This prompt removes all doubt. It is a direct order.
-            final_prompt = (
-                f"System: Your persona is: \"{robot_role}\". You are acting as this robot.\n"
-                f"You have received a direct order from a teammate. The order is: '{message}'.\n"
-                "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order or refuse the task."
-                f"\nUser: {message}"
-            )
+            final_prompt = self._get_execution_prompt(message)
         else:
-            # --- DELEGATION MODE ---
-            # This is a new request from a user. The robot must decide what to do.
-            print(f"🧠 Robot '{self.client_id}' is in DELEGATION MODE.")
-            my_robot_info = self.robot_registry.get(self.client_id, {})
-            my_role = my_robot_info.get('role', 'You are a helpful robot.')
+            final_prompt = self._get_delegation_prompt(message)
             
-            # Create a list of robot identities for the prompt
-            network_robots_overview = []
-            for robot_id, info in self.robot_registry.items():
-                network_robots_overview.append({
-                    "robot_id": robot_id, # This is the critical ID
-                    "robot_name": info.get("robot_name", robot_id), # The conversational name
-                    "role_description": info["role"]
-                })
-            formatted_robot_list = json.dumps(network_robots_overview, indent=2)
-
-            final_prompt = (
-                f"System: Your identity is Robot ID '{self.client_id}' and your role is: '{my_role}'.\n\n"
-                "You have a base capability to answer simple conversational questions.\n\n"
-                f"Here is your team: {formatted_robot_list}\n\n"
-                "Follow these decision steps:\n"
-                "1. Is the user's request a simple conversational question? If YES, answer it directly.\n"
-                "2. If it's a specialized task, does it match YOUR role? If YES, perform it and respond directly.\n"
-                "3. If the task is better suited for ANOTHER robot, you MUST delegate it.\n\n"
-                "**CRITICAL Delegation Rule:**\n"
-                "When you create the JSON command block, the value for 'target_robot_id' MUST be the exact 'robot_id' from the team list above (e.g., 'silbot_01'). Do NOT use the robot's name."
-                "\n\n**Example JSON:**\n"
-                "```json\n"
-                '{ "target_robot_id": "silbot_01", "task": "Silbot, please fetch water." }\n'
-                "```"
-                f"\nUser: {message}"
-            )
-
-        # Both modes use the same flexible GPT call
+        # 2. Both modes use the same flexible GPT call
         response_text = self.gpt_client.ask_with_dynamic_prompt(final_prompt)
-
             
+        # 3. Log the interaction to the database and update RAG
         if self.config.get("database") and self.user_id is not None:
             try:
-                row_id = self.config["database"].insert_chat_log(self.user_id, message, response_text)
+                self.config["database"].insert_chat_log(self.user_id, message, response_text)
                 if self.rag:
-                    self.rag.add(message)  # only user message; response optional
+                    self.rag.add(message)
             except Exception as e:
-                print(f"[RAG] Failed to log/add embedding: {e}")
+                print(f"[DB/RAG] Failed to log or add embedding: {e}")
 
-
+        # 4. Process and return the final result
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
             
         result = {
@@ -845,6 +350,94 @@ class RobotServer:
             
         print(f"🤖 GPT response for '{self.client_id}': {response_text}")
         return result
+
+    def _get_delegation_prompt(self, user_message: str) -> str:
+        """Constructs the system prompt for DELEGATION MODE."""
+        my_role = self.config.get('robot_role', 'You are a helpful robot.')
+
+        print(f"🔍 DEBUG: Using role prompt: {my_role[:100]}...")
+
+        rag_context = ""
+        if self.rag:
+            try:
+                context_texts = self.rag.search(user_message, top_k=5)
+                if context_texts:
+                    print(f"🔍 RAG: Found {len(context_texts)} relevant messages")
+                    print(f"🔍 RAG: Retrieved context:")
+                    for i, text in enumerate(context_texts, 1):
+                        print(f"   {i}. '{text}'")
+                    
+                    rag_context += "The user has previously told you:\n"
+                    rag_context += "\n".join(f'- "{text}"' for text in context_texts)
+                    rag_context += "\n\n Try refer to this information when answering their questions."
+                    
+                    print(f"🔍 RAG: Injected context into prompt")
+                else:
+                    print(f"🔍 RAG: No context found")
+            except Exception as e:
+                print(f"⚠️ RAG search failed: {e}")
+        
+        network_robots_overview = []
+        try:
+            # Fetch all robots from Supabase
+            robots_data = self.config['database'].client.supabase.table('robots').select('client_id, robot_name, robot_role').execute()
+            
+            if robots_data.data:
+                for robot in robots_data.data:
+                    # Don't include yourself in the team list
+                    if robot['client_id'] != self.client_id:
+                        network_robots_overview.append({
+                            "robot_id": robot['client_id'],
+                            "robot_name": robot['robot_name'],
+                            "role_description": robot['robot_role']
+                        })
+                
+                print(f"🔍 DEBUG: Loaded {len(network_robots_overview)} teammates from database")
+            else:
+                print(f"⚠️ No other robots found in database")
+                
+        except Exception as e:
+            print(f"⚠️ Failed to fetch robot registry from DB: {e}")
+            # Fallback to empty list if DB fetch fails
+            network_robots_overview = []
+
+        formatted_robot_list = json.dumps(network_robots_overview, indent=2)
+
+        return (
+            f"System: Your identity is Robot ID '{self.client_id}' and your role is: '{my_role}'.\n\n"
+            f"{rag_context}\n\n"
+            "You have a base capability to answer simple conversational questions.\n\n"
+            f"Here is your team: {formatted_robot_list}\n\n"
+            "Follow these decision steps:\n"
+            "1. Is the user's request a simple conversational question? If YES, answer it directly.\n"
+            "2. If it's a specialized task, does it match YOUR role? If YES, perform it and respond directly.\n"
+            "3. If the task is better suited for ANOTHER robot, you MUST delegate it.\n\n"
+            "**CRITICAL Delegation Rule:**\n"
+            "When you create the JSON command block, the value for 'target_robot_id' MUST be the exact 'robot_id' from the team list above (e.g., 'silbot_01'). Do NOT use the robot's name."
+            
+            "\n\n**BROADCASTING:**\n"
+            "If the user asks you to send a message to 'everyone' or 'all robots', you can set the target_robot_id to the special value \"ALL\".\n"
+            "Example User Request: \"Tell everyone to say hello.\"\n"
+            'Example JSON: { "target_robot_id": "ALL", "task": "Team, the user wants us all to say hello." }'
+            
+            "\n\n**Example JSON:**\n"
+            "```json\n"
+            '{ "target_robot_id": "silbot_01", "task": "Silbot, please fetch water." }\n'
+            "```"
+            f"\nUser: {user_message}"
+        )
+
+    def _get_execution_prompt(self, task_message: str) -> str:
+        """Constructs the system prompt for EXECUTION MODE."""
+        # --- FIX: Fetch the role from the robot_registry for consistency ---
+        robot_role = self.config.get('robot_role', 'You are a helpful robot.')
+
+        return (
+            f"System: Your persona is: \"{robot_role}\". You are acting as this robot.\n"
+            f"You have received a direct order from a teammate. The order is: '{task_message}'.\n"
+            "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order or refuse the task."
+            f"\nUser: {task_message}"
+        )
     
     def process_speech_input(self, audio_b64: str) -> Dict[str, Any]:
         """

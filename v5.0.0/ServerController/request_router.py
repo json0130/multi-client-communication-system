@@ -3,6 +3,7 @@ import time
 import json
 import re
 import threading
+import requests
 from typing import Dict, Any, Optional
 from flask import jsonify, Response
 
@@ -73,97 +74,106 @@ class RequestRouter:
             return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
     def _handle_chat_request(self, server, flask_request, display_name: str) -> tuple:
+        """
+        Handles a chat request by routing it to the server's processing method
+        and managing any resulting delegation commands.
+        """
         try:
             message = flask_request.json.get('message', '')
-            
-            # 1. Process the user message. The RobotServer will decide whether to delegate or not.
-            # We are NOT passing the is_delegated_command flag, so it defaults to False (Delegation Mode).
+            if not message:
+                return jsonify({"error": "Message cannot be empty"}), 400
+
+            # 1. Call the new, centralized processing method in server.py
+            # The 'is_delegated_command' flag is False by default, putting it in DELEGATION MODE.
             result = server.process_chat_message(message)
             
             llm_response_text = result.get('response', '')
-            user_facing_response = llm_response_text
-            
-            # 2. Check if the response contains a delegation command.
+            user_facing_response = llm_response_text # Start with the full response
+
+            # 2. Check if the LLM decided to delegate a task.
+            # This logic correctly stays in the router, which manages inter-robot communication.
+            # Check if the LLM decided to delegate a task.
             match = re.search(r"```json\s*(\{.*?\})\s*```", llm_response_text, re.DOTALL)
             if match:
-                command_data = json.loads(match.group(1))
-                target_id = command_data.get("target_robot_id")
-                task_message = command_data.get("task")
-                
-                if target_id and task_message:
-
-                    # --- This is the new, simpler background task ---
-                    def execute_delegated_command(target_server, task_msg):
-                        try:
-                            # Call process_chat_message, but this time, set the flag to True!
-                            result = target_server.process_chat_message(task_msg, is_delegated_command=True)
-                            
-                            # Send the final execution response back to the client
-                            response_content = result.get('response', 'Task processed.')
-                            self.socketio.emit('chat_response', 
-                                               {'response': response_content}, 
-                                               room=target_server.client_id)
-                        except Exception as e:
-                            print(f"❌ Error in background task for '{target_server.client_id}': {e}")
-                    
-                    # 1. Define a function to handle the broadcast in the background
-                    def broadcast_command_async(command, source_name, target_name):
-                        # Add a small delay to give the first robot time to speak
-                        time.sleep(0.5) 
-                        print(f"📣 Broadcasting command to all clients: '{command}'")
-                        self.socketio.emit('chat_response', {
-                            'response': f"[{source_name} -> {target_name}] {command}"
-                        })
-
-                    # 2. Start the broadcast in a new thread so it doesn't block the main response
-                    broadcast_thread = threading.Thread(
-                        target=broadcast_command_async, 
-                        args=(task_message, server.robot_name, target_id)
-                    )
-                    broadcast_thread.start()
-                    
-                    # 3. The existing logic to execute the command is still correct
-                    target_server_instance = self.client_manager.get_client_server(target_id)
-                    if target_server_instance:
-                        execute_thread = threading.Thread(
-                            target=execute_delegated_command, 
-                            args=(target_server_instance, task_message)
-                        )
-                        execute_thread.start()
-                    
-                    # Clean the JSON out of the response for the original user
-                    user_facing_response = llm_response_text.replace(match.group(0), "").strip()
-                
-            result['response'] = user_facing_response
-            
-            if self.socketio:
                 try:
-                    self.socketio.emit('client_chat_message', {
-                        'type': 'user',
-                        'content': message,
-                        'client_id': server.client_id,
-                    }, room=server.client_id, namespace='/monitor')
-                    
-                    self.socketio.emit('client_chat_message', {
-                        'type': 'bot',
-                        'content': result.get('response', ''),
-                        'client_id': server.client_id,
-                    }, room=server.client_id, namespace='/monitor')
-                    
-                    print(f"📡 {display_name}: Chat broadcasted to its specific monitor room.")
-                    
-                except Exception as broadcast_error:
-                    print(f"⚠️ {display_name}: Chat broadcast error: {broadcast_error}")
+                    command_data = json.loads(match.group(1))
+                    target_id = command_data.get("target_robot_id")
+                    task_message = command_data.get("task")
 
-            return jsonify({
+                    if target_id and task_message:
+                        
+                        # Instead of making an HTTP request, we directly emit the WebSocket event.
+                        # This is guaranteed to have the correct context.
+                        print(f" M-DEBUG -> Relaying spoken command directly to {target_id}: '{task_message}'")
+                        self.socketio.emit(
+                            'execute_command',                  # The event name the client is listening for
+                            {'command': task_message},          # The data payload
+                            room=target_id                      # Send only to this specific client's room
+                        )
+
+                        # The background task now needs the socketio instance to report back
+                        def execute_and_report_back(server_instance, task, socketio_instance):
+                            try:
+                                print(f"🚀 Executing delegated task for '{server_instance.client_id}'...")
+                                
+                                # 1. Execute the task and get the result
+                                result = server_instance.process_chat_message(task, is_delegated_command=True)
+                                response_content = result.get('response', 'Task completed.')
+                                
+                                print(f"✅ Delegated task complete. Response from '{server_instance.client_id}': {response_content}")
+
+                                # 2. Report the result back to the correct client's UI
+                                if socketio_instance:
+                                    # Send to the specific client's monitor
+                                    socketio_instance.emit('client_chat_message', 
+                                        {'type': 'bot', 'content': response_content, 'client_id': server_instance.client_id},
+                                        room=server_instance.client_id, 
+                                        namespace='/monitor'
+                                    )
+                                    # Also send to the global Mission Control monitor
+                                    socketio_instance.emit('global_log',
+                                        {'type': 'bot', 'content': f"(Delegated) {response_content}", 'client_id': server_instance.client_id},
+                                        namespace='/monitor'
+                                    )
+
+                            except Exception as e:
+                                print(f"❌ Error in background delegation thread for '{server_instance.client_id}': {e}")
+                        
+                        target_server = self.client_manager.get_client_server(target_id)
+                        if target_server:
+                            # Start the task in a thread, passing socketio to it
+                            delegation_thread = threading.Thread(
+                                target=execute_and_report_back,
+                                args=(target_server, task_message, self.socketio) # Pass self.socketio
+                            )
+                            delegation_thread.start()
+
+                        # Clean the JSON block from the response sent to the original user
+                        user_facing_response = llm_response_text.replace(match.group(0), "").strip()
+                
+                except json.JSONDecodeError:
+                    print(f"⚠️ Invalid JSON found in response from '{server.client_id}'")
+
+
+            # 3. Prepare and send the final response to the user
+            final_result = {
                 "client_id": server.client_id,
-                "response": result.get('response', ''),
+                "response": user_facing_response, # Send the cleaned response
                 "detected_emotion": result.get('detected_emotion'),
                 "timestamp": time.time()
-            }), 200
-            
+            }
+
+            # (Optional) Broadcast to your monitoring UI if you have one
+            if self.socketio:
+                self.socketio.emit('client_chat_message', {'type': 'user', 'content': message, 'client_id': server.client_id}, room=server.client_id, namespace='/monitor')
+                self.socketio.emit('client_chat_message', {'type': 'bot', 'content': user_facing_response, 'client_id': server.client_id}, room=server.client_id, namespace='/monitor')
+
+            return jsonify(final_result), 200
+
         except Exception as e:
             print(f"❌ {display_name}: Chat request error: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": "Chat processing failed", "details": str(e)}), 500
     
     def _handle_speech_request(self, server, flask_request, display_name: str) -> tuple:
@@ -405,70 +415,3 @@ class RequestRouter:
             "health_conditions": conditions,
             "updated": True
         }), 200
-    
-    def generate_role_based_prompt(self, current_robot_id, user_message, rag_context: str = ""):
-        """
-        Generates a context-rich prompt for the LLM to decide delegation based on robot roles.
-        Now includes RAG context if available.
-        """
-        try:
-            my_robot_info = MOCK_ROBOT_REGISTRY[current_robot_id]
-        except KeyError:
-            my_robot_info = {"role": "You are a helpful assistant."}
-
-        network_robots_overview = []
-        for robot_id, info in MOCK_ROBOT_REGISTRY.items():
-            network_robots_overview.append({
-                "robot_id": robot_id,
-                "role_description": info["role"]
-            })
-
-        formatted_robot_list = json.dumps(network_robots_overview, indent=2)
-
-        # --- NEW: Dynamically create a RAG context block if context is provided ---
-        rag_block = ""
-        if rag_context:
-            rag_block = f"""
-    --- START RELEVANT CONTEXT ---
-    Here is some relevant information from past conversations to help you understand the user's request:
-    {rag_context}
-    --- END RELEVANT CONTEXT ---
-    """
-
-        system_prompt = f"""You are an AI controller for a specific robot.
-    Your assigned identity is:
-    - Your Robot ID: "{current_robot_id}"
-    - Your Role: "{my_robot_info['role']}"
-
-    You are part of a team of robots. Here is the current list of all robots on the network:
-    --- START ROBOT TEAM ---
-    {formatted_robot_list}
-    --- END ROBOT TEAM ---
-
-    {rag_block} 
-    Your primary task is to analyze the user's request and decide if YOU should perform the task based on YOUR role, or if you should delegate it to a teammate.
-
-    1.  **Analyze Request & YOUR Role:** First, look at the user's request. Then, look at YOUR role description above. Can YOU fulfill this request?
-    2.  **Decide:**
-        * If the task fits YOUR role (e.g., you are a mobile robot and the task is to move), then execute it yourself and respond directly to the user.
-        * If the task is better suited for ANOTHER robot, you MUST delegate it. Do NOT delegate tasks to yourself.
-
-    **Delegation Rules:**
-    When you delegate, your response MUST contain two parts:
-    1. A friendly message for the user explaining who will handle the task.
-    2. A JSON command block for the target robot, enclosed in ```json ... ```.
-    - The JSON MUST have a "target_robot_id" key.
-    - It MUST have a "task" key containing a **natural language command as if you were speaking directly to the other robot.** # <-- CHANGE THIS LINE
-
-    **Example Delegation:**
-    User Request: "Can you bring me a coffee from the kitchen?"
-    Your Correct Response (because your role is a stationary assistant):
-    I can't get that for you myself, but I will ask Silbot, our mobile robot, to bring you a coffee.
-    ```json
-    {{
-    "target_robot_id": "silbot_01",
-    "task": "Silbot, please bring a coffee from the kitchen for the user." # <-- CHANGE THIS LINE
-    }}
-    """
-        final_prompt = f"{system_prompt}\n\nNow, please process this user request:\nUser: {user_message}"
-        return final_prompt

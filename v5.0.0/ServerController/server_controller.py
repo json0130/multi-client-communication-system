@@ -294,6 +294,31 @@ class ServerController:
                     "success": False,
                     "message": str(e)
                 }), 500
+
+        @self.app.route('/client/<client_id>/command', methods=['POST'])
+        def send_command_to_client(client_id):
+            """
+            Receives a command (e.g., dialogue) and forwards it to a specific client.
+            """
+            if not request.is_json:
+                return jsonify({"error": "Invalid request: JSON required"}), 400
+
+            data = request.get_json()
+            command = data.get('command')
+
+            if not command:
+                return jsonify({"error": "The 'command' field is required"}), 400
+
+            # Use the ClientManager to see if the target robot is connected
+            if not self.client_manager.get_client_info(client_id):
+                return jsonify({"error": f"Client '{client_id}' is not registered or active."}), 404
+
+            print(f" M-DEBUG -> Relaying command to robot {client_id}: '{command}'")
+
+            # Emit a WebSocket event specifically to the target client's room
+            self.socketio.emit('execute_command', {'command': command}, room=client_id)
+
+            return jsonify({"status": "success", "message": f"Command sent to {client_id}"}), 200
         
         @self.app.route('/client/<client_id>/chat', methods=['POST'])
         def client_chat(client_id):

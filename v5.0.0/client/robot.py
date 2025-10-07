@@ -32,33 +32,54 @@ class SimpleConcurrentClient(BasicClient):
     """
     
     def __init__(self, config_file: str = "client_config.json"):
+        # This calls the parent __init__ which sets up self.server_connection
         super().__init__(config_file)
+        
+        # --- THIS IS THE KEY FIX ---
+        # We define the handlers here, where they have access to 'self' (the client instance)
+        # and its output_modules. Then we register them directly on the sio object.
+        self._register_custom_event_handlers()
 
+        self.setup_all_modules()
+
+    def _register_custom_event_handlers(self):
+        """
+        Defines and registers all client-specific event handlers.
+        """
+        # 1. Define the handler for chat responses
         def on_chat_response(data):
             response = data.get('response')
             if response:
-                # Use the registered console_output module to display the message
                 if 'console_output' in self.output_modules:
                     self.output_modules['console_output'].process_output(response)
-                else:
-                    # Fallback if the console module isn't running for some reason
-                    print(f"\n🤖 Server Response: {response}")
-                
-                # Optional: Make the robot speak the response
-                # if 'edge_tts_output' in self.output_modules:
-                #     self.output_modules['edge_tts_output'].process(response)
-        
-        # Register the handler with the socketio client instance
-        # This now correctly uses 'self' because it is inside the __init__ method
-        if self.server_connection and self.server_connection.sio:
-            print("\n>>> DEBUG: Attempting to register 'on_chat_response' handler...")
-            self.server_connection.sio.on('chat_response', on_chat_response)
-            print(">>> DEBUG: Handler registration successful.\n")
-        else:
-            print("\n>>> DEBUG: FAILED to register handler! Server connection or SIO object not found.\n")
+                if 'edge_tts_output' in self.output_modules:
+                    self.output_modules['edge_tts_output'].process_output(response)
+                elif 'pyttsx_tts' in self.output_modules:
+                    self.output_modules['pyttsx_tts'].process_output(response)
 
-        # Finally, call setup_all_modules
-        self.setup_all_modules()
+        # 2. Define the new handler for direct commands
+        def on_execute_command(data):
+            """Handles the 'execute_command' event from the server."""
+            command = data.get('command')
+            if command:
+                logger.info(f"📢 Executing command: \"{command}\"")
+                # Use a TTS module to speak the command
+                if 'edge_tts_output' in self.output_modules:
+                    self.output_modules['edge_tts_output'].process_output(command)
+                elif 'pyttsx_tts' in self.output_modules:
+                    self.output_modules['pyttsx_tts'].process_output(command)
+                
+                # Also display it on the console for logging
+                if 'console_output' in self.output_modules:
+                    self.output_modules['console_output'].process_output(f"[COMMAND]: {command}")
+
+        # 3. Register these handlers on the SocketIO instance
+        if self.server_connection and self.server_connection.sio:
+            self.server_connection.sio.on('chat_response', on_chat_response)
+            self.server_connection.sio.on('execute_command', on_execute_command)
+            logger.info("✅ Client-specific event handlers registered.")
+        else:
+            logger.error("❌ Cannot register handlers: server_connection or sio not initialized.")
     
     def _on_arduino_connected(self): 
         """Called when Arduino connects""" 
