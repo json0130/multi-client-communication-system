@@ -12,79 +12,86 @@ import struct
 import select
 sys.path.append('/home/silbot3/gptpy2')
 
-def log_info(msg):
-    """Helper function for consistent logging"""
-    rospy.loginfo(f"[SILBOT3] {msg}")
-    print(f"[SILBOT3] {msg}")  # Print to terminal for direct visibility
-
 if __name__ == '__main__':
     try:
         # Initialize ROS node
         rospy.init_node('gptpy', anonymous=True)
-        log_info("ROS Node initialized")
-        
-        # Setup publisher
-        gesture_pub = rospy.Publisher('gpttopic', String, queue_size=1000)
-        log_info("Gesture publisher created")
+        gesture_pub = rospy.Publisher('gpttopic', String, queue_size=1)  # Reduce queue to 1
         
         # Socket setup
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         HOST = '0.0.0.0'
         PORT = 7790
         
-        last_gesture = ""
+        sock.bind((HOST, PORT))
+        sock.listen(1)
+        
+        last_gesture = None  # Changed from empty string
         last_gesture_time = time.time()
         GESTURE_COOLDOWN = 3.0
-        
-        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-            s.bind((HOST, PORT))
-            s.listen()
-            log_info(f"Listening for Docker connection on {HOST}:{PORT}")
-            
-            conn, addr = s.accept()
-            log_info(f"New connection from {addr}")
-            
-            with conn:
-                while not rospy.is_shutdown():
-                    # Non-blocking socket read with timeout
+        is_connected = False  # Flag to track connection status
+
+        while not rospy.is_shutdown():
+            if not is_connected:
+                try:
+                    # Set socket to non-blocking for accept
+                    sock.setblocking(False)
+                    conn, addr = sock.accept()
+                    conn.setblocking(True)  # Set connection back to blocking
+                    is_connected = True
+                except socket.error:
+                    # No connection yet, sleep and continue
+                    rospy.sleep(1)
+                    continue
+
+            try:
+                if is_connected:
                     ready = select.select([conn], [], [], 0.1)
                     
                     if ready[0]:
                         data = conn.recv(1024)
                         if not data:
-                            log_info("Connection closed by client")
-                            break
+                            # Connection closed
+                            is_connected = False
+                            conn.close()
+                            continue
                         
                         message = data.decode('utf-8').lower()
-                        log_info(f"Received message: {message}")
-                        
-                        # Gesture control with cooldown
                         current_time = time.time()
+                        
                         if current_time - last_gesture_time >= GESTURE_COOLDOWN:
+                            # Only process gestures if enough time has passed
+                            gesture = None  # Default to no gesture
                             
-                            # Gesture selection logic
                             if "hello" in message or "hi" in message:
                                 gesture = "wave"
                             elif "i think" in message or "i believe" in message:
                                 gesture = "Think"
-                            else:
+                            elif len(message) > 0:  # Only do Speak_Start if there's actual content
                                 gesture = "Speak_Start"
                             
-                            # Only publish new gestures
-                            if gesture != last_gesture:
-                                log_info(f"Publishing gesture: {gesture}")
-                                gesture_pub.publish(gesture)
+                            if gesture and gesture != last_gesture:
+                                gesture_pub.publish(String(gesture))
                                 last_gesture = gesture
                                 last_gesture_time = current_time
-                            else:
-                                log_info(f"Skipping duplicate gesture: {gesture}")
-                        else:
-                            log_info(f"Gesture cooldown active. Waiting {GESTURE_COOLDOWN - (current_time - last_gesture_time):.1f}s")
                     
-                    # Small sleep to prevent CPU hogging
-                    rospy.sleep(0.1)
+                    rospy.sleep(0.1)  # Small sleep to prevent CPU hogging
                     
-    except Exception as e:
-        log_info(f"❌ Error: {str(e)}")
-        rospy.logerr(f"Error in silbot3_shit.py: {str(e)}")
+            except Exception as e:
+                # Handle connection errors
+                is_connected = False
+                try:
+                    conn.close()
+                except:
+                    pass
+                rospy.sleep(1)
+                
+    except KeyboardInterrupt:
+        print("\nShutting down gracefully...")
     finally:
-        log_info("Shutting down SILBOT3 node")
+        try:
+            sock.close()
+        except:
+            pass
+        sys.exit(0)
