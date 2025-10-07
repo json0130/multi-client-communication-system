@@ -34,25 +34,23 @@ if __name__ == '__main__':
         while not rospy.is_shutdown():
             conn = None # Initialize conn for error handling
             try:
-                # Blocks until a client connects
                 conn, addr = s.accept()
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
-                conn.settimeout(1.0)  # ⚠️ ADD THIS - 1 second timeout
+                # conn.settimeout(1.0)  # ❌ REMOVE/COMMENT OUT THIS LINE
                 print("Connected by {}".format(addr))
-                
+
                 # Inner loop: Handle communication with the current client
                 while not rospy.is_shutdown():
+                    # Wrap in try/except to handle socket errors, but let recv block
                     try:
                         data = conn.recv(1024)
-                        
-                        # ⚠️ UNCOMMENT THIS CRITICAL CHECK
+                        # ✅ CRITICAL FIX: Check for zero bytes (client disconnect)
                         if not data:
                             print("Client {} disconnected.".format(addr))
-                            break # Exit inner loop, go back to s.accept()
-                            
+                            break # Exit inner loop
                         message = data.decode('utf-8').lower()
                         print("Received full response: {}".format(message))
-                        
+
                         # Handle the handshake message sent by the client
                         if message == "client_connected_ok":
                             print("Handshake received. Connection confirmed and waiting for real data.")
