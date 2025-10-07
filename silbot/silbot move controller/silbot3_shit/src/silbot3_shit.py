@@ -58,10 +58,10 @@ if __name__ == '__main__':
                             print("Handshake received. Connection confirmed and waiting for real data.")
                             continue # Skip to the next recv() without publishing a gesture
                         
-                        if "hello" in message or "hi" in message:
+                        if message == "wave":
                             print("received hello or hi")
                             gesture_pub.publish("wave")
-                        elif "think" in message or "believe" in message:
+                        elif message == "think":
                             gesture_pub.publish("Think")
                             print("received i think")
                         #else:
