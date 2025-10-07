@@ -12,6 +12,16 @@ class RoboticsOutputModule:
         self.conn = None
         self.host = self.config.get('host', 'localhost')
         self.port = self.config.get('port', 7790)
+        
+    def set_client(self, client):
+        """Set reference to main client for communication"""
+        # This module doesn't strictly need the client reference, 
+        # but it must implement the method to avoid the registration error.
+        pass
+    
+    def initialize(self) -> bool:
+        """Required by OutputModule abstract base class"""
+        return True
 
     def process_output(self, command):
         if not self.enabled:
