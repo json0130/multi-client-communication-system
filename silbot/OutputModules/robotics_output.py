@@ -1,6 +1,6 @@
 import socket
-import sys
 import logging
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +42,8 @@ class RoboticsOutputModule:
             self.conn.sendall(handshake_message.encode('utf-8'))
             logger.info(f"Handshake sent: {handshake_message}")
             # ---------------------------------------------
+            
+            time.sleep(0.1)
             
             self.enabled = True
             logger.info(f"✅ Successfully connected to Silbot machine at {self.host}:{self.port}")
