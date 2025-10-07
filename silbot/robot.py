@@ -21,7 +21,7 @@ from InputModules.realsense_input import RealSenseInputModule
 from OutputModules.console_output import ConsoleOutputModule
 from OutputModules.edge_tts_output import EdgeTTSOutputModule
 from OutputModules.tts_output import TTSOutputModule, PyttsxTTSOutputModule
-from OutputModules.arduino_output import ArduinoOutputModule
+#from OutputModules.arduino_output import ArduinoOutputModule
 from OutputModules.robotics_output import RoboticsOutputModule
 
 logger = logging.getLogger(__name__)
@@ -199,39 +199,39 @@ class SimpleConcurrentClient(BasicClient):
         self.register_output_module(robotics_output)
         robotics_output.start()
 
-        # --- ARDUINO SETUP SECTION (MODIFIED) ---
-        if self.config.get('features', {}).get('arduino_integration', True):
-            logger.info("🔌 Setting up Arduino output...")
+        # # --- ARDUINO SETUP SECTION (MODIFIED) ---
+        # if self.config.get('features', {}).get('arduino_integration', True):
+        #     logger.info("🔌 Setting up Arduino output...")
             
-            # Start with the config file's settings
-            arduino_config = self.config.get('arduino_output', {})
+        #     # Start with the config file's settings
+        #     arduino_config = self.config.get('arduino_output', {})
             
-            # Try to auto-detect the port
-            detected_port = self._detect_arduino_port()
+        #     # Try to auto-detect the port
+        #     detected_port = self._detect_arduino_port()
             
-            # If a port is detected, it overrides the one in the config file.
-            if detected_port:
-                logger.info(f"   🎯 Using auto-detected port: {detected_port}")
-                arduino_config['arduino_port'] = detected_port
-            else:
-                logger.warning(f"   Fallback to port from config file: {arduino_config.get('arduino_port')}")
+        #     # If a port is detected, it overrides the one in the config file.
+        #     if detected_port:
+        #         logger.info(f"   🎯 Using auto-detected port: {detected_port}")
+        #         arduino_config['arduino_port'] = detected_port
+        #     else:
+        #         logger.warning(f"   Fallback to port from config file: {arduino_config.get('arduino_port')}")
             
-            # Set sensible defaults if they are missing
-            arduino_config.setdefault('arduino_baud', 115200)
-            arduino_config.setdefault('auto_connect', True)
+        #     # Set sensible defaults if they are missing
+        #     arduino_config.setdefault('arduino_baud', 115200)
+        #     arduino_config.setdefault('auto_connect', True)
 
-            # Important: The module name must match the key used in client.py
-            self.arduino_module = ArduinoOutputModule("arduino_output", arduino_config)
+        #     # Important: The module name must match the key used in client.py
+        #     self.arduino_module = ArduinoOutputModule("arduino_output", arduino_config)
             
-            self.arduino_module.on_connected = self._on_arduino_connected
-            self.arduino_module.on_disconnected = self._on_arduino_disconnected
-            # Correcting the callback name based on your file
-            self.arduino_module.on_connection_error = self._on_arduino_error
+        #     self.arduino_module.on_connected = self._on_arduino_connected
+        #     self.arduino_module.on_disconnected = self._on_arduino_disconnected
+        #     # Correcting the callback name based on your file
+        #     self.arduino_module.on_connection_error = self._on_arduino_error
             
-            if self.register_output_module(self.arduino_module):
-                logger.info("   ✅ Arduino output module registered")
-            else:
-                logger.warning("   ⚠️ Arduino output module failed to register")
+        #     if self.register_output_module(self.arduino_module):
+        #         logger.info("   ✅ Arduino output module registered")
+        #     else:
+        #         logger.warning("   ⚠️ Arduino output module failed to register")
     
     def print_startup_info(self):
         """Print information about what's running"""
