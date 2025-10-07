@@ -37,37 +37,43 @@ if __name__ == '__main__':
                 # Blocks until a client connects
                 conn, addr = s.accept()
                 conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                conn.settimeout(1.0)  # ⚠️ ADD THIS - 1 second timeout
                 print("Connected by {}".format(addr))
                 
                 # Inner loop: Handle communication with the current client
                 while not rospy.is_shutdown():
-                    data = conn.recv(1024)
-                    if data:
-                        print("Received data: {}".format(data))
-                    
-                    # If data is empty (b''), the client has disconnected
-                    # if not data:
-                    #     print("Client {} disconnected.".format(addr))
-                    #     break # Exit inner loop, go back to s.accept()
+                    try:
+                        data = conn.recv(1024)
                         
-                    message = data.decode('utf-8').lower()
-                    if message:
+                        # ⚠️ UNCOMMENT THIS CRITICAL CHECK
+                        if not data:
+                            print("Client {} disconnected.".format(addr))
+                            break # Exit inner loop, go back to s.accept()
+                            
+                        message = data.decode('utf-8').lower()
                         print("Received full response: {}".format(message))
-                    
-                    # --- FIX: Handle the handshake message sent by the client ---
-                    if message == "client_connected_ok":
-                        print("Handshake received. Connection confirmed and waiting for real data.")
-                        continue # Skip to the next recv() without publishing a gesture
-                    # -------------------------------------------------------------
-                    
-                    if "hello" in message or "hi" in message:
-                        print("received hello or hi")
-                        gesture_pub.publish("wave")
-                    elif "think" in message or "believe" in message:
-                        gesture_pub.publish("Think")
-                        print("received i think")
-                    #else:
-                        #gesture_pub.publish("Speak_Start")
+                        
+                        # Handle the handshake message sent by the client
+                        if message == "client_connected_ok":
+                            print("Handshake received. Connection confirmed and waiting for real data.")
+                            continue # Skip to the next recv() without publishing a gesture
+                        
+                        if "hello" in message or "hi" in message:
+                            print("received hello or hi")
+                            gesture_pub.publish("wave")
+                        elif "think" in message or "believe" in message:
+                            gesture_pub.publish("Think")
+                            print("received i think")
+                        #else:
+                            #gesture_pub.publish("Speak_Start")
+                            
+                    except socket.timeout:
+                        # This is normal - no data received within timeout period
+                        # Just continue the loop to check for new data or shutdown
+                        continue
+                    except socket.error as e:
+                        print("Socket error during communication: {}".format(e))
+                        break
                         
             except KeyboardInterrupt:
                 # Allow outer loop to break cleanly
@@ -81,6 +87,7 @@ if __name__ == '__main__':
                 if conn:
                     conn.close()
                     conn = None
+                print("Connection closed, waiting for new connections...")
         
     except KeyboardInterrupt:
         print("\nShutting down gracefully...")
