@@ -1,4 +1,3 @@
-
 #!/bin/bash
 
 # Remove any previous container
@@ -18,7 +17,6 @@ docker run -it \
   --device-cgroup-rule='c 189:* rmw' \
   --device=/dev/bus/usb \
   --device=/dev/snd \
-  --device=/dev/ttyUSB0 \
   --privileged \
   -v /dev/bus/usb:/dev/bus/usb \
   -v "$(pwd)":/app \

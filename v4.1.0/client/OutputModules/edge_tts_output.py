@@ -307,11 +307,6 @@ class EdgeTTSOutputModule(OutputModule):
             if not os.path.exists(audio_file):
                 logger.error(f"❌ Audio file not found: {audio_file}")
                 return
-
-            # This signals to other modules that speech is about to start.
-            if self.client and hasattr(self.client, 'tts_started_event'):
-                logger.debug("Firing TTS started event")
-                self.client.tts_started_event.set()
             
             # Play using working audio command (plughw:3,0 or ffplay)
             cmd = self.working_audio_cmd + [audio_file]

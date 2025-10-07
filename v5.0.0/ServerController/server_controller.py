@@ -274,19 +274,36 @@ class ServerController:
         def register_client():
             try:
                 config = request.json
+                # First register with Supabase
                 result = self.supabase_client.register_robot(config)
-                print(f"--- DEBUG: register_client result: {result} ---")  # 
+                print(f"--- DEBUG: register_client result: {result} ---")
                 
                 if result:
-                    return jsonify({
-                        "success": True,
-                        "message": f"Robot {config['robot_name']} registered successfully",
-                        "data": result
-                    }), 200
+                    # Now also register with ClientManager
+                    success, message, client_info = self.client_manager.process_client_init(config)
+                    
+                    if success:
+                        return jsonify({
+                            "success": True,
+                            "message": f"Robot {config['robot_name']} registered successfully",
+                            "data": {
+                                **result,
+                                "client_info": {
+                                    "client_id": client_info.client_id,
+                                    "robot_name": client_info.robot_name,
+                                    "modules": list(client_info.modules)
+                                }
+                            }
+                        }), 200
+                    else:
+                        return jsonify({
+                            "success": False,
+                            "message": f"Supabase registration successful but ClientManager failed: {message}"
+                        }), 400
                 else:
                     return jsonify({
                         "success": False,
-                        "message": "Failed to register robot"
+                        "message": "Failed to register robot with Supabase"
                     }), 400
                     
             except Exception as e:

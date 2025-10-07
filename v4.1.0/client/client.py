@@ -1,4 +1,3 @@
-
 # client.py - Base Client and Abstract Classes
 import json
 import time
@@ -68,6 +67,7 @@ class ServerConnection:
         self.client_config = client_config
         self.client_id = client_config.get('client_id', 'basic_client_001')
         
+        # Initialize Socket.IO client
         self.sio = socketio.Client(
             reconnection=True,
             reconnection_attempts=5,
@@ -77,8 +77,9 @@ class ServerConnection:
             engineio_logger=False
         )
         
+        # Initialize HTTP session
         self.session = requests.Session()
-        # self.session.timeout = 30 # This might be too long, requests will set their own
+        self.session.timeout = 30
         
         self.connected = False
         self.initialized = False
@@ -114,30 +115,29 @@ class ServerConnection:
             logger.error(f"❌ Server error: {data.get('message')}")
     
     def _send_client_init(self):
+        """Send client initialization to server"""
         client_init_data = {
             "robot_name": self.client_config.get('robot_name', 'BasicClient'),
             "modules": self.client_config.get('modules', ['gpt']),
             "client_id": self.client_id,
             "config": self.client_config.get('server_config', {})
         }
+        
         logger.info("📋 Sending client initialization...")
         self.sio.emit('client_init', client_init_data)
-
-    def ensure_connected(self):
-        """Checks for a connection and attempts to reconnect if dropped."""
-        if not self.sio.connected:
-            logger.warning("⚠️ WebSocket connection dropped. Attempting to reconnect...")
-            self.connect()
     
     def connect(self) -> bool:
+        """Connect to server and wait for initialization"""
         try:
             logger.info(f"🔗 Connecting to server: {self.server_url}")
+            
             self.sio.connect(
                 self.server_url,
                 transports=['websocket'],
                 wait_timeout=10
             )
             
+            # Wait for initialization
             timeout = 15
             start_time = time.time()
             while not self.initialized and (time.time() - start_time) < timeout:
@@ -148,7 +148,6 @@ class ServerConnection:
                 return True
             else:
                 logger.error("❌ Client initialization timeout")
-                self.disconnect()
                 return False
         
         except Exception as e:
@@ -156,21 +155,22 @@ class ServerConnection:
             return False
     
     def disconnect(self):
+        """Disconnect from server"""
         if self.connected:
             self.sio.disconnect()
     
     def send_chat_message(self, message: str) -> Optional[Dict]:
+        """Send chat message via HTTP"""
         try:
-            self.ensure_connected()
             url = f"{self.server_url}/client/{self.client_id}/chat"
             payload = {"message": message}
-            logger.info(f"DEBUG: Sending chat payload: {payload}")
-            response = self.session.post(url, json=payload, timeout=20)
+            
+            response = self.session.post(url, json=payload, timeout=15)
             
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.error(f"❌ Chat request failed: {response.status_code} - {response.text}")
+                logger.error(f"❌ Chat request failed: {response.status_code}")
                 return None
         
         except Exception as e:
@@ -178,26 +178,19 @@ class ServerConnection:
             return None
     
     def send_speech_data(self, audio_data: bytes) -> Optional[Dict]:
+        """Send speech audio via HTTP"""
         try:
-            self.ensure_connected()
-            logger.info("--- DEBUG: Preparing speech request ---")
-            logger.info(f"Type of audio_data: {type(audio_data)}")
-            if audio_data:
-                logger.info(f"Length of audio_data: {len(audio_data)} bytes")
-            else:
-                logger.info("CRITICAL: audio_data is None or empty!")
-                logger.info("------------------------------------")
-
             import base64
             url = f"{self.server_url}/client/{self.client_id}/speech"
             audio_b64 = base64.b64encode(audio_data).decode('utf-8')
             payload = {"audio": audio_b64}
+            
             response = self.session.post(url, json=payload, timeout=30)
             
             if response.status_code == 200:
                 return response.json()
             else:
-                logger.error(f"❌ Speech request failed: {response.status_code} - {response.text}")
+                logger.error(f"❌ Speech request failed: {response.status_code}")
                 return None
         
         except Exception as e:
@@ -205,6 +198,7 @@ class ServerConnection:
             return None
     
     def send_frame_data(self, frame_data: Any) -> bool:
+        """Send frame data via WebSocket"""
         if not self.connected or not self.initialized:
             return False
         
@@ -214,6 +208,7 @@ class ServerConnection:
                 'timestamp': time.time(),
                 'source': 'client_camera'
             }
+            
             self.sio.emit('image_frame', frame_payload)
             return True
         
@@ -229,52 +224,26 @@ class BasicClient:
         if not self.config:
             raise Exception("Failed to load configuration")
         
+        # Initialize server connection
         self.server_connection = ServerConnection(
             self.config['server_url'], 
             self.config
         )
         
+        # Module storage
         self.input_modules: Dict[str, InputModule] = {}
         self.output_modules: Dict[str, OutputModule] = {}
         
+        # State
         self.running = False
-
-        self.heartbeat_thread = None
-        self.HEARTBEAT_INTERVAL = 10
-
-        self.tts_started_event = threading.Event()
         
         logger.info(f"🤖 Initializing {self.config['robot_name']}")
         logger.info(f"   🆔 ID: {self.config['client_id']}")
         logger.info(f"   🌐 Server: {self.config['server_url']}")
         logger.info(f"   📦 Modules: {', '.join(self.config['modules'])}")
     
-    def _heartbeat_thread(self):
-        """
-        Sends a small 'heartbeat' message to the server periodically
-        to keep the WebSocket connection alive.
-        """
-        logger.info("❤️ Heartbeat thread started")
-        while self.running:
-            try:
-                # Only send heartbeats if the connection is fully established
-                if self.server_connection and self.server_connection.initialized:
-                    self.server_connection.sio.emit('heartbeat', {'timestamp': time.time()})
-                    logger.debug("❤️ Heartbeat sent")
-                
-                # Wait for the interval, but check for the stop signal every second
-                for _ in range(self.HEARTBEAT_INTERVAL):
-                    if not self.running:
-                        break
-                    time.sleep(1)
-
-            except Exception as e:
-                logger.warning(f"⚠️ Heartbeat error: {e}")
-                time.sleep(self.HEARTBEAT_INTERVAL) # Wait before retrying on error
-        logger.info("❤️ Heartbeat thread stopped")
-    # -----------------------------------
-
     def _load_config(self, config_file: str) -> Optional[Dict]:
+        """Load client configuration from JSON file"""
         try:
             with open(config_file, 'r') as f:
                 config = json.load(f)
@@ -288,6 +257,7 @@ class BasicClient:
             return None
     
     def register_input_module(self, module: InputModule) -> bool:
+        """Register an input module"""
         try:
             module.set_client(self)
             if module.initialize():
@@ -302,6 +272,7 @@ class BasicClient:
             return False
     
     def register_output_module(self, module: OutputModule) -> bool:
+        """Register an output module"""
         try:
             module.set_client(self)
             if module.initialize():
@@ -316,11 +287,13 @@ class BasicClient:
             return False
     
     def send_to_server(self, data_type: str, data: Any) -> Optional[Dict]:
+        """Send data to server based on type"""
         if data_type == 'chat':
             return self.server_connection.send_chat_message(data)
         elif data_type == 'speech':
             return self.server_connection.send_speech_data(data)
         elif data_type == 'frame':
+            # logger.info(f"frame send")
             success = self.server_connection.send_frame_data(data)
             return {'success': success}
         else:
@@ -333,58 +306,62 @@ class BasicClient:
             logger.warning("⚠️ No response data received")
             return
         
+        # Extract response text
         response_text = response_data.get("response", "")
-        if not response_text:
-            return
-
-        logger.info(f"🤖 Server response: {response_text}")
-
-        self.tts_started_event.clear()
-
-        # Send the full text to all output modules for general processing (like TTS)
-        for module_name, module in self.output_modules.items():
-            try:
-                module.process_output({
-                    'text': response_text,
-                    'type': response_type,
-                    'full_response': response_data
-                })
-            except Exception as e:
-                logger.error(f"❌ Error in output module '{module_name}': {e}")
+        if response_text:
+            logger.info(f"🤖 Server response: {response_text}")
+            
+            # Send to all output modules
+            for module_name, module in self.output_modules.items():
+                try:
+                    module.process_output({
+                        'text': response_text,
+                        'type': response_type,
+                        'full_response': response_data
+                    })
+                except Exception as e:
+                    logger.error(f"❌ Error in output module '{module_name}': {e}")
         
+        # Log transcription if speech input
         if response_type == "speech":
             transcription = response_data.get("transcription", "")
             if transcription:
                 logger.info(f"📝 Transcribed: '{transcription}'")
     
     def start(self) -> bool:
+        """Start the client system"""
         try:
+            # Check server health
             logger.info("🏥 Checking server health...")
             if not self._check_server_health():
                 logger.error("❌ Server is not healthy")
                 return False
             
+            # Connect to server
             if not self.server_connection.connect():
                 logger.error("❌ Failed to connect to server")
                 return False
             
+            # Start all modules
             self.running = True
-
-            if not self.heartbeat_thread:
-                self.heartbeat_thread = threading.Thread(target=self._heartbeat_thread, daemon=True)
-                self.heartbeat_thread.start()
             
+            # Start input modules
             for module_name, module in self.input_modules.items():
                 try:
                     if module.start():
                         logger.info(f"🎯 Started input module: {module_name}")
+                    else:
+                        logger.warning(f"⚠️ Failed to start input module: {module_name}")
                 except Exception as e:
                     logger.error(f"❌ Error starting input module '{module_name}': {e}")
             
+            # Start output modules
             for module_name, module in self.output_modules.items():
                 try:
                     if module.start():
                         logger.info(f"🎯 Started output module: {module_name}")
+                    else:
+                        logger.warning(f"⚠️ Failed to start output module: {module_name}")
                 except Exception as e:
                     logger.error(f"❌ Error starting output module '{module_name}': {e}")
             
@@ -396,27 +373,32 @@ class BasicClient:
             return False
     
     def stop(self):
+        """Stop the client system"""
         logger.info("🛑 Stopping client system...")
         self.running = False
         
-        all_modules = list(self.input_modules.values()) + list(self.output_modules.values())
-        for module in all_modules:
+        # Stop all modules
+        for module_name, module in list(self.input_modules.items()) + list(self.output_modules.items()):
             try:
                 module.stop()
-                logger.info(f"🛑 Stopped module: {module.name}")
+                logger.info(f"🛑 Stopped module: {module_name}")
             except Exception as e:
-                logger.error(f"❌ Error stopping module '{module.name}': {e}")
+                logger.error(f"❌ Error stopping module '{module_name}': {e}")
         
+        # Disconnect from server
         self.server_connection.disconnect()
+        
         logger.info("✅ Client system stopped")
     
     def run(self):
+        """Main run loop"""
         try:
             if not self.start():
                 return
             
             logger.info("🚀 Client running... Press Ctrl+C to stop")
             
+            # Main loop - keep running while modules are active
             while self.running:
                 time.sleep(1)
         
@@ -428,6 +410,7 @@ class BasicClient:
             self.stop()
     
     def _check_server_health(self) -> bool:
+        """Check if server is healthy"""
         try:
             response = requests.get(f"{self.server_connection.server_url}/", timeout=5)
             if response.status_code == 200:
