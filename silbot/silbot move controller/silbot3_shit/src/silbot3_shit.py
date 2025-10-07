@@ -48,7 +48,9 @@ if __name__ == '__main__':
                         if not data:
                             print("Client {} disconnected.".format(addr))
                             break # Exit inner loop
-                        message = data.decode('utf-8').lower()
+                        
+                        print("Raw data received: {}".format(data))
+                        message = data.decode('utf-8').lower().strip()
                         print("Received full response: {}".format(message))
 
                         # Handle the handshake message sent by the client
