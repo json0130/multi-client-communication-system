@@ -44,9 +44,9 @@ if __name__ == '__main__':
                     data = conn.recv(1024)
                     
                     # If data is empty (b''), the client has disconnected
-                    if not data:
-                        print("Client {} disconnected.".format(addr))
-                        break # Exit inner loop, go back to s.accept()
+                    # if not data:
+                    #     print("Client {} disconnected.".format(addr))
+                    #     break # Exit inner loop, go back to s.accept()
                         
                     message = data.decode('utf-8').lower()
                     print("Received full response: {}".format(message))
