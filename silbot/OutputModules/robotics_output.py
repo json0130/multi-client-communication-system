@@ -13,8 +13,25 @@ class RoboticsOutputModule:
         self.host = self.config.get('host', 'localhost')
         self.port = self.config.get('port', 7790)
 
+    def process_output(self, command):
+        if not self.enabled:
+            logger.warning("⚠️ Attempted to send command, but Silbot connection is not enabled.")
+            return
+
+        try:
+            logger.info(f"🤖 Sending command to Silbot: {command}")
+            self.conn.sendall(command.encode('utf-8'))
+            logger.info(f"✅ Successfully sent command: {command}")
+        except ConnectionResetError:
+            logger.error("❌ Connection was reset by Silbot. Attempting to reconnect...")
+            self.start()  # Try to reconnect
+        except Exception as e:
+            logger.error(f"❌ Failed to send command: {e}")
+            self.enabled = False  # Disable on error
+
     def start(self):
         try:
+            logger.info(f"🔄 Connecting to Silbot at {self.host}:{self.port}...")
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.connect((self.host, self.port))
             self.enabled = True
@@ -22,17 +39,6 @@ class RoboticsOutputModule:
         except Exception as e:
             logger.error(f"❌ Failed to connect to Silbot machine: {e}")
             self.enabled = False
-
-    def process_output(self, command):
-        if not self.enabled:
-            logger.warning("Attempted to send command, but Silbot connection is not enabled.")
-            return
-
-        try:
-            self.conn.sendall(command.encode('utf-8'))
-            logger.info(f"Sent command: {command}")
-        except Exception as e:
-            logger.error(f"Failed to send command: {e}")
 
     def shutdown(self):
         if self.conn:
