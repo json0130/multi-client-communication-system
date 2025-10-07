@@ -50,6 +50,12 @@ if __name__ == '__main__':
                     message = data.decode('utf-8').lower()
                     print("Received full response: {}".format(message))
                     
+                    # --- FIX: Handle the handshake message sent by the client ---
+                    if message == "client_connected_ok":
+                        print("Handshake received. Connection confirmed and waiting for real data.")
+                        continue # Skip to the next recv() without publishing a gesture
+                    # -------------------------------------------------------------
+                    
                     if "hello" in message or "hi" in message:
                         gesture_pub.publish("wave")
                     elif "i think" in message or "i believe" in message:

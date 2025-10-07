@@ -34,6 +34,13 @@ class RoboticsOutputModule:
             logger.info(f"🔄 Connecting to Silbot at {self.host}:{self.port}...")
             self.conn = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.conn.connect((self.host, self.port))
+            
+            # --- FIX: Send an immediate handshake/ping ---
+            handshake_message = "client_connected_ok"
+            self.conn.sendall(handshake_message.encode('utf-8'))
+            logger.info(f"Handshake sent: {handshake_message}")
+            # ---------------------------------------------
+            
             self.enabled = True
             logger.info(f"✅ Successfully connected to Silbot machine at {self.host}:{self.port}")
         except Exception as e:
