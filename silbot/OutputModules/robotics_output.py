@@ -28,10 +28,26 @@ class RoboticsOutputModule:
             logger.warning("⚠️ Attempted to send command, but Silbot connection is not enabled.")
             return
 
+        # ==========================================================
+        # ✅ FIX: Extract the string command from the input object
+        # The BasicClient sends a dict, but SimpleConcurrentClient sends a str.
+        # We handle both by preferring the 'text' key if it's a dict.
+        # ==========================================================
+        command_to_send = command
+        if isinstance(command, dict):
+            # This handles the call from BasicClient.process_server_response
+            command_to_send = command.get('text', '')
+        
+        # Ensure we have a string command to work with
+        if not isinstance(command_to_send, str) or not command_to_send:
+            logger.warning(f"⚠️ Robotics module received invalid or empty command: {command_to_send}")
+            return
+        
         try:
-            logger.info(f"🤖 Sending command to Silbot: {command}")
-            self.conn.sendall(command.encode('utf-8'))
-            logger.info(f"✅ Successfully sent command: {command}")
+            logger.info(f"🤖 Sending command to Silbot: {command_to_send}")
+            # Use the extracted string, which can now be encoded
+            self.conn.sendall(command_to_send.encode('utf-8')) 
+            logger.info(f"✅ Successfully sent command: {command_to_send}")
         except ConnectionResetError:
             logger.error("❌ Connection was reset by Silbot. Attempting to reconnect...")
             self.start()  # Try to reconnect
