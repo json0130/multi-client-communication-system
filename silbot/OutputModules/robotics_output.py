@@ -59,8 +59,9 @@ class RoboticsOutputModule:
             if "wave" in extracted_tag or "waving" in extracted_tag:
                 command_to_send = "wave"
             elif "think" in extracted_tag:
-                # Use "think" to match the capitalization in your server code for the gesture name
                 command_to_send = "think"
+            elif "celebrate" in extracted_tag or "celebrating" in extracted_tag:
+                command_to_send = "celebrate"
             else:
                 # Fallback: If an unknown tag is found, send the tag content directly (e.g., [custom_move] -> custom_move)
                 command_to_send = extracted_tag

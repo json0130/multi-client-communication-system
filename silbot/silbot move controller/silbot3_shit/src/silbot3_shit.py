@@ -64,6 +64,9 @@ if __name__ == '__main__':
                         elif message == "think":
                             gesture_pub.publish("Think")
                             print("received i think")
+                        elif message == "celebrate":
+                            gesture_pub.publish("Celebrate")
+                            print("received i celebrate")
                         #else:
                             #gesture_pub.publish("Speak_Start")
                             
