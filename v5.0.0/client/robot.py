@@ -35,7 +35,6 @@ class SimpleConcurrentClient(BasicClient):
         # This calls the parent __init__ which sets up self.server_connection
         super().__init__(config_file)
         
-        # --- THIS IS THE KEY FIX ---
         # We define the handlers here, where they have access to 'self' (the client instance)
         # and its output_modules. Then we register them directly on the sio object.
         self._register_custom_event_handlers()
@@ -59,19 +58,35 @@ class SimpleConcurrentClient(BasicClient):
 
         # 2. Define the new handler for direct commands
         def on_execute_command(data):
-            """Handles the 'execute_command' event from the server."""
-            command = data.get('command')
+            command = data.get('command', '')
+            logger.info(f"📢 Executing command: \"{command}\"")
+            
             if command:
-                logger.info(f"📢 Executing command: \"{command}\"")
-                # Use a TTS module to speak the command
-                if 'edge_tts_output' in self.output_modules:
-                    self.output_modules['edge_tts_output'].process_output(command)
-                elif 'pyttsx_tts' in self.output_modules:
-                    self.output_modules['pyttsx_tts'].process_output(command)
-                
-                # Also display it on the console for logging
+                # Display the command
                 if 'console_output' in self.output_modules:
-                    self.output_modules['console_output'].process_output(f"[COMMAND]: {command}")
+                    self.output_modules['console_output'].process_output({'text': f"[COMMAND]: {command}"})
+                
+                # Send the command as a chat message to process it
+                logger.info(f"🚀 Processing delegated command...")
+                response = self.server_connection.send_chat_message(command)
+                
+                if response:
+                    logger.info(f"✅ Command executed successfully")
+                    response_text = response.get('response', '')
+                    
+                    # ✅ ADD THIS - Speak the response
+                    if response_text:
+                        logger.info(f"🗣️ Speaking response: '{response_text[:100]}...'")
+                        
+                        # Speak via TTS
+                        if 'edge_tts_output' in self.output_modules:
+                            self.output_modules['edge_tts_output'].process_output({'text': response_text})
+                        
+                        # Show in console
+                        if 'console_output' in self.output_modules:
+                            self.output_modules['console_output'].process_output({'text': response_text})
+                else:
+                    logger.error(f"❌ Failed to execute delegated command")
 
         # 3. Register these handlers on the SocketIO instance
         if self.server_connection and self.server_connection.sio:
