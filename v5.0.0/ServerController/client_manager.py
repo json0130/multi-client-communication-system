@@ -150,6 +150,20 @@ class ClientManager:
     def _create_server_instance(self, client_info: ClientInfo, robot_registry: Dict) -> Optional[RobotServer]:
         """Create a new RobotServer instance for a client"""
         try:
+
+            robot_role = 'You are a helpful robot.'  # default fallback
+        
+            try:
+                # Correct path: self.db.client.supabase.table()
+                robot_data = self.db.client.supabase.table('robots').select('robot_role').eq('client_id', client_info.client_id).execute()
+                
+                if robot_data.data and len(robot_data.data) > 0:
+                    robot_role = robot_data.data[0].get('robot_role', robot_role)
+                    print(f"🔍 DEBUG: Loaded robot_role for {client_info.client_id}: {robot_role[:100]}...")
+            except Exception as e:
+                print(f"⚠️ Could not fetch robot_role from DB for {client_info.client_id}: {e}")
+                print(f"   Using default role instead")
+            
             # Create custom configuration for this client
             server_config = {
                 # 🚀 SPEED IMPROVEMENTS - Emotion Processing
@@ -179,6 +193,8 @@ class ClientManager:
             "database": self.db,     # pass Database instance
             "user_id": client_info.user_id,  # stored this earlier
 
+            "robot_role": robot_role,
+
                 **client_info.config_overrides  # Apply client-specific overrides
             }
             
@@ -198,6 +214,15 @@ class ClientManager:
         except Exception as e:
             print(f"❌ Error creating server instance for {client_info.get_display_name()}: {e}")
             return None
+        
+    def get_all_servers(self, exclude_id: Optional[str] = None) -> list:
+        """Returns a list of all server instances, optionally excluding one."""
+        with self.manager_lock:
+            servers = [
+                server for client_id, server in self.client_servers.items()
+                if client_id != exclude_id
+            ]
+            return servers
     
     def get_client_server(self, client_id: str) -> Optional[RobotServer]:
         """Get existing client server (don't create if doesn't exist)"""

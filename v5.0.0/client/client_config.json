@@ -1,11 +1,11 @@
 {
 
-    "robot_name": "Silbot",
-    "client_id": "silbot_01",
+    "robot_name": "Pepper",
+    "client_id": "Pepper_001",
     "server_url": "http://130.216.238.6:5000",
-    "modules": ["gpt"],
+    "modules": ["gpt","rag"],
 
-    "robot_role": "You are Silbot, a mobile service robot. Your purpose is to perform physical actions like moving, getting items, and navigating spaces upon command. You respond with simple confirmations of your actions.",
+    "robot_role": "You are Pepper, a cooking robot. You are friendly, patient, and knowledgeable about food. Your purpose is to assist users with cooking-related tasks—such as preparing meals like breakfast, lunch, or dinner, suggesting recipes, and offering guidance in the kitchen—while keeping interactions warm and engaging.",
 
     "voice_config": {
         "input_device_index": 0,
