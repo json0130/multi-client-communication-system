@@ -313,6 +313,54 @@ class BasicClient:
         except Exception as e:
             logger.error(f"❌ Error registering output module '{module.name}': {e}")
             return False
+
+    def connect_to_server(self):
+        """Connect to the WebSocket server"""
+        if self.is_connected:
+            return
+
+        logger.info(f"🔌 Connecting to server: {self.server_connection.server_url}")
+        self.sio = socketio.Client(
+            reconnection_attempts=5,
+            reconnection_delay=3,
+            logger=False,
+            engineio_logger=False
+        )
+        
+        # --- CHANGE 1: Call the new handler registration method ---
+        # This ensures handlers are registered AFTER self.sio is created.
+        self._register_event_handlers()
+        
+        # Define standard connection handlers
+        @self.sio.event
+        def connect():
+            self.is_connected = True
+            logger.info(f"✅ WebSocket connected with SID: {self.sio.sid}")
+            logger.info(f"   Joining room: {self.config.get('client_id')}")
+            self.sio.emit('join_room', {'room': self.config.get('client_id')})
+        
+        @self.sio.event
+        def connect_error(data):
+            logger.error(f"❌ WebSocket connection failed: {data}")
+            self.is_connected = False
+        
+        @self.sio.event
+        def disconnect():
+            self.is_connected = False
+            logger.warning("🔌 WebSocket disconnected")
+
+        try:
+            self.sio.connect(self.server_connection.server_url)
+        except Exception as e:
+            logger.error(f"❌ WebSocket connection failed: {e}")
+
+    # --- CHANGE 2: Add this new placeholder method ---
+    def _register_event_handlers(self):
+        """
+        Placeholder for subclasses to register their SocketIO event handlers.
+        This is called after the 'sio' object is created.
+        """
+        pass
     
     def send_to_server(self, data_type: str, data: Any) -> Optional[Dict]:
         if data_type == 'chat':

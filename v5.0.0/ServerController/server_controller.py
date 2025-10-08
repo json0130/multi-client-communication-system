@@ -274,19 +274,36 @@ class ServerController:
         def register_client():
             try:
                 config = request.json
+                # First register with Supabase
                 result = self.supabase_client.register_robot(config)
-                print(f"--- DEBUG: register_client result: {result} ---")  # 
+                print(f"--- DEBUG: register_client result: {result} ---")
                 
                 if result:
-                    return jsonify({
-                        "success": True,
-                        "message": f"Robot {config['robot_name']} registered successfully",
-                        "data": result
-                    }), 200
+                    # Now also register with ClientManager
+                    success, message, client_info = self.client_manager.process_client_init(config)
+                    
+                    if success:
+                        return jsonify({
+                            "success": True,
+                            "message": f"Robot {config['robot_name']} registered successfully",
+                            "data": {
+                                **result,
+                                "client_info": {
+                                    "client_id": client_info.client_id,
+                                    "robot_name": client_info.robot_name,
+                                    "modules": list(client_info.modules)
+                                }
+                            }
+                        }), 200
+                    else:
+                        return jsonify({
+                            "success": False,
+                            "message": f"Supabase registration successful but ClientManager failed: {message}"
+                        }), 400
                 else:
                     return jsonify({
                         "success": False,
-                        "message": "Failed to register robot"
+                        "message": "Failed to register robot with Supabase"
                     }), 400
                     
             except Exception as e:
@@ -294,6 +311,31 @@ class ServerController:
                     "success": False,
                     "message": str(e)
                 }), 500
+
+        @self.app.route('/client/<client_id>/command', methods=['POST'])
+        def send_command_to_client(client_id):
+            """
+            Receives a command (e.g., dialogue) and forwards it to a specific client.
+            """
+            if not request.is_json:
+                return jsonify({"error": "Invalid request: JSON required"}), 400
+
+            data = request.get_json()
+            command = data.get('command')
+
+            if not command:
+                return jsonify({"error": "The 'command' field is required"}), 400
+
+            # Use the ClientManager to see if the target robot is connected
+            if not self.client_manager.get_client_info(client_id):
+                return jsonify({"error": f"Client '{client_id}' is not registered or active."}), 404
+
+            print(f" M-DEBUG -> Relaying command to robot {client_id}: '{command}'")
+
+            # Emit a WebSocket event specifically to the target client's room
+            self.socketio.emit('execute_command', {'command': command}, room=client_id)
+
+            return jsonify({"status": "success", "message": f"Command sent to {client_id}"}), 200
         
         @self.app.route('/client/<client_id>/chat', methods=['POST'])
         def client_chat(client_id):

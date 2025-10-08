@@ -108,6 +108,8 @@ class RagModule:
             .data
         ) or []
 
+        
+
         if not data:
             print(f"[RAG] No chat logs for user {self.user_id}. Starting empty.")
             return

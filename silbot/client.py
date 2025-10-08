@@ -125,6 +125,12 @@ class ServerConnection:
         
         logger.info("📋 Sending client initialization...")
         self.sio.emit('client_init', client_init_data)
+
+    def ensure_connected(self):
+        """Checks for a connection and attempts to reconnect if dropped."""
+        if not self.sio.connected:
+            logger.warning("⚠️ WebSocket connection dropped. Attempting to reconnect...")
+            self.connect()
     
     def connect(self) -> bool:
         """Connect to server and wait for initialization"""
@@ -171,6 +177,24 @@ class ServerConnection:
                 return response.json()
             else:
                 logger.error(f"❌ Chat request failed: {response.status_code}")
+                return None
+        
+        except Exception as e:
+            logger.error(f"❌ Error sending chat message: {e}")
+            return None
+
+    def send_chat_message(self, message: str) -> Optional[Dict]:
+        try:
+            self.ensure_connected()
+            url = f"{self.server_url}/client/{self.client_id}/chat"
+            payload = {"message": message}
+            logger.info(f"DEBUG: Sending chat payload: {payload}")
+            response = self.session.post(url, json=payload, timeout=20)
+            
+            if response.status_code == 200:
+                return response.json()
+            else:
+                logger.error(f"❌ Chat request failed: {response.status_code} - {response.text}")
                 return None
         
         except Exception as e:
@@ -341,6 +365,8 @@ class BasicClient:
             if not self.server_connection.connect():
                 logger.error("❌ Failed to connect to server")
                 return False
+
+            self.register_via_http()
             
             # Start all modules
             self.running = True
@@ -425,3 +451,15 @@ class BasicClient:
         except Exception as e:
             logger.error(f"❌ Cannot connect to server: {e}")
             return False
+
+    def register_via_http(self):
+        print("📡 Registering client via HTTP...")
+        url = f"{self.server_connection.server_url}/register_client"
+        payload = {
+            "robot_name": self.config.get('robot_name', 'BasicClient'),
+            "modules": self.config.get('modules', ['gpt']),
+            "client_id": self.config.get('client_id', 'basic_client_001'),
+            "robot_role": self.config.get('robot_role', 'default')
+        }
+        response = requests.post(url, json=payload)
+        print("HTTP registration response:", response.json())

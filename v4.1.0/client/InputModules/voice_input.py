@@ -103,7 +103,7 @@ class VoiceInputModule(InputModule):
         try:
             info = self.audio.get_device_info_by_index(11)
             if info['maxInputChannels'] > 0:
-                self.usb_device_index = 0
+                self.usb_device_index = 11
                 self.sample_rate = int(info['defaultSampleRate'])
                 # logger.info(f"   🎯 FALLBACK: Using device 11")
                 # logger.info(f"      Name: {info['name']}")
@@ -161,11 +161,10 @@ class VoiceInputModule(InputModule):
                 # Text input - EXACT working logic
                 elif user_input:
                     logger.info("🔄 Processing text message...")
-                    threading.Thread(
-                        target=self._process_request_in_background,
-                        args=('chat', user_input),
-                        daemon=True
-                    ).start()
+                    if self.client:
+                        response = self.client.send_to_server('chat', user_input)
+                        self.client.process_server_response(response, 'text')
+                
                 # Voice input (empty input) - EXACT working logic
                 else:
                     self._handle_voice_recording()
@@ -196,11 +195,8 @@ class VoiceInputModule(InputModule):
         
         if audio_data and self.client:
             logger.info("🔄 Processing speech message...")
-            threading.Thread(
-                target=self._process_request_in_background,
-                args=('speech', audio_data),
-                daemon=True
-            ).start()
+            response = self.client.send_to_server('speech', audio_data)
+            self.client.process_server_response(response, 'speech')
         else:
             logger.error("❌ No audio recorded")
     
@@ -306,10 +302,3 @@ class VoiceInputModule(InputModule):
         except Exception as e:
             logger.error(f"❌ Error creating WAV file: {e}")
             return None
-
-    def _process_request_in_background(self, data_type: str, data: any):
-        """Sends data to the server and processes the response in a background thread."""
-        if self.client:
-            response = self.client.send_to_server(data_type, data)
-            # The 'speech' response type is used for both text and voice for consistency
-            self.client.process_server_response(response, 'speech')
