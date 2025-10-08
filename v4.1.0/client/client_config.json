@@ -1,0 +1,15 @@
+{
+
+    "robot_name": "ChatBox",
+    "client_id": "chatbox_jetson_001",
+    "server_url": "http://130.216.238.6:5000",
+    "modules": ["gpt", "emotion", "speech"],
+    "voice_config": {
+        "input_device_index": 11,
+        "sample_rate": 48000,
+        "channels": 1,
+        "chunk_size": 1024,
+        "max_record_time": 30,
+        "prefer_usb": true
+    }
+}
