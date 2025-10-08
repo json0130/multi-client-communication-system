@@ -1,6 +1,7 @@
 import socket
 import logging
 import time
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -28,28 +29,55 @@ class RoboticsOutputModule:
             logger.warning("⚠️ Attempted to send command, but Silbot connection is not enabled.")
             return
 
-        # ==========================================================
-        # ✅ FIX: Extract the string command from the input object
-        # The BasicClient sends a dict, but SimpleConcurrentClient sends a str.
-        # We handle both by preferring the 'text' key if it's a dict.
-        # ==========================================================
-        command_to_send = command
+        # 1. Extract the actual text content from either a dict or a string
+        full_text = ""
         if isinstance(command, dict):
-            # This handles the call from BasicClient.process_server_response
-            command_to_send = command.get('text', '')
-            print(f"Extracted command from dict: {command_to_send.lower()}")
-            if "[wave]" in command_to_send.lower():
-                command_to_send = "wave"
-            elif "[think]" in command_to_send.lower():
-                command_to_send = "think"
+            # Handles the call from BasicClient.process_server_response
+            full_text = command.get('text', '')
+        elif isinstance(command, str):
+            # Handles the call from SimpleConcurrentClient.on_chat_response (the plain string)
+            full_text = command
+        else:
+            logger.warning(f"⚠️ Robotics module received non-text/dict input: {command}")
+            return
+            
+        clean_text = full_text.lower()
+        print(f"Robotics Module processing text: {clean_text}")
+
+        # 2. Use Regex to find the first command tag: [ANYTHING_HERE]
+        # The pattern r"\[(.*?)\]" captures the text inside the first pair of brackets
+        tag_match = re.search(r"\[(.*?)\]", clean_text)
         
+        command_to_send = ""
+
+        if tag_match:
+            # Extract the content inside the brackets and clean it up (e.g., [think] -> think)
+            extracted_tag = tag_match.group(1).strip().lower()
+            print(f"✅ Extracted command tag: {extracted_tag}")
+
+            # Now, we map the extracted tag to the simple command word the server expects.
+            if "wave" in extracted_tag or "hello" in extracted_tag or "hi" in extracted_tag:
+                command_to_send = "hello"
+            elif "think" in extracted_tag or "believe" in extracted_tag:
+                # Use "think" to match the capitalization in your server code for the gesture name
+                command_to_send = "think"
+            else:
+                # Fallback: If an unknown tag is found, send the tag content directly (e.g., [custom_move] -> custom_move)
+                command_to_send = extracted_tag
+
+        # 3. Handle the output:
+        # If no explicit action tag was found, send a default command for speaking.
+        if not command_to_send:
+            logger.info("🤖 No explicit action tag found. Sending default 'think'.")
+            command_to_send = "think"
+
         # Ensure we have a string command to work with
         if not isinstance(command_to_send, str) or not command_to_send:
-            logger.warning(f"⚠️ Robotics module received invalid or empty command: {command_to_send}")
+            logger.warning(f"⚠️ Robotics module generated invalid or empty command: {command_to_send}")
             return
         
         try:
-            logger.info(f"🤖 Sending command to Silbot: {command_to_send}")
+            logger.info(f"🤖 Sending resolved action command: {command_to_send}")
             # Use the extracted string, which can now be encoded
             self.conn.sendall(command_to_send.encode('utf-8')) 
             logger.info(f"✅ Successfully sent command: {command_to_send}")
