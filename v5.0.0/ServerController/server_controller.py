@@ -333,7 +333,7 @@ class ServerController:
             print(f" M-DEBUG -> Relaying command to robot {client_id}: '{command}'")
 
             # Emit a WebSocket event specifically to the target client's room
-            self.socketio.emit('execute_command', {'command': command}, room=client_id)
+            # self.socketio.emit('execute_command', {'command': command}, room=client_id)
 
             return jsonify({"status": "success", "message": f"Command sent to {client_id}"}), 200
         

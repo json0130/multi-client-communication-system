@@ -1,4 +1,5 @@
-# request_router.py - Request Routing and Processing Logic
+# request_router.py - COMPLETE FIX with unified delegation handling
+
 import time
 import json
 import re
@@ -19,7 +20,7 @@ class RequestRouter:
     
     def __init__(self, client_manager: ClientManager, socketio=None, database: Optional[Database] = None):
         self.client_manager = client_manager
-        self.socketio = socketio  # ✅ FIXED: Store socketio for broadcasting
+        self.socketio = socketio
         self.db = database or Database()
     
     def route_client_request(self, client_id: str, endpoint: str, flask_request) -> tuple:
@@ -48,9 +49,9 @@ class RequestRouter:
                 return self._handle_health_request(server, display_name)
             elif endpoint == 'emotion':
                 return self._handle_emotion_request(server, display_name)
-            elif endpoint == 'monitor':  # ✅ NEW: Monitor page
+            elif endpoint == 'monitor': 
                 return self._handle_monitor_request(server, display_name)
-            elif endpoint == 'live_stream':  # ✅ NEW: Live stream
+            elif endpoint == 'live_stream': 
                 return self._handle_live_stream_request(server, display_name)
             else:
                 return jsonify({"error": f"Unknown endpoint: {endpoint}"}), 404
@@ -60,83 +61,135 @@ class RequestRouter:
             display_name = client_info.get_display_name() if client_info else client_id
             print(f"❌ Request routing error for {display_name}: {e}")
             return jsonify({"error": "Internal server error", "details": str(e)}), 500
+    
+    def _process_delegation_logic(self, server, llm_response_text: str) -> Dict[str, Any]:
+        """
+        Unified delegation processing logic used by both chat and speech handlers.
         
-    def route_user_request(self, user_id: int, endpoint: str, flask_request):
+        Returns:
+            Dict with keys:
+            - 'is_delegation': bool - whether this is a delegation
+            - 'user_facing_text': str - text to show/speak to user (if not delegation)
+            - 'delegation_speech': str - speech for delegating robot (if delegation)
+            - 'target_id': str - target robot ID (if delegation)
+            - 'task_message': str - task for target robot (if delegation)
         """
-        Handle routes that operate on the user record itself (no client server).
+        result = {
+            'is_delegation': False,
+            'user_facing_text': llm_response_text,
+            'delegation_speech': None,
+            'target_id': None,
+            'task_message': None
+        }
+        
+        # Check for delegation command
+        match = re.search(r"```json\s*(\{.*?\})\s*```", llm_response_text, re.DOTALL)
+        
+        if match and self.socketio:
+            try:
+                command_data = json.loads(match.group(1))
+                target_id = command_data.get("target_robot_id")
+                task_message = command_data.get("task")
+
+                if target_id and task_message:
+                    # Extract user-facing response (without JSON block)
+                    user_facing_response = llm_response_text.replace(match.group(0), "").strip()
+                    
+                    # Construct delegation speech (for the ORIGINAL robot to speak)
+                    delegation_speech = f"{user_facing_response} {task_message}"
+                    
+                    result.update({
+                        'is_delegation': True,
+                        'user_facing_text': user_facing_response,
+                        'delegation_speech': delegation_speech,
+                        'target_id': target_id,
+                        'task_message': task_message
+                    })
+                    
+            except json.JSONDecodeError:
+                print(f"⚠️ Invalid JSON in response. Treating as normal message.")
+        
+        return result
+    
+    def _execute_delegation(self, server, delegation_info: Dict[str, Any]):
         """
-        try:
-            if endpoint == "infer_topics":
-                return self._handle_infer_topics(user_id, flask_request)
-            return jsonify({"error": f"Unknown user endpoint: {endpoint}"}), 404
-        except Exception as e:
-            print(f"❌ User-route error for {user_id}: {e}")
-            return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        Execute the delegation: send to original robot and target robot.
+        
+        Args:
+            server: The originating server instance
+            delegation_info: Dict from _process_delegation_logic with delegation details
+        """
+        if not delegation_info['is_delegation']:
+            return
+        
+        target_id = delegation_info['target_id']
+        task_message = delegation_info['task_message']
+        delegation_speech = delegation_info['delegation_speech']
+        
+        # 1. Send delegation speech to ORIGINAL robot via SocketIO
+        print(f"🗣️ Sending delegation speech to {server.client_id}: '{delegation_speech}'")
+        self.socketio.emit('chat_response', {'response': delegation_speech}, room=server.client_id)
+
+        # 2. Send silent command to TARGET robot
+        print(f"📤 Relaying silent command to {target_id}: '{task_message}'")
+        self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
+
+        # 3. Background task for target's response
+        def execute_and_respond(target_server_instance, task, socket_io_instance):
+            try:
+                print(f"🚀 Executing background task for '{target_server_instance.client_id}'...")
+                delegated_result = target_server_instance.process_chat_message(task, is_delegated_command=True)
+                final_response = delegated_result.get('response', 'Task completed.')
+                print(f"✅ Background task complete. Response from '{target_server_instance.client_id}': {final_response}")
+                
+                # Emit final response for TARGET robot to speak
+                socket_io_instance.emit('chat_response', {'response': final_response}, room=target_server_instance.client_id)
+            except Exception as e:
+                print(f"❌ Error in background delegation thread: {e}")
+
+        target_server = self.client_manager.get_client_server(target_id)
+        if target_server:
+            threading.Thread(target=execute_and_respond, args=(target_server, task_message, self.socketio)).start()
+        else:
+            print(f"⚠️ Target robot '{target_id}' not found or not active")
 
     def _handle_chat_request(self, server, flask_request, display_name: str) -> tuple:
+        """Handle chat request with delegation support"""
         try:
             message = flask_request.json.get('message', '')
             if not message:
                 return jsonify({"error": "Message cannot be empty"}), 400
 
+            # Process the message
             result = server.process_chat_message(message)
             llm_response_text = result.get('response', '')
             
-            # --- START: CORRECTED LOGIC WITH CLEAR IF/ELSE ---
-            match = re.search(r"```json\s*(\{.*?\})\s*```", llm_response_text, re.DOTALL)
+            # Process delegation logic
+            delegation_info = self._process_delegation_logic(server, llm_response_text)
             
-            # PATH 1: The response contains a delegation command.
-            if match and self.socketio:
-                try:
-                    command_data = json.loads(match.group(1))
-                    target_id = command_data.get("target_robot_id")
-                    task_message = command_data.get("task")
-
-                    if target_id and task_message:
-                        # 1. Construct the ONE speech for the ORIGINAL robot (e.g., chatbox).
-                        user_facing_response = llm_response_text.replace(match.group(0), "").strip()
-                        delegation_speech = f"{user_facing_response} {task_message}"
-                        
-                        # 2. Emit the single, combined speech to the ORIGINAL robot.
-                        print(f"🗣️ Sending delegation speech to {server.client_id}: '{delegation_speech}'")
-                        self.socketio.emit('chat_response', {'response': delegation_speech}, room=server.client_id)
-
-                        # 3. Emit the silent command to the TARGET robot (e.g., silbot).
-                        print(f"📤 Relaying silent command to {target_id}: '{task_message}'")
-                        self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
-
-                        # 4. Handle the background task for the target's response.
-                        def execute_and_respond(target_server_instance, task, socket_io_instance):
-                            try:
-                                print(f"🚀 Executing background task for '{target_server_instance.client_id}'...")
-                                delegated_result = target_server_instance.process_chat_message(task, is_delegated_command=True)
-                                final_response = delegated_result.get('response', 'Task completed.')
-                                print(f"✅ Background task complete. Response from '{target_server_instance.client_id}': {final_response}")
-
-                                # 5. Emit the final response for the TARGET robot to speak.
-                                socket_io_instance.emit('chat_response', {'response': final_response}, room=target_server_instance.client_id)
-                            except Exception as e:
-                                print(f"❌ Error in background delegation thread: {e}")
-
-                        target_server = self.client_manager.get_client_server(target_id)
-                        if target_server:
-                            threading.Thread(target=execute_and_respond, args=(target_server, task_message, self.socketio)).start()
-                        
-                        # The HTTP response only contains the user-facing part.
-                        return jsonify({"response": user_facing_response, "client_id": server.client_id}), 200
-
-                except json.JSONDecodeError:
-                    print(f"⚠️ Invalid JSON in response. Treating as a normal message.")
-                    # If JSON fails, the code will now correctly fall through to the 'else' block.
-
-            # PATH 2: The response is a normal, non-delegated message.
-            # This 'else' block ensures this code ONLY runs if the 'if match' above was false.
-            if self.socketio:
-                print(f"🗣️ Sending normal response to {server.client_id}: '{llm_response_text}'")
-                self.socketio.emit('chat_response', {'response': llm_response_text}, room=server.client_id)
-            
-            return jsonify({"response": llm_response_text, "client_id": server.client_id}), 200
-            # --- END: CORRECTED LOGIC ---
+            if delegation_info['is_delegation']:
+                # Execute delegation
+                self._execute_delegation(server, delegation_info)
+                
+                # Return metadata only
+                return jsonify({
+                    "status": "delegated",
+                    "client_id": server.client_id,
+                    "target_robot": delegation_info['target_id'],
+                    "message": "Task delegated successfully"
+                }), 200
+            else:
+                # Normal response - send via SocketIO
+                if self.socketio:
+                    print(f"🗣️ Sending normal response to {server.client_id}: '{llm_response_text}'")
+                    self.socketio.emit('chat_response', {'response': llm_response_text}, room=server.client_id)
+                
+                # Return metadata
+                return jsonify({
+                    "status": "completed",
+                    "client_id": server.client_id,
+                    "message": "Response sent successfully"
+                }), 200
 
         except Exception as e:
             print(f"❌ {display_name}: Chat request error: {e}")
@@ -145,7 +198,7 @@ class RequestRouter:
             return jsonify({"error": "Chat processing failed", "details": str(e)}), 500
     
     def _handle_speech_request(self, server, flask_request, display_name: str) -> tuple:
-        """Handle speech-to-text request - requires Speech module"""
+        """Handle speech-to-text request with delegation support"""
         try:
             client_modules = self.client_manager.get_client_modules(server.client_id)
             
@@ -163,26 +216,56 @@ class RequestRouter:
             
             print(f"🎤 {display_name}: Processing speech input")
             
-            # Process with the client's server instance
+            # Process speech input
             result = server.process_speech_input(audio_b64)
             
             transcription = result.get('transcription', '')
             print(f"📝 {display_name}: Transcribed: '{transcription}'")
             
-            if result.get('response'):
-                print(f"🤖 {display_name}: GPT Response: '{result.get('response')}'")
+            # Check if GPT response is present (means GPT module is enabled)
+            llm_response_text = result.get('response')
             
+            if llm_response_text:
+                # Process delegation logic for the GPT response
+                delegation_info = self._process_delegation_logic(server, llm_response_text)
+                
+                if delegation_info['is_delegation']:
+                    # Execute delegation
+                    print(f"🔄 {display_name}: Speech triggered delegation")
+                    self._execute_delegation(server, delegation_info)
+                    
+                    # Return speech result with delegation status
+                    return jsonify({
+                        "status": "delegated",
+                        "client_id": server.client_id,
+                        "robot_name": getattr(server, 'robot_name', 'Unknown'),
+                        "transcription": transcription,
+                        "confidence": result.get('confidence'),
+                        "target_robot": delegation_info['target_id'],
+                        "message": "Speech processed and task delegated",
+                        "timestamp": time.time()
+                    }), 200
+                else:
+                    # Normal response - send via SocketIO
+                    if self.socketio:
+                        print(f"🗣️ Sending speech response to {server.client_id}: '{llm_response_text}'")
+                        self.socketio.emit('chat_response', {'response': llm_response_text}, room=server.client_id)
+            
+            # Return speech processing result
             return jsonify({
+                "status": "completed",
                 "client_id": server.client_id,
                 "robot_name": getattr(server, 'robot_name', 'Unknown'),
                 "transcription": transcription,
                 "confidence": result.get('confidence'),
-                "response": result.get('response'),  # If GPT is also enabled
+                "message": "Speech processed successfully",
                 "timestamp": time.time()
             }), 200
             
         except Exception as e:
             print(f"❌ {display_name}: Speech request error: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": "Speech processing failed", "details": str(e)}), 500
     
     def _handle_health_request(self, server, display_name: str) -> tuple:
@@ -281,6 +364,18 @@ class RequestRouter:
                 "error": "Frame processing failed",
                 "details": str(e)
             }
+    
+    def route_user_request(self, user_id: int, endpoint: str, flask_request):
+        """
+        Handle routes that operate on the user record itself (no client server).
+        """
+        try:
+            if endpoint == "infer_topics":
+                return self._handle_infer_topics(user_id, flask_request)
+            return jsonify({"error": f"Unknown user endpoint: {endpoint}"}), 404
+        except Exception as e:
+            print(f"❌ User-route error for {user_id}: {e}")
+            return jsonify({"error": "Internal server error", "details": str(e)}), 500
             
     def _handle_infer_topics(self, user_id: int, flask_request):
         sample_size = int(flask_request.json.get("sample_size", 100)) if flask_request.is_json else 100
