@@ -100,7 +100,7 @@ class RagModule:
         # Rebuild from Supabase chat logs (all past messages)
         print(f"[RAG] Building index for user {self.user_id} from Supabase…")
         data = (
-            self.supabase.table("chat_logs")
+            self.supabase.supabase.table("chat_logs")
             .select("message")
             .eq("user_id", self.user_id)
             .order("id")
