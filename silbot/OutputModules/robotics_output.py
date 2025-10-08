@@ -56,9 +56,9 @@ class RoboticsOutputModule:
             print(f"✅ Extracted command tag: {extracted_tag}")
 
             # Now, we map the extracted tag to the simple command word the server expects.
-            if "wave" in extracted_tag or "hello" in extracted_tag or "hi" in extracted_tag:
-                command_to_send = "hello"
-            elif "think" in extracted_tag or "believe" in extracted_tag:
+            if "wave" in extracted_tag or "waving" in extracted_tag:
+                command_to_send = "wave"
+            elif "think" in extracted_tag:
                 # Use "think" to match the capitalization in your server code for the gesture name
                 command_to_send = "think"
             else:
