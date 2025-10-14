@@ -45,7 +45,12 @@ class RobotServer:
         
         # Module instances (initialized based on enabled_modules)
         self.emotion_processor = None
-        self.gpt_client = None
+        # Initialize GPT with config
+        if 'gpt' in enabled_modules:
+            self.gpt_client = GPTClient(config.get('llm_config'))
+            if not self.gpt_client.setup_openai():
+                print("❌ Failed to initialize GPT client")
+                self.gpt_client = None
         self.speech_processor = None
         self.web_interface = None  # Individual web interface for this client
         self.rag = None
