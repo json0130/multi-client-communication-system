@@ -2,6 +2,10 @@
 import sys
 import os
 import logging
+from typing import Optional
+
+# --- NEW IMPORTS ---
+#import serial.tools.list_ports
 
 # Add modules to path
 sys.path.append(os.path.join(os.path.dirname(__file__), 'modules'))
@@ -18,9 +22,10 @@ from OutputModules.console_output import ConsoleOutputModule
 from OutputModules.edge_tts_output import EdgeTTSOutputModule
 from OutputModules.tts_output import TTSOutputModule, PyttsxTTSOutputModule
 #from OutputModules.arduino_output import ArduinoOutputModule
+from OutputModules.robotics_output import RoboticsOutputModule
 
 logger = logging.getLogger(__name__)
- 
+
 class SimpleConcurrentClient(BasicClient):
     """
     Client that uses simple config format and applies sensible defaults
@@ -28,126 +33,211 @@ class SimpleConcurrentClient(BasicClient):
     """
     
     def __init__(self, config_file: str = "client_config.json"):
+        # This calls the parent __init__ which sets up self.server_connection
         super().__init__(config_file)
+        
+        # --- THIS IS THE KEY FIX ---
+        # We define the handlers here, where they have access to 'self' (the client instance)
+        # and its output_modules. Then we register them directly on the sio object.
+        self._register_custom_event_handlers()
 
+        self.setup_all_modules()
+
+    def _register_custom_event_handlers(self):
+        """
+        Defines and registers all client-specific event handlers.
+        """
+        # 1. Define the handler for chat responses
         def on_chat_response(data):
             response = data.get('response')
             if response:
+                if 'robotics_output' in self.output_modules:
+                    self.output_modules['robotics_output'].process_output(response)
                 if 'console_output' in self.output_modules:
-                    # This calls the method in your console_output.py to print the message
                     self.output_modules['console_output'].process_output(response)
-                else:
-                    print(f"\n🤖 Server Response: {response}")
-
                 if 'edge_tts_output' in self.output_modules:
-                    self.output_modules['edge_tts_output'].process_output(response)        
+                    self.output_modules['edge_tts_output'].process_output(response)
+                elif 'pyttsx_tts' in self.output_modules:
+                    self.output_modules['pyttsx_tts'].process_output(response)
 
-        # Register the handler with the socketio client instance
+        # 2. Define the new handler for direct commands
+        def on_execute_command(data):
+            """Handles the 'execute_command' event from the server."""
+            command = data.get('command')
+            if command:
+                logger.info(f"📢 Executing command: \"{command}\"")
+                # Use a TTS module to speak the command
+                if 'edge_tts_output' in self.output_modules:
+                    self.output_modules['edge_tts_output'].process_output(command)
+                elif 'pyttsx_tts' in self.output_modules:
+                    self.output_modules['pyttsx_tts'].process_output(command)
+                
+                # Also display it on the console for logging
+                if 'console_output' in self.output_modules:
+                    self.output_modules['console_output'].process_output(f"[COMMAND]: {command}")
+
+        # 3. Register these handlers on the SocketIO instance
         if self.server_connection and self.server_connection.sio:
             self.server_connection.sio.on('chat_response', on_chat_response)
-        
-        # This line runs after the handler is set up
-        self.setup_all_modules()
+            self.server_connection.sio.on('execute_command', on_execute_command)
+            logger.info("✅ Client-specific event handlers registered.")
+        else:
+            logger.error("❌ Cannot register handlers: server_connection or sio not initialized.")
+    
+    def _on_arduino_connected(self): 
+        """Called when Arduino connects""" 
+        logger.info("✅ Arduino robot connected and ready!") 
 
+    def _on_arduino_disconnected(self): 
+        """Called when Arduino disconnects""" 
+        logger.warning("⚠️ Arduino robot disconnected") 
+
+    def _on_arduino_error(self, error_msg: str): 
+        """Called on Arduino connection errors""" 
+        logger.error(f"❌ Arduino error: {error_msg}") 
+
+    def send_robot_emotion(self, emotion: str) -> bool: 
+        """Send emotion to Arduino robot""" 
+        if hasattr(self, 'arduino_module') and self.arduino_module and self.arduino_module.is_connected(): 
+            return self.arduino_module.send_emotion(emotion) 
+        logger.warning(f"⚠️ Cannot send emotion '{emotion}' - Arduino not connected") 
+        return False 
+
+    def send_robot_command(self, command: str) -> bool: 
+        """Send custom command to Arduino robot""" 
+        if hasattr(self, 'arduino_module') and self.arduino_module and self.arduino_module.is_connected(): 
+            return self.arduino_module.send_custom_command(command) 
+        logger.warning(f"⚠️ Cannot send command '{command}' - Arduino not connected") 
+        return False
+
+    def _detect_arduino_port(self) -> Optional[str]:
+        """
+        Auto-detect the Arduino/ESP32 port by looking for common identifiers.
+        Returns the port name if found, otherwise None.
+        """
+        logger.info("   🔍 Searching for Arduino/ESP32 port...")
+        ports = serial.tools.list_ports.comports()
+        
+        # Common identifiers for ESP32 and Arduino boards (CP210x is on your board)
+        known_identifiers = ["CP210x", "CH340", "USB Serial", "Arduino"]
+        
+        for port in ports:
+            # Check description and manufacturer for known identifiers
+            for identifier in known_identifiers:
+                if (port.description and identifier in port.description) or \
+                   (port.manufacturer and identifier in port.manufacturer):
+                    logger.info(f"   ✅ Found device '{port.description}' on port {port.device}")
+                    return port.device
+        
+        logger.warning("   ⚠️ Could not auto-detect an Arduino/ESP32 port.")
+        return None
+    
     def setup_all_modules(self):
         """Setup all modules with sensible defaults based on simple config"""
         
         # === INPUT MODULES ===
+        # This block enables the client to use its keyboard
+        # --- Text Input is now always enabled ---
+        logger.info("⌨️ Setting up text input (always on)...")
+        text_input = TextInputModule("text_input")
+        self.register_input_module(text_input)
+        text_input.start()
         
-        # 1. Text Input (always available)
-        # logger.info("🔤 Setting up text input...")
-        # text_input = TextInputModule("text_input")
-        # self.register_input_module(text_input)
-        
-        # 2. Voice Input (if speech module enabled)
         if 'speech' in self.config.get('modules', []):
             logger.info("🎤 Setting up voice input...")
-            # Default voice settings
-            voice_config = {
+            voice_config = self.config.get('voice_config', {
                 'sample_rate': 48000,
                 'channels': 1,
-                'input_device_index': 11,  # Common for USB mics
+                'input_device_index': 11,
                 'max_record_time': 30
-            }
+            })
             voice_input = VoiceInputModule("voice_input", voice_config)
             self.register_input_module(voice_input)
             voice_input.start()
         
-        # 3. Camera Input (if emotion module enabled)
         if 'emotion' in self.config.get('modules', []):
             logger.info("📹 Setting up camera input...")
+            camera_config = self.config.get('camera_config', {
+                'camera_index': 0, 'width': 1280, 'height': 720,
+                'fps': 15, 'send_fps': 15, 'jpeg_quality': 85
+            })
             
-            # Default camera settings
-            camera_config = {
-                'camera_index': 0,
-                'width': 1280, #was 640
-                'height': 720, #was 480
-                'fps': 15,	# was 30
-                'send_fps': 15,  # Send 1 frame per second to server
-                'jpeg_quality': 85
-            }
-            
-            # Try RealSense first (for Jetson setups), fallback to regular camera
             logger.info("   🎯 Attempting camera...")
             realsense_input = RealSenseInputModule("camera_input", camera_config)
+            realsense_input.start()
             if not self.register_input_module(realsense_input):
-                logger.info("   📸 RealSense failed, using regular camera...")
-                camera_input = CameraInputModule("camera_input", camera_config)
-                self.register_input_module(camera_input)
-        
+                logger.warning("   📸 RealSense failed, registration incomplete.")
+                # You might want to add a fallback to a regular camera here if needed
+
         # === OUTPUT MODULES ===
         
-        # 1. Console Output
         logger.info("🖥️ Setting up console output...")
-        console_config = {
-            'show_timestamps': True,
-            'show_response_type': True,
-            'prefix': '🤖'
-        }
-        console_output = ConsoleOutputModule("console_output", console_config)
+        console_output = ConsoleOutputModule("console_output", self.config.get('console_config', {}))
         self.register_output_module(console_output)
         console_output.start()
-
-        # 2. EDGE TTS Output
-        logger.info("🎙️ Setting up Edge text-to-speech...")
         
-        # Edge TTS
-        edge_config = {
-            'voice': 'en-US-AriaNeural',  # Very natural female voice
-            # Other good options:
-            # 'en-US-JennyNeural' - Natural female
-            # 'en-US-GuyNeural' - Natural male  
-            # 'en-US-DavisNeural' - Warm male
-            'rate': '+0%',
-            'pitch': '+0Hz',
-            'remove_emotion_tags': True,
-        }
+        logger.info("🎙️ Setting up Edge text-to-speech...")
+        edge_config = self.config.get('edge_tts_config', {
+            'voice': 'en-US-AriaNeural', 'rate': '+0%', 'pitch': '+0Hz', 'remove_emotion_tags': True
+        })
         
         edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
         if self.register_output_module(edge_tts):
-            logger.info("   ✅ Using Microsoft Edge TTS (plughw:3,0)")
+            logger.info("   ✅ Using Microsoft Edge TTS")
             edge_tts.start()
         else:
-            logger.info("   🔄 Edge TTS not available, trying espeak...")
+            logger.warning("   ⚠️ Edge TTS failed. You may need to install it.")
+            # Fallback can be added here if needed
             
-            # Final fallback to espeak
-            espeak_config = {
-                'voice': 'en+f2',
-                'rate': 155,
-                'volume': 100,
-                'remove_emotion_tags': True
-            }
-                
-            from OutputModules.tts_output import TTSOutputModule
-            tts_output = TTSOutputModule("tts_output", espeak_config)
-            self.register_output_module(tts_output)
+        # 3. Robotics Output
+        logger.info("🤖 Setting up Robotics control...")
+        robotics_config = {
+            'host': 'localhost',  # Because of --network=host, localhost works.
+            'port': 7790          # Port we chose for the server
+        }
+        robotics_output = RoboticsOutputModule("robotics_output", robotics_config)
+        self.register_output_module(robotics_output)
+        robotics_output.start()
+
+        # # --- ARDUINO SETUP SECTION (MODIFIED) ---
+        # if self.config.get('features', {}).get('arduino_integration', True):
+        #     logger.info("🔌 Setting up Arduino output...")
+            
+        #     # Start with the config file's settings
+        #     arduino_config = self.config.get('arduino_output', {})
+            
+        #     # Try to auto-detect the port
+        #     detected_port = self._detect_arduino_port()
+            
+        #     # If a port is detected, it overrides the one in the config file.
+        #     if detected_port:
+        #         logger.info(f"   🎯 Using auto-detected port: {detected_port}")
+        #         arduino_config['arduino_port'] = detected_port
+        #     else:
+        #         logger.warning(f"   Fallback to port from config file: {arduino_config.get('arduino_port')}")
+            
+        #     # Set sensible defaults if they are missing
+        #     arduino_config.setdefault('arduino_baud', 115200)
+        #     arduino_config.setdefault('auto_connect', True)
+
+        #     # Important: The module name must match the key used in client.py
+        #     self.arduino_module = ArduinoOutputModule("arduino_output", arduino_config)
+            
+        #     self.arduino_module.on_connected = self._on_arduino_connected
+        #     self.arduino_module.on_disconnected = self._on_arduino_disconnected
+        #     # Correcting the callback name based on your file
+        #     self.arduino_module.on_connection_error = self._on_arduino_error
+            
+        #     if self.register_output_module(self.arduino_module):
+        #         logger.info("   ✅ Arduino output module registered")
+        #     else:
+        #         logger.warning("   ⚠️ Arduino output module failed to register")
     
     def print_startup_info(self):
         """Print information about what's running"""
         print("\n" + "="*60)
         print("🤖 CHATBOX CLIENT STARTED")
         print("="*60)
-        
         print(f"🏷️  Robot: {self.config.get('robot_name', 'Unknown')}")
         print(f"🆔 Client ID: {self.config.get('client_id', 'Unknown')}")
         print(f"🌐 Server: {self.config.get('server_url', 'Unknown')}")
@@ -155,17 +245,15 @@ class SimpleConcurrentClient(BasicClient):
         
         print("\n📥 INPUT MODULES:")
         for name, module in self.input_modules.items():
-            status = "✅ Running" if module.enabled else "❌ Failed"
+            status = "✅ Running" # Registration now happens in setup_all_modules
             print(f"   • {name.replace('_', ' ').title()}: {status}")
         
         print("\n📤 OUTPUT MODULES:")
         for name, module in self.output_modules.items():
-            status = "✅ Running" if module.enabled else "❌ Failed"
+            status = "✅ Running"
             print(f"   • {name.replace('_', ' ').title()}: {status}")
         
         print("\n💡 USAGE:")
-        if 'text_input' in self.input_modules:
-            print("   💬 Type any message + Enter = Text chat")
         if 'voice_input' in self.input_modules:
             print("   🎤 Empty line + Enter = Voice recording")
         if any('camera' in name for name in self.input_modules):
@@ -181,36 +269,25 @@ def main():
     print("📋 Using simple configuration format...")
     
     try:
-        # Create client with simple config
         client = SimpleConcurrentClient("client_config.json")
-        
-        # Show what's running
         client.print_startup_info()
         
-        # Start everything
         print("🚀 Starting all modules...")
         client.run()
-        
         return 0
         
     except FileNotFoundError:
         print("❌ Error: client_config.json not found")
-        print("\n📝 Please create client_config.json with:")
-        print('''{
-    "robot_name": "ChatBox",
-    "client_id": "chatbox_jetson_001", 
-    "server_url": "http://192.168.1.100:5000",
-    "modules": ["gpt", "emotion", "speech"]
-}''')
+        # Provide a helpful template
         return 1
         
     except KeyboardInterrupt:
         print("\n🛑 Stopped by user")
         return 0
     except Exception as e:
-        logger.error(f"❌ Error: {e}")
+        logger.error(f"❌ A critical error occurred in main: {e}", exc_info=True)
         return 1
 
 if __name__ == "__main__":
     sys.exit(main())
-
+    
