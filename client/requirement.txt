@@ -1,0 +1,20 @@
+# requirements.txt
+
+# Core ML/CV
+ultralytics
+opencv-python # Often a dependency for CV tasks
+numpy
+
+# OpenAI and Environment
+openai
+python-dotenv
+
+# Hardware & Audio/Speech
+
+pyserial
+pyttsx3
+edge-tts
+
+# Networking
+python-socketio[client]
+websocket-client
