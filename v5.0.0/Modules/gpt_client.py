@@ -52,8 +52,8 @@ class GPTClient:
             # Convert history to message format
             messages = [{"role": "system", "content": system_prompt}]
             # Add conversation history
-            for msg in self.conversation_history:
-                messages.append({"role": msg.role, "content": msg.content})
+            # for msg in self.conversation_history:
+            #     messages.append({"role": msg.role, "content": msg.content})
             
             # This is now a clean, generic function. It just passes the prompts along.
             response = self.client.chat.completions.create(
@@ -98,6 +98,7 @@ class GPTClient:
 
             # Convert history to message format
             messages = [{"role": "system", "content": system_content}]
+            #messages = [{"role": "system", "content": system_content}, {"role": "user", "content": user_content}]
             # Add conversation history
             for msg in self.conversation_history:
                 messages.append({"role": msg.role, "content": msg.content})
