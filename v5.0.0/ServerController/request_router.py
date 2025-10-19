@@ -132,10 +132,12 @@ class RequestRouter:
 
         # 2. Send silent command to TARGET robot
         print(f"📤 Relaying silent command to {target_id}: '{task_message}'")
-        self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
+        # self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
 
         # 3. Background task for target's response
         def execute_and_respond(target_server_instance, task, socket_io_instance):
+            import time
+            time.sleep(10)  # Brief pause to ensure command is registered
             try:
                 print(f"🚀 Executing background task for '{target_server_instance.client_id}'...")
                 delegated_result = target_server_instance.process_chat_message(task, is_delegated_command=True)

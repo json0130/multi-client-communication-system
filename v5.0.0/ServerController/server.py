@@ -56,7 +56,6 @@ class RobotServer:
         self.latest_confidence = 0.0
         self.last_update_time = time.time()
         
-        
         # State tracking
         self.components_initialized = False
         self.initialization_lock = threading.Lock()
@@ -354,8 +353,6 @@ class RobotServer:
     def _get_delegation_prompt(self, user_message: str) -> str:
         """Constructs the system prompt for DELEGATION MODE."""
         my_role = self.config.get('robot_role', 'You are a helpful robot.')
-
-        print(f"🔍 DEBUG: Using role prompt: {my_role[:100]}...")
 
         rag_context = ""
         if self.rag:
