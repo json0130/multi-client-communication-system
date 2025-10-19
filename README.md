@@ -1,267 +1,253 @@
-An Emotion-Aware Social Robot for Children with Mental Health Issues. With real-time emotion detection and a chatbot system that combines computer vision, natural language processing, and hardware integration, designed to be used for children.
+# Role-Adaptive Multi-Robot Communication Framework
 
-## Project Overview
+This repository presents the **Role-Adaptive Communication Framework** for multi-robot systems powered by **Large Language Models (LLMs)**. The framework enables heterogeneous robots to communicate adaptively according to their assigned roles, personalities, and interaction contexts. It integrates **Retrieval-Augmented Generation (RAG)** for contextual memory, **adaptive persona configuration** via system prompts, and a **centralised orchestration architecture** for efficient coordination and scalability.
 
-This project develops a comprehensive human-robot interaction (HRI) system that combines real-time emotion recognition with intelligent conversational capabilities. The system is specifically designed to support children experiencing mental health challenges, providing natural engagement through facial emotion detection and meaningful interactive experiences.
+Developed as part of the University of Auckland Part IV Research Project (2025), this system combines emotion-aware communication, dynamic LLM configuration, and robot-to-robot (RRI) task delegation across multiple platforms.
+
+---
+
+## 1. Project Overview
+
+The **Role-Adaptive Multi-Robot Framework** represents an evolution from a one-to-one adaptive learning system to a fully integrated **multi-agent communication system**.  
+
+It allows each robot to operate under a **unique persona and functional configuration**, while maintaining shared context through a centralised server.  
+The system supports both **Human-Robot Interaction (HRI)** and **Robot-Robot Interaction (RRI)** for cooperative operations across heterogeneous platforms.
+
+### Key Capabilities
+
+- **Centralised Orchestration Server** for multi-robot management  
+- **Role-Adaptive Communication** powered by modular LLM integration  
+- **Persona Assignment** through detailed JSON-based configuration files  
+- **Dynamic Task Delegation** between heterogeneous robot agents  
+- **WebSocket Communication** for low-latency, bidirectional streaming  
+- **RAG-based Memory System** for personalised and context-aware interactions  
+- **Scalable Client Architecture** supporting simultaneous robot connections  
+
+---
+
+## 2. System Architecture
+
+The system consists of a **Centralised Server** and multiple **Robot Clients**, communicating via asynchronous WebSockets.  
+Each robot registers to the server using a JSON configuration file that defines its role, LLM model, and modules (e.g., emotion recognition, speech, face recognition).
+
+### Core Components
+
+| Layer | Description |
+|-------|--------------|
+| **Central Server** | Hosts orchestration logic, LLM APIs, RAG memory, and module routing. |
+| **Robot Client** | Connects to the server with a JSON-based configuration defining its functional modules and personality. |
+| **RAG Database** | Stores conversation history and key user information for context retrieval. |
+| **LLM Integration** | Supports ChatGPT, Gemini, DeepSeek, and Llama for flexible persona configurations. |
+| **RRI Module** | Handles robot-to-robot task delegation and message routing. |
+
+### Communication Flow
+
+1. Each robot loads its configuration (`robot_config.json`) and connects to the server.  
+2. The server assigns a session and activates modules (LLM, emotion, STT, etc.).  
+3. Robots communicate through real-time WebSocket channels.  
+4. Robots may exchange context and tasks via RRI through the central server.  
+
+---
+
+## 3. Hardware Platforms
+
+| Platform | Description |
+|-----------|-------------|
+| **CHATBOX** | Compact companion robot with 12 DOF and emotion-aware interaction capabilities. |
+| **Silbot** | Mobile humanoid robot used for navigation and guiding roles, with expressive arm gestures. |
+| **IrobiQ** | Healthcare-focused service robot for elderly care and chronic disease management. |
+| **Pepper** | Semi-humanoid social robot with 20 DOF for customer service and education tasks. |
+| **EveR-4 H22** | High-fidelity humanoid robotic head capable of advanced emotional expression. |
+
+---
+
+## 4. Software Architecture
+
+### 4.1. Server Modules
+
+- **LLM Orchestrator** – routes queries to appropriate LLMs (GPT, Gemini, DeepSeek, Llama)
+- **RAG Engine** – retrieves relevant information from stored conversations
+- **Emotion Recognition** – processes facial input for emotional context
+- **Speech Modules** – includes Whisper STT and TTS engines
+- **RRI Handler** – manages robot-to-robot task exchanges and message routing
+
+### 4.2. Client Configuration
+
+Each robot client is defined by a JSON configuration file specifying:
+- Role and personality prompt
+- Functional modules
+- LLM model selection
+- Hardware settings (e.g., Arduino, camera, ports)
+
+Example:
+
+```json
+{
+  "robot_name": "CHATBOX",
+  "client_id": "robot_01",
+  "server_url": "ws://<server-ip>:5000",
+  "modules": ["gpt", "emotion", "speech"],
+  "robot_role": "You are ChatBox, a compassionate companion robot for children. You respond with empathy and encouragement.",
+  "llm_config": {
+    "provider": "openai",
+    "model": "gpt-4o-mini",
+    "temperature": 0.7,
+    "max_tokens": 1000
+  },
+  "hardware_configuration": {
+    "arduino_port": "/dev/ttyUSB0",
+    "arduino_baud": 115200,
+    "arduino_timeout": 2.0
+  }
+}
+```
+
+### 5. Role-Adaptive Communication
+
+Each robot client exhibits distinct communication characteristics derived from its **role definition** and **personality prompt** within the configuration file.  
+This ensures that the robot’s dialogue, tone, and behavioural output align naturally with its assigned function in the environment.
+
+### Communication Personalities
+
+| Role | Communication Style | Description |
+|------|----------------------|-------------|
+| **Receptionist Robot** | Polite, informative, and concise | Welcomes users, provides guidance, and delegates navigation tasks. |
+| **Guide Robot** | Friendly, directive, and confident | Physically escorts users, provides directional support. |
+| **Companion Robot** | Warm, empathetic, and nurturing | Engages in supportive dialogue with emotional awareness. |
+
+The system integrates both **linguistic adaptation** and **contextual consistency**, using LLM configuration parameters such as temperature, top-p, and role-specific system prompts.
+
+---
+
+## 6. Robot-to-Robot Communication
+
+The **Robot-to-Robot Interaction (RRI)** protocol enables contextual and cooperative task management between heterogeneous robots.  
+Messages are exchanged via the **central WebSocket server**, ensuring synchronised task flow and shared dialogue context.
 
 ### Key Features
 
-- **Real-time Emotion Detection**: Facial emotion recognition using EfficientNet
-- **Contextual AI Responses**: ChatGPT integration with emotion-aware prompting
-- **Hardware Integration**: Chatbot integrated with Arduino-controlled physical responses and feedback
-- **Live Video Streaming**: WebSocket-based real-time video transmission
-- **Server Hosted**: Streaming hosted on the Server through Google Colab
-- **Portability**: Chatbot is portable through implementation on the Jetson Nano board
+- **Task Delegation:** Transfers a user’s request to the most suitable robot.
+- **Context Retention:** Maintains dialogue state and emotional context across robots.
+- **Verbal Coordination:** Expresses transitions through human-understandable speech.
 
-### System Architecture
+### Example Dialogue
 
-**Hardware**
-- **Jetson Nano Board**: Primary processing unit
-- **Intel RealSense Camera**: Depth-aware facial capture and real-time video streaming
-- **ChatBox Robot Platform**: Physical interaction and gesture execution
-- **Bluetooth Speaker**: Audio output for text-to-speech functionality
+Receptionist Robot: “The nearest restroom is at the end of the hallway. Silbot can guide you there.”
+Receptionist Robot: “Silbot, please escort the user to the restroom.”
+Silbot: “Certainly! Please follow me.”
 
-**Software Stack**
-- **Emotion Recognition**: Custom ChatBox_V1 model based on EfficientNet V2-S architecture
-- **Computer Vision**: WebSocket connections for real-time data transmission
-- **Server Infrastructure**: Google Colab backend with ngrok tunnelling
-- **Text-to-Speech**: pyttsx3 with espeak engine for natural speech generation
+This interaction flow demonstrates seamless task delegation between role-specific robots while preserving conversational context.
 
-## Versioning History
+---
 
-### V1.0.0 - Local Processing System (28/04/2025)
+## 7. System Flow Diagram
 
-- **Features**: Arduino robot platform with local emotion recognition and ChatGPT integration
-- **Limitations**: Laptop attachment reduced portability and clean aesthetics
 
-### V2.0.0 - Jetson Nano Migration (8/05/2025)
 
-- **Change**: Migrated processing from laptop to Jetson Nano board for improved portability
-- **Features**: Jetson Nano board processing, Docker containerisation, portable robot design
-- **Limitations**: Limited computational power, memory constraints
 
-### V2.0.1 - Streaming Service Addition (10/05/2025)
-
-- **Change**: Added video streaming capability for remote monitoring
-- **Features**: Video streaming capability for caregiver/doctor monitoring
-- **Limitations**: Local streaming only, no remote access capability
-
-### V2.1.0 - Server-Based Processing Colab (16/05/2025)
-
-- **Change**: Moved emotion recognition processing to Google Colab server
-- **Features**: Emotion recognition on Google Colab server, remote streaming via ngrok
-- **Limitations**: High latency, rapid token exhaustion, ChatGPT still processed on Jetson
-
-### V2.2.0 - Full Server Processing (18/05/2025)
-
-- **Change**: Moved ChatGPT processing to server alongside emotion detection
-- **Features**: Both emotion detection and ChatGPT processing on server, modular design
-- **Limitations**: Streaming performance issues, continued token usage problems
-
-### V2.3.0 - WebSocket Implementation (20/05/2025)
-
-- **Change**: Implemented WebSocket communication to replace HTTP requests
-- **Features**: WebSocket communication, significant reduction in token usage, real-time streaming
-- **Limitations**: Initial implementation without emotion stability features
-
-### V2.3.1 - Moving Average Emotion Detection (21/05/2025)
-
-- **Change**: Added moving average algorithm for emotion detection stability
-- **Features**: Moving average algorithm using 5 latest results for emotion stability
-- **Limitations**: Still utilising the basic monitoring interface for the live streaming implementation without detailed visual feedback
-
-### V2.3.2 - Enhanced Monitoring System (22/05/2025)
-
-- **Change**: Improved monitoring interface with comprehensive visual feedback
-- **Features**: Chat history, face detection bounding boxes, emotion confidence display, improved monitoring interface
-  <br>**_This is the current stable version_**</br>
-
-## System Architecture
-
-(Insert System Architecture Diagram here)
-
-## Setting Up
-
-### Prerequisites
-
-- **Jetson Nano Devkit/Orin** with Intel RealSense camera
-- **Google Colab**
-- **Arduino** (optional, for physical feedback)
-- **Python 3.8+** on Jetson
-- **OpenAI API Key**
-
-### 1. Colab Server Setup
-
-1. Open `colab_server.py` in Google Colab - setting up a "cell" with the colab_server.py code
-2. Add your OpenAI API key to Colab secrets
-3. Create an ngrok auth token [here](https://ngrok.com) (create an account, and navigate to Your Authtoken)
-4. Copy your AuthToken to colab_server.py:
-
-```python
-ngrok.set_auth_token("AUTH_TOKEN_HERE")
-```
-
-### 2. Jetson Setup
-
-On the Jetson Nano (with Ubuntu)
-
+## 8. Project Structure
 ```bash
-# Clone the repository
-git clone https://github.com/CS731-2025/cs731-2025-project-jscript.git
-cd cs731-2025-project-jscript/vx.x.x.
-
-# Create an .env file
-touch .env
-
-# Input the below .env file information
-```
-
-#### .env file setup:
-
-**_Important:_** The ngrok URL from the Colab Server Setup stage should be added to this .env file
-
-```env
-# Colab Server
-COLAB_SERVER_URL=https://your-ngrok-url.ngrok.io
-
-# Hardware
-ARDUINO_PORT=/dev/ttyUSB0
-REALSENSE_WIDTH=640
-REALSENSE_HEIGHT=480
-REALSENSE_FPS=30
-
-# Performance
-EMOTION_PROCESSING_INTERVAL=0.1
-STREAM_FPS=30
-FRAME_SKIP_RATIO=1
-```
-
-### 3. Arduino Setup
-
-1. Connect the Arduino Uno board to the Jetson Board through a USB port connection.
-
-### 4. Run the System
-
-**On Google Colab**
-
-1. Run all cells to start the server
-2. Copy the ngrok URL provided in the terminal output to input into the jetson .env file:
-   `https://aaaa-bb-cc-dd-e.ngrok-free.app`
-   This section:
-   `COLAB_SERVER_URL=https://aaaa-bb-cc-dd-e.ngrok-free.app`
-3. Make sure that the server is running
-
-**On Jetson:**
-
-```bash
-# Building the Docker image
-docker build -t docker-chatbot-socket .
-
-# Run the Docker image
-docker run -it --runtime nvidia --gpus all --rm docker-chatbot-socket
-
-python3 jetson_client.py
+multi-client-communication-system/
+├── server/ # Central orchestration server
+│ ├── llm_manager.py # Manages GPT, Gemini, DeepSeek, Llama APIs
+│ ├── rag_module.py # Context retrieval and memory logic
+│ ├── websocket_server.py # Async WebSocket connection handler
+│ ├── rri_handler.py # Robot-to-robot communication handler
+│ └── database/
+│ └── vector_db/ # FAISS / MongoDB storage for RAG
+│
+├── clients/
+│ ├── chatbox_client.py # CHATBOX client with emotion integration
+│ ├── silbot_client.py # SILBOT client for guiding and navigation
+│ ├── pepper_client.py # PEPPER client with verbal interaction
+│ ├── robot_config.json # JSON defining robot roles and modules
+│ └── utils/ # Shared utilities for client setup
+│
+├── hardware/
+│ ├── arduino_handler.py # Controls servo and sensor actions
+│ └── realsense_stream.py # RealSense or USB camera interface
+│
+├── docker/
+│ ├── Dockerfile # Docker environment setup
+│ └── requirements.txt # Dependency list
+│
+├── docs/
+│ ├── architecture_diagram.png # High-level system architecture
+│ └── flowchart.png # Interaction and message flow diagram
+│
+└── README.md # Project documentation
 
 ```
+---
 
-**Once the jetson_client.py and colab_server.py is running:**
+## 9. Academic Significance
 
-1. Chat/input into the Jetson board, to receive a GPT output
-2. You can access the live stream through: `https://aaaa-bb-cc-dd-e.ngrok-free.app/monitor`
+The **Role-Adaptive Communication Framework** contributes to the field of **Human–Robot Interaction (HRI)** and **Multi-Agent Coordination** by demonstrating:
 
-## Project Structure (FIX w Versions)
+- Scalable and modular design for multi-robot collaboration  
+- Adaptive LLM-driven dialogue aligned with robot roles and personalities  
+- Persistent contextual awareness through RAG-based long-term memory  
+- Seamless robot-to-robot communication for cooperative task execution  
 
+This research advances multi-agent conversational systems by introducing adaptive, personality-based communication across heterogeneous service robots.
+
+### Achievements
+- 🏆 **Best Context Design Award** – IEEE RO-MAN 2025 (Amsterdam, Netherlands)  
+- 🏆 **Innovative Solution Award** – ICSR 2025 (Naples, Italy)
+
+---
+
+## 10. Setup Instructions
+
+### 1. Server Setup
+
+1. Clone the repository:
+   ```bash
+   git clone git@github.com:JaySong/multi-client-communication-system.git
+   cd multi-client-communication-system
 ```
-cs731-2025-project-jscript/
-├── emotion_understanding/          # Main application code
-│   ├── model/                      # Pre-trained models
-│   ├── dataset/                    # Dataset
-│   ├── yolo_v8/                    # YOLO
-│   └── openCV/                     # OpenCV 
-│        ├── test.py                     # Testing script
-│        ├── train.py
-│        ├── train1.py
-│        ├── train_effi.py
-│        ├── train_efficientnetV2.py
-│        ├── train_im.py  
-│        ├── train_V2.py
-│        ├── train_V3.py    
-│        └── train_final.py              # Latest Version
-├── v1.0.0/                       # Version 1.0.0 release
-├── v2.0.0/                       # Version 2.0.0 release
-├── v2.1.0/                       # Version 2.1.0 release
-├── v2.2.0/                       # Version 2.2.0 release
-├── v2.3.0/                       # Version 2.3.0 release
-├── v2.3.2/                       # Version 2.3.2 release (latest)
-├── jetson_client.py           # Main Jetson client with WebSocket integration
-│   ├── realsense_stream.py        # Optimised RealSense camera streaming
-│   ├── arduino_handler.py         # Arduino communication and control
-│   ├── colab_server.py            # Colab server with emotion detection
-│   ├── dockerfile                 # Docker configuration
-│   ├── efficientnet_opencv.pth    # Pre-trained model weights
-│   ├── emotion_file.txt           # Emotion data file
-│   ├── haarcascade_frontalface_default.xml  # Face detection cascade
-│   ├── requirements.txt           # Python dependencies
-│   └── run_docker.sh              # Docker execution script
-├── .gitignore                     # Git ignore patterns
-└── README.md                      # Main project documentation
+2. Build and run the Docker container:
+   ```bash
+docker build -t multi-robot-server .
+docker run -it 
 ```
 
-## Emotion Detection
 
-The system recognises 7 primary emotions:
+3. Once the container is running, the central orchestration server will automatically initialise:
 
-- **Happy** 😊
-- **Sad** 😢
-- **Angry** 😠
-- **Fear** 😨
-- **Surprise** 😲
-- **Disgust** 🤢
-- **Neutral** 😐
+- WebSocket listener on port 5000
 
-## ChatGPT Integration
+- RAG memory module (FAISS + MongoDB backend)
 
-The system uses emotion-aware prompting to generate contextually appropriate responses:
+- LLM manager (OpenAI, Gemini, DeepSeek, Llama)
 
-```python
-# Example emotion tag usage
-User Input: "I'm feeling overwhelmed"
-Detected Emotion: sad (confidence: 78%)
-GPT Prompt: "[sad] I'm feeling overwhelmed"
-Bot Response: "[COMFORT] I understand that feeling overwhelmed can be really difficult..."
-```
+- RRI communication handler for inter-robot coordination
 
-### Action Tags for Arduino
+4. The server console will display connection logs for each connected client, confirming successful session registration.
 
-The bot responds with emotion tags that trigger Arduino actions:
 
-- `[GREETING]` 👋
-- `[CONFUSED]` 😕 
-- `[DEFAULT]` 😐
-- `[WAVE]` 🖐️
-- `[POINT]` 🫵
-- `[SHRUG]` 🤷
-- `[ANGRY]` 😡
-- `[SAD]` 😢
+### 2. Robot-to-Robot Demonstration
 
-## API Endpoints
+The Robot-to-Robot Interaction (RRI) protocol allows different robots to coordinate naturally through the central server.
+This enables smooth task delegation and consistent conversation flow between robots of different roles.
 
-### WebSocket Events
+Interact with CHATBOX (the receptionist robot):
 
-- `emotion_frame` - Send frame for emotion detection
-- `stream_frame` - Send frame for live streaming
-- `chat_message` - Real-time chat message broadcasting
+Ask: “Where is the nearest restroom?”
 
-### HTTP Endpoints
+CHATBOX will respond with:
 
-- `POST /chat` - Send chat message and get response
-- `GET /health` - System health check
-- `GET /stats` - Performance statistics
-- `GET /live_stream` - MJPEG video stream
+“The restroom is located at the end of the hallway. Silbot can guide you there.”
 
-## Contact
 
-For any queries or for general contact
+CHATBOX delegates the task via RRI:
 
-- Jay Song | Email: json941@aucklanduni.ac.nz
-- Seth Yoo | Email: syoo881@aucklanduni.ac.nz
+“Silbot, please escort the user to the restroom.”
+
+
+SILBOT acknowledges and executes the action:
+
+“Certainly! Please follow me.”
+
+
+This example demonstrates adaptive, role-consistent collaboration between robots within a shared communication environment.
