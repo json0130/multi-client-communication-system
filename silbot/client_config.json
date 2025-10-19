@@ -20,6 +20,14 @@
         "arduino_port": "/dev/ttyUSB0",
         "arduino_baud": 115200,
         "arduino_timeout": 2.0
+    },
+
+    "llm_config": {
+        "provider": "openrouter",
+        "model": "openrouter-model-name-here!",
+        "api_key": "YOUR_OPENROUTER_KEY",
+        "temperature": 0.7,
+        "max_tokens": 1000
     }
 }
 

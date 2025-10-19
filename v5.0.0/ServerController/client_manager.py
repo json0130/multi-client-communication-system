@@ -64,6 +64,12 @@ class ClientManager:
             robot_name = client_init_data.get('robot_name')
             modules = client_init_data.get('modules', [])
             
+            # Extract LLM config
+            llm_config = client_init_data.get('llm_config', {})
+            if llm_config and llm_config.get('provider') == 'openrouter':
+                if not llm_config.get('api_key'):
+                    return False, "OpenRouter API key required", None
+            
             if not robot_name:
                 return False, "robot_name is required in client_init.json", None
             
@@ -98,7 +104,7 @@ class ClientManager:
                 client_id=client_id,
                 robot_name=robot_name,
                 modules=modules_set,
-                config_overrides=config_overrides,
+                config_overrides={**config_overrides, 'llm_config': llm_config},  # Include LLM config
                 registration_time=time.time(),
                 last_activity=time.time(),
                 user_id=user_id

@@ -45,7 +45,12 @@ class RobotServer:
         
         # Module instances (initialized based on enabled_modules)
         self.emotion_processor = None
-        self.gpt_client = None
+        # Initialize GPT with config
+        if 'gpt' in enabled_modules:
+            self.gpt_client = GPTClient(config.get('llm_config'))
+            if not self.gpt_client.setup_openai():
+                print("❌ Failed to initialize GPT client")
+                self.gpt_client = None
         self.speech_processor = None
         self.web_interface = None  # Individual web interface for this client
         self.rag = None
@@ -55,6 +60,7 @@ class RobotServer:
         self.latest_emotion = "neutral"
         self.latest_confidence = 0.0
         self.last_update_time = time.time()
+        
         
         # State tracking
         self.components_initialized = False
@@ -353,6 +359,8 @@ class RobotServer:
     def _get_delegation_prompt(self, user_message: str) -> str:
         """Constructs the system prompt for DELEGATION MODE."""
         my_role = self.config.get('robot_role', 'You are a helpful robot.')
+
+        print(f"🔍 DEBUG: Using role prompt: {my_role[:100]}...")
 
         rag_context = ""
         if self.rag:
