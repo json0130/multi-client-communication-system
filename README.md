@@ -272,3 +272,34 @@ SILBOT acknowledges and executes the action:
 
 
 This example demonstrates adaptive, role-consistent collaboration between robots within a shared communication environment.
+
+## 11. Version History
+A high-level overview of the project's evolution, from a single-robot prototype to a multi-agent framework.
+
+- v1.0.0: Initial prototype. Processing (emotion recognition, ChatGPT) ran locally on a laptop physically attached to an Arduino robot.
+
+- v2.0.0: Portability update. Migrated all processing from the laptop to an onboard Jetson Nano using Docker.
+
+- v2.1.0: Hybrid processing. Offloaded emotion recognition to a Google Colab server to free up Jetson resources; ChatGPT remained local on the Jetson.
+
+- v2.2.0: Server-centric. Moved all heavy processing (Emotion + ChatGPT) to the server, turning the Jetson into a thin client.
+
+- v2.3.0: Real-time communication. Replaced HTTP polling with WebSockets, dramatically reducing latency and token/API usage.
+
+- v2.3.2: Enhanced monitoring. Upgraded the web monitoring UI to include chat history, face detection boxes, and emotion confidence levels.
+
+- v3.0.0: Local network deployment. Major rewrite to remove the Colab/ngrok dependency. The system now runs entirely on a local network with a modular server architecture.
+
+- v3.1.0: Core AI features. Integrated Speech-to-Text (Faster-Whisper) and RAG (FAISS + MongoDB) for conversational memory.
+
+- v3.2.0: Hands-free operation. Implemented a keyword-based "wake word" system and forced USB mic selection, removing the need for keyboard input.
+
+- v4.0.0: Multi-client architecture. A complete server rewrite to support multiple concurrent clients with isolated resources. The client was also redesigned with a modular plugin system (Input/Output).
+
+- v4.0.1: Performance & RAG update. Optimized monitor streaming (300% faster) and re-integrated RAG using a robust Supabase (PostgreSQL) backend for persistent user memory.
+
+- v4.1.0: Hardware integration. Activated the client plugin system by adding new hardware modules: Intel RealSense (with Depth), standard webcams, and Arduino/ESP32 for physical emotion expression.
+
+- v4.1.1: Face recognition. Added a FaceRecoProcessor module using dlib for real-time face detection, encoding, and identification.
+
+- v5.0.0 (Current): Role-adaptive framework. Final rewrite focused on the research contribution: enabling Role-Adaptive Communication and Robot-to-Robot Interaction (RRI). Introduced a flexible LLM backend (supporting OpenRouter, Gemini, etc.) and a centralized orchestration server for multi-agent coordination.
