@@ -68,7 +68,7 @@ Each robot registers to the server using a JSON configuration file that defines 
 - **LLM Orchestrator** – routes queries to appropriate LLMs (GPT, Gemini, DeepSeek, Llama)
 - **RAG Engine** – retrieves relevant information from stored conversations
 - **Emotion Recognition** – processes facial input for emotional context
-- **Speech Modules** – includes Whisper STT and TTS engines
+- **Speech Modules** – includes Whisper STT engines
 - **RRI Handler** – manages robot-to-robot task exchanges and message routing
 
 ### 4.2. Client Configuration
@@ -88,10 +88,10 @@ Example:
   "server_url": "ws://<server-ip>:5000",
   "modules": ["gpt", "emotion", "speech"],
   "robot_role": "You are ChatBox, a compassionate companion robot for children. You respond with empathy and encouragement.",
-  "llm_config": {
-    "provider": "openai",
-    "model": "gpt-4o-mini",
-    "temperature": 0.7,
+  " llm_config ": {
+    "provider": " openrouter " ,
+    "model": " openrouter - model - name - here !" ,
+    "temperature": 0.7 ,
     "max_tokens": 1000
   },
   "hardware_configuration": {
@@ -148,32 +148,44 @@ This interaction flow demonstrates seamless task delegation between role-specifi
 ## 8. Project Structure
 ```bash
 multi-client-communication-system/
-├── server/ # Central orchestration server
-│ ├── llm_manager.py # Manages GPT, Gemini, DeepSeek, Llama APIs
-│ ├── rag_module.py # Context retrieval and memory logic
-│ ├── websocket_server.py # Async WebSocket connection handler
-│ ├── rri_handler.py # Robot-to-robot communication handler
-│ └── database/
-│ └── vector_db/ # FAISS / MongoDB storage for RAG
+├── Modules/
+│ ├── gpt_client.py
+│ ├── rag_module.py 
+│ ├── emotion_processor.py
+│ └── speech_processor.py 
 │
-├── clients/
-│ ├── chatbox_client.py # CHATBOX client with emotion integration
-│ ├── silbot_client.py # SILBOT client for guiding and navigation
-│ ├── pepper_client.py # PEPPER client with verbal interaction
-│ ├── robot_config.json # JSON defining robot roles and modules
-│ └── utils/ # Shared utilities for client setup
+├── ServerController/
+│ ├── client_manager.py
+│ ├── database.py 
+│ ├── supabase_client.py 
+│ ├── request_router.py 
+│ ├── server_controller.py 
+│ ├── server.py 
+│ └── websocket_manager.py
 │
-├── hardware/
-│ ├── arduino_handler.py # Controls servo and sensor actions
-│ └── realsense_stream.py # RealSense or USB camera interface
+├── models/
+│ └── emotion_recognition.pth
 │
-├── docker/
-│ ├── Dockerfile # Docker environment setup
-│ └── requirements.txt # Dependency list
-│
-├── docs/
-│ ├── architecture_diagram.png # High-level system architecture
-│ └── flowchart.png # Interaction and message flow diagram
+├── client/
+│ ├── InputModules/
+| │ ├── camera_input.py 
+| │ ├── realsense_input.py 
+| │ ├── text_input.py
+| │ └── voice_input.py 
+| |
+│ ├── OutputModules/
+| │ ├── arduino_output.py 
+| │ ├── console_output.py
+| │ ├── edge_tts_output.py
+| │ └── tts_output.py
+| |
+│ ├── dockerfile 
+│ ├── .env 
+│ ├── client_config.json 
+│ ├── client.py 
+│ ├── robot.py 
+│ ├── run_docker.sh
+│ └── requirements.txt
 │
 └── README.md # Project documentation
 
