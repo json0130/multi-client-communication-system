@@ -217,15 +217,24 @@ This research advances multi-agent conversational systems by introducing adaptiv
    ```bash
    git clone git@github.com:JaySong/multi-client-communication-system.git
    cd multi-client-communication-system
-```
+
+3. Run the server_controller:
+   ```bash
+   conda create --name multi-robot-server python=3.10
+   conda activate multi-robot-server
+   cd v5.0.0
+   pip install -r requirement.txt
+   cd ServerController
+   python server_controller.py
+
 2. Build and run the Docker container:
    ```bash
-docker build -t multi-robot-server .
-docker run -it 
-```
+   docker build -t multi-robot-server .
+   ./run_docker.sh
+   python3 robot.py
 
 
-3. Once the container is running, the central orchestration server will automatically initialise:
+4. Once the container is running, the central orchestration server will automatically initialise:
 
 - WebSocket listener on port 5000
 
