@@ -13,7 +13,7 @@ from client import OutputModule
 logger = logging.getLogger(__name__)
 
 class EdgeTTSOutputModule(OutputModule):
-    """Microsoft Edge TTS with clean text processing and USB speaker support"""
+    """Microsoft Edge TTS with clean text processing and default speaker support"""
     
     def __init__(self, name: str = "edge_tts_output", config: Dict = None):
         super().__init__(name, config)
@@ -27,8 +27,8 @@ class EdgeTTSOutputModule(OutputModule):
         self.remove_emotion_tags = self.config.get('remove_emotion_tags', True)
         self.max_length = self.config.get('max_length', 500)
         
-        # Audio configuration - USB speaker (hw:3,0)
-        self.working_audio_cmd = ['aplay', '-D', 'plughw:3,0']
+        # Audio configuration - macOS default speaker
+        self.working_audio_cmd = ['afplay']
         self.fallback_audio_cmd = ['ffplay', '-nodisp', '-autoexit']
         
         # Threading
@@ -38,8 +38,8 @@ class EdgeTTSOutputModule(OutputModule):
         
         # Test availability
         self.edge_tts_available = self._test_edge_tts()
-        self.ffmpeg_available = self._test_ffmpeg()
-        self.audio_available = self._test_usb_audio()
+        # ffmpeg is not needed for afplay
+        self.audio_available = self._test_audio_playback()
     
     def _test_edge_tts(self) -> bool:
         """Test if edge-tts is available"""
@@ -51,24 +51,10 @@ class EdgeTTSOutputModule(OutputModule):
             logger.warning("⚠️ Edge TTS not available - install with: pip install edge-tts")
             return False
     
-    def _test_ffmpeg(self) -> bool:
-        """Test if ffmpeg is available for MP3→WAV conversion"""
-        try:
-            result = subprocess.run(['ffmpeg', '-version'], capture_output=True, timeout=5)
-            if result.returncode == 0:
-                # logger.info("🔧 ffmpeg available for audio conversion")
-                return True
-            else:
-                logger.warning("⚠️ ffmpeg not available")
-                return False
-        except Exception as e:
-            logger.warning(f"⚠️ ffmpeg test failed: {e}")
-            return False
-    
-    def _test_usb_audio(self) -> bool:
-        """Test USB speaker with MP3→WAV conversion pipeline"""
-        if not self.edge_tts_available or not self.ffmpeg_available:
-            logger.warning("⚠️ Cannot test USB audio - missing dependencies")
+    def _test_audio_playback(self) -> bool:
+        """Test default audio playback with MP3 pipeline"""
+        if not self.edge_tts_available:
+            logger.warning("⚠️ Cannot test audio playback - missing dependencies")
             return False
         
         try:
@@ -78,42 +64,30 @@ class EdgeTTSOutputModule(OutputModule):
                 # Test the complete pipeline
                 test_text = "Audio test"
                 temp_mp3 = '/tmp/edge_tts_pipeline_test.mp3'
-                temp_wav = '/tmp/edge_tts_pipeline_test.wav'
                 
                 try:
                     # Generate MP3
                     communicate = edge_tts.Communicate(test_text, self.voice)
                     await communicate.save(temp_mp3)
                     
-                    # Convert MP3 to WAV
-                    convert_result = subprocess.run([
-                        'ffmpeg', '-i', temp_mp3,
-                        '-ar', '22050', '-ac', '1', '-sample_fmt', 's16',
-                        '-y', temp_wav
-                    ], capture_output=True, text=True, timeout=10)
+                    # Test playback (afplay)
+                    cmd = self.working_audio_cmd + [temp_mp3]
+                    play_result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
                     
-                    if convert_result.returncode == 0:
-                        # Test playback
-                        cmd = self.working_audio_cmd + [temp_wav]
-                        play_result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                        
-                        if play_result.returncode == 0:
-                            # logger.info("✅ EdgeTTS → MP3 → WAV → USB speaker pipeline working")
+                    if play_result.returncode == 0:
+                        # logger.info("✅ EdgeTTS → MP3 → afplay pipeline working")
+                        return True
+                    else:
+                        # Try fallback (ffplay)
+                        cmd = self.fallback_audio_cmd + [temp_mp3]
+                        fallback_result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+                        if fallback_result.returncode == 0:
+                            # logger.info("✅ Pipeline working with ffplay fallback")
+                            self.working_audio_cmd = self.fallback_audio_cmd
                             return True
                         else:
-                            # Try fallback
-                            cmd = self.fallback_audio_cmd + [temp_wav]
-                            fallback_result = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
-                            if fallback_result.returncode == 0:
-                                # logger.info("✅ Pipeline working with ffplay fallback")
-                                self.working_audio_cmd = self.fallback_audio_cmd
-                                return True
-                            else:
-                                logger.warning("⚠️ Both aplay and ffplay failed")
-                                return False
-                    else:
-                        logger.warning(f"⚠️ MP3→WAV conversion failed: {convert_result.stderr}")
-                        return False
+                            logger.warning("⚠️ Both afplay and ffplay failed")
+                            return False
                         
                 except Exception as e:
                     logger.error(f"❌ Pipeline test error: {e}")
@@ -121,14 +95,13 @@ class EdgeTTSOutputModule(OutputModule):
                     
                 finally:
                     # Cleanup
-                    for f in [temp_mp3, temp_wav]:
-                        if os.path.exists(f):
-                            os.unlink(f)
+                    if os.path.exists(temp_mp3):
+                        os.unlink(temp_mp3)
             
             return asyncio.run(test_pipeline())
             
         except Exception as e:
-            logger.error(f"❌ USB audio pipeline test failed: {e}")
+            logger.error(f"❌ Audio playback pipeline test failed: {e}")
             return False
     
     def initialize(self) -> bool:
@@ -137,18 +110,14 @@ class EdgeTTSOutputModule(OutputModule):
             logger.error("❌ Edge TTS not available")
             return False
         
-        if not self.ffmpeg_available:
-            logger.error("❌ ffmpeg not available - needed for MP3→WAV conversion")
-            return False
-        
         if not self.audio_available:
-            logger.error("❌ USB speaker pipeline not working")
+            logger.error("❌ Default audio playback pipeline not working")
             return False
         
         # logger.info("🎙️ Initializing Microsoft Edge TTS")
         # logger.info(f"   🗣️ Voice: {self.voice}")
         # logger.info(f"   🔊 Audio: {' '.join(self.working_audio_cmd)}")
-        # logger.info("   🔧 Pipeline: EdgeTTS → MP3 → ffmpeg → WAV → USB speaker")
+        # logger.info("   🔧 Pipeline: EdgeTTS → MP3 → Default Speaker")
         return True
     
     def start(self) -> bool:
@@ -248,7 +217,6 @@ class EdgeTTSOutputModule(OutputModule):
     def _speak_text(self, text: str):
         """Generate and play speech - NO SSML to avoid XML artifacts"""
         temp_mp3 = None
-        temp_wav = None
         
         try:
             import edge_tts
@@ -256,52 +224,35 @@ class EdgeTTSOutputModule(OutputModule):
             # Create temporary files
             with tempfile.NamedTemporaryFile(suffix='.mp3', delete=False) as tmp_mp3:
                 temp_mp3 = tmp_mp3.name
-            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_wav:
-                temp_wav = tmp_wav.name
             
             # Generate speech with plain text (no SSML/XML)
-            asyncio.run(self._generate_speech(text, temp_mp3, temp_wav))
+            asyncio.run(self._generate_speech(text, temp_mp3))
             
             # Play converted WAV file
-            self._play_audio(temp_wav)
+            self._play_audio(temp_mp3)
             
         except Exception as e:
             logger.error(f"❌ Edge TTS speak error: {e}")
         finally:
             # Cleanup temporary files
-            for temp_file in [temp_mp3, temp_wav]:
-                if temp_file and os.path.exists(temp_file):
-                    try:
-                        os.unlink(temp_file)
-                    except:
-                        pass
+            if temp_mp3 and os.path.exists(temp_mp3):
+                try:
+                    os.unlink(temp_mp3)
+                except:
+                    pass
     
-    async def _generate_speech(self, text: str, mp3_file: str, wav_file: str):
+    async def _generate_speech(self, text: str, mp3_file: str):
         """Generate speech with plain text - no SSML/XML to avoid artifacts"""
         import edge_tts
         
         # Use plain text WITHOUT SSML formatting to avoid XML/HTML artifacts
         communicate = edge_tts.Communicate(text, self.voice)
         await communicate.save(mp3_file)
-        
-        # Convert MP3 to WAV with correct format for USB speaker
-        convert_result = subprocess.run([
-            'ffmpeg', '-i', mp3_file,         # Input MP3
-            '-ar', '22050',                   # Sample rate: 22050 Hz
-            '-ac', '1',                       # Channels: 1 (mono)
-            '-sample_fmt', 's16',             # 16-bit signed
-            '-y',                             # Overwrite output
-            wav_file                          # Output WAV
-        ], capture_output=True, text=True, timeout=15)
-        
-        if convert_result.returncode != 0:
-            logger.error(f"❌ MP3→WAV conversion failed: {convert_result.stderr}")
-            raise Exception(f"Audio conversion failed")
-        else:
-            logger.debug("✅ Speech generated and converted successfully")
+        logger.debug("✅ Speech generated successfully")
+
     
     def _play_audio(self, audio_file: str):
-        """Play converted WAV file using USB speaker"""
+        """Play converted WAV file using default speaker"""
         try:
             # Verify file exists
             if not os.path.exists(audio_file):
@@ -313,7 +264,7 @@ class EdgeTTSOutputModule(OutputModule):
                 logger.debug("Firing TTS started event")
                 self.client.tts_started_event.set()
             
-            # Play using working audio command (plughw:3,0 or ffplay)
+            # Play using working audio command (afplay or ffplay)
             cmd = self.working_audio_cmd + [audio_file]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
@@ -321,7 +272,6 @@ class EdgeTTSOutputModule(OutputModule):
                 logger.debug("🔊 Audio played successfully")
             else:
                 logger.warning(f"⚠️ Audio playback warning: {result.stderr}")
-                # Note: Some ALSA warnings are normal and don't prevent playback
                 
         except subprocess.TimeoutExpired:
             logger.error("❌ Audio playback timeout")
