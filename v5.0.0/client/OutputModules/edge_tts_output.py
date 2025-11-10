@@ -27,8 +27,9 @@ class EdgeTTSOutputModule(OutputModule):
         self.remove_emotion_tags = self.config.get('remove_emotion_tags', True)
         self.max_length = self.config.get('max_length', 500)
         
-        # Audio configuration - USB speaker (hw:3,0)
-        self.working_audio_cmd = ['aplay', '-D', 'plughw:3,0']
+        # Audio configuration - Read from config, with a fallback default
+        playback_device = self.config.get('playback_device', 'plughw:3,0')
+        self.working_audio_cmd = ['aplay', '-D', playback_device]
         self.fallback_audio_cmd = ['ffplay', '-nodisp', '-autoexit']
         
         # Threading
