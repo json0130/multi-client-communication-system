@@ -49,6 +49,8 @@ class RequestRouter:
                 return self._handle_health_request(server, display_name)
             elif endpoint == 'emotion':
                 return self._handle_emotion_request(server, display_name)
+            elif endpoint == 'modules':
+                return self._handle_modules_request(server, display_name)
             elif endpoint == 'monitor': 
                 return self._handle_monitor_request(server, display_name)
             elif endpoint == 'live_stream': 
@@ -318,6 +320,22 @@ class RequestRouter:
         except Exception as e:
             print(f"❌ {display_name}: Emotion request error: {e}")
             return jsonify({"error": "Emotion processing failed", "details": str(e)}), 500
+        
+    def _handle_modules_request(self, server, display_name: str) -> tuple:
+        """Handle request to get enabled modules for the client"""
+        try:
+            client_modules = self.client_manager.get_client_modules(server.client_id)
+            
+            return jsonify({
+                "client_id": server.client_id,
+                "robot_name": getattr(server, 'robot_name', 'Unknown'),
+                "enabled_modules": list(client_modules),
+                "timestamp": time.time()
+            }), 200
+            
+        except Exception as e:
+            print(f"❌ {display_name}: Modules request error: {e}")
+            return jsonify({"error": "Failed to retrieve modules", "details": str(e)}), 500
     
     def handle_image_frame_processing(self, client_id: str, frame_data: Dict[str, Any]) -> Dict[str, Any]:
         """

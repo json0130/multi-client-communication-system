@@ -256,6 +256,7 @@ class ServerController:
                     "client_chat": "/client/{client_id}/chat (POST)",
                     "client_speech": "/client/{client_id}/speech (POST)", 
                     "client_emotion": "/client/{client_id}/emotion (GET)",
+                    "client_modules": "/client/{client_id}/modules (GET)",
                     "client_health": "/client/{client_id}/health (GET)",
                     "client_monitor": "/client/{client_id}/monitor (GET)",
                     "client_live_stream": "/client/{client_id}/live_stream (GET)",
@@ -351,6 +352,11 @@ class ServerController:
         def client_emotion(client_id):
             """Get current emotion state for specific client"""
             return self.request_router.route_client_request(client_id, 'emotion', request)
+        
+        @self.app.route('/client/<client_id>/modules', methods=['GET'])
+        def client_modules(client_id):
+            """Get enabled modules for specific client"""
+            return self.request_router.route_client_request(client_id, 'modules', request)
 
         @self.app.route('/client/<client_id>/monitor', methods=['GET'])
         def client_monitor(client_id):
