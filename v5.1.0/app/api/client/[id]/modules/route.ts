@@ -3,7 +3,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
     const clientId = params.id
     const body = await req.json()
 
-    const response = await fetch(`http://localhost:5000/client/${clientId}/modules`, {
+    const response = await fetch(`http://130.216.238.6:5000/client/${clientId}/modules`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

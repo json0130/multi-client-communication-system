@@ -1,6 +1,6 @@
 export async function GET() {
   try {
-    const response = await fetch("http://localhost:5000/api/registry", {
+    const response = await fetch("http://130.216.238.6:5000/clients", {
       headers: { "Content-Type": "application/json" },
     })
 
@@ -9,16 +9,23 @@ export async function GET() {
     }
 
     const data = await response.json()
-    // Format the response to match frontend expectations
+    // The server returns { clients: { client_id: {...} } }
+    const formattedClients = Object.entries(data.clients || {}).map(([clientId, clientData]: [string, any]) => ({
+      client_id: clientId,
+      display_name: clientData.display_name || clientData.robot_name || clientId,
+      robot_name: clientData.robot_name || clientId,
+      status: clientData.status || "inactive",
+      inactive_minutes: clientData.inactive_minutes || 0,
+      last_activity: clientData.last_activity || Date.now() / 1000,
+      modules: clientData.modules || [],
+      registration_time: clientData.registration_time || 0,
+    }))
+
     return Response.json({
-      clients: Object.values(data).map((client: any) => ({
-        client_id: client.client_id,
-        robot_name: client.robot_name || client.client_id,
-        enabled_modules: client.enabled_modules || [],
-        last_activity: client.last_activity || Date.now() / 1000,
-        components_initialized: client.components_initialized || false,
-        current_emotion: client.current_emotion || "neutral",
-      })),
+      clients: formattedClients,
+      total_clients: data.total_clients || 0,
+      active_servers: data.active_servers || 0,
+      timestamp: data.timestamp || Date.now() / 1000,
     })
   } catch (error) {
     console.error("API Error:", error)

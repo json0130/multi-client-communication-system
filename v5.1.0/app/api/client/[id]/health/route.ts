@@ -1,7 +1,7 @@
 export async function GET(req: Request, { params }: { params: { id: string } }) {
   try {
     const clientId = params.id
-    const response = await fetch(`http://localhost:5000/client/${clientId}/health`, {
+    const response = await fetch(`http://130.216.238.6:5000/client/${clientId}/health`, {
       headers: { "Content-Type": "application/json" },
     })
 
