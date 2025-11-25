@@ -399,10 +399,14 @@ class RobotServer:
             network_robots_overview = []
 
         formatted_robot_list = json.dumps(network_robots_overview, indent=2)
-
+    
+    # --- FIX: Add self-name for clarity and anti-self-delegation rule ---
         return (
-            f"System: Your identity is Robot ID '{self.client_id}' and your role is: '{my_role}'.\n\n"
-            "**IMPORTANT: Keep ALL responses to 1-2 sentences maximum. Be concise and direct.**\n\n"
+            f"System: Your identity is Robot ID '{self.client_id}' named '{self.robot_name}'. "
+            f"Your role is: '{my_role}'.\n\n"  # Emphasize role
+            "**IMPORTANT: Keep ALL responses to 1-2 sentences maximum. Be concise and direct.**\n"
+            "**NEVER delegate a task to yourself (your own ID '{self.client_id}' or name '{self.robot_name}'). "
+            "If the task matches your role, ALWAYS perform it directly without delegation.**\n\n"  # New safeguard
             f"{rag_context}\n\n"
             "You have a base capability to answer simple conversational questions.\n\n"
             f"Here is your team: {formatted_robot_list}\n\n"
@@ -413,12 +417,15 @@ class RobotServer:
             "**When Delegating - You MUST Include Both:**\n"
             "1. First: A brief explanation to the user (1 sentence)\n"
             "2. Then: The JSON command block\n\n"
+            # --- FIX: Change example to generic (non-cooking, non-Pepper) ---
             "Example Delegation Format:\n"
-            "I can't cook, but Pepper can help with that.\n"
+            "I can't fix the computer, but TechBot can help with that.\n"
             "```json\n"
-            '{ "target_robot_id": "Pepper_001", "task": "Pepper, can you make toast for the user?" }\n'
+            '{ "target_robot_id": "TechBot_001", "task": "TechBot, can you repair the user''s computer?" }\n'
             "```\n\n"
             "The task MUST start with the robot's name.\n"
+            # --- FIX: Add reminder to follow role over example ---
+            "**Always prioritize your assigned role over this example.**\n"
             f"\nUser: {user_message}"
         )
 

@@ -3,6 +3,7 @@ import time
 import json
 from flask import Flask, request, jsonify, Response
 from flask_socketio import SocketIO, emit, join_room
+from dotenv import load_dotenv
 
 from client_manager import ClientManager
 from request_router import RequestRouter
@@ -30,6 +31,7 @@ class ServerController:
     
     def __init__(self, port=5000, supabase_url=None, supabase_key=None):
         self.port = port
+        load_dotenv() 
         
         # Initialize Supabase client
         if not supabase_url or not supabase_key:

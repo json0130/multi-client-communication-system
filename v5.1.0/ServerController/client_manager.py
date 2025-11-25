@@ -2,6 +2,7 @@
 import time
 import threading
 import uuid
+import traceback
 import json
 from typing import Dict, Optional, Set, Any
 from dataclasses import dataclass
@@ -162,6 +163,7 @@ class ClientManager:
                     print(f"🔍 DEBUG: Loaded robot_role for {client_info.client_id}: {robot_role[:100]}...")
             except Exception as e:
                 print(f"⚠️ Could not fetch robot_role from DB for {client_info.client_id}: {e}")
+                print(traceback.format_exc())  # Add full stack trace
                 print(f"   Using default role instead")
             
             # Create custom configuration for this client
