@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 
 interface Client {
@@ -58,109 +58,98 @@ export default function RobotOverviewPage() {
     return client.status === "active" && client.inactive_minutes < 1
   }
 
-  const getStatusColor = (client: Client) => {
-    if (isOnline(client)) return "bg-green-500/20 text-green-300"
-    return "bg-red-500/20 text-red-300"
-  }
-
-  const getStatusDot = (client: Client) => {
-    if (isOnline(client)) return "bg-green-500"
-    return "bg-red-500"
+  const getStatusBadge = (client: Client) => {
+    if (isOnline(client)) {
+      return <Badge className="bg-green-100 text-green-700 hover:bg-green-100">Active</Badge>
+    }
+    if (client.inactive_minutes < 60) {
+      return <Badge className="bg-yellow-100 text-yellow-700 hover:bg-yellow-100">Idle</Badge>
+    }
+    return <Badge className="bg-gray-100 text-gray-700 hover:bg-gray-100">Offline</Badge>
   }
 
   const getLastActivityText = (inactive_minutes: number) => {
     if (inactive_minutes < 1) return "Just now"
-    if (inactive_minutes < 60) return `${Math.round(inactive_minutes)}m ago`
+    if (inactive_minutes < 60) return `${Math.round(inactive_minutes)} minutes ago`
     const hoursAgo = Math.floor(inactive_minutes / 60)
-    return `${hoursAgo}h ago`
+    if (hoursAgo < 24) return `${hoursAgo} hours ago`
+    const daysAgo = Math.floor(hoursAgo / 24)
+    return `${daysAgo} days ago`
   }
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-7xl mx-auto px-4 py-12">
-        {/* Header */}
-        <div className="mb-12">
-          <h1 className="text-4xl font-bold text-foreground mb-2">Robot Central Hub</h1>
-          <p className="text-muted-foreground">Monitor and manage all connected robots</p>
+      {/* Header */}
+      <div className="border-b border-border bg-card">
+        <div className="max-w-7xl mx-auto px-6 py-6">
+          <h1 className="text-3xl font-bold text-foreground">Robot Central Hub</h1>
+        </div>
+      </div>
+
+      <div className="max-w-7xl mx-auto px-6 py-12">
+        {/* Page Title */}
+        <div className="mb-8">
+          <h2 className="text-2xl font-bold text-foreground mb-2">Robot Overview</h2>
+          <p className="text-muted-foreground">Monitor and manage all your robots</p>
         </div>
 
-        {/* Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Total Robots</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-foreground">{stats.total_clients}</div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Online</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-accent">{clients.filter(isOnline).length}</div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-card border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-sm font-medium text-muted-foreground">Active Servers</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-accent">{stats.active_servers}</div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* Client List */}
+        {/* Content */}
         {loading ? (
-          <Card className="bg-card border-border">
-            <CardContent className="pt-8 text-center">
-              <p className="text-muted-foreground">Loading robots...</p>
-            </CardContent>
-          </Card>
+          <div className="flex items-center justify-center py-12">
+            <p className="text-muted-foreground">Loading robots...</p>
+          </div>
         ) : error ? (
-          <Card className="bg-card border-border border-destructive/50">
+          <Card className="border-destructive/30 bg-destructive/5">
             <CardContent className="pt-8">
-              <p className="text-destructive">Error: {error}</p>
-              <p className="text-sm text-muted-foreground mt-2">
-                Make sure the Python server is running at http://130.216.238.6:5000
+              <p className="text-destructive font-medium mb-2">Error loading robots</p>
+              <p className="text-sm text-muted-foreground">
+                {error}. Make sure the Python server is running at http://130.216.238.6:5000
               </p>
             </CardContent>
           </Card>
         ) : clients.length === 0 ? (
-          <Card className="bg-card border-border">
-            <CardContent className="pt-8 text-center">
-              <p className="text-muted-foreground">No robots connected</p>
+          <Card className="border-border">
+            <CardContent className="py-12 text-center">
+              <p className="text-muted-foreground">No robots connected yet</p>
             </CardContent>
           </Card>
         ) : (
-          <div className="grid gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {clients.map((client) => (
-              <Link key={client.client_id} href={`/robot/${client.client_id}`}>
-                <Card className="bg-card border-border hover:border-primary/50 transition-colors cursor-pointer">
+              <Link key={client.client_id} href={`/robot/${client.client_id}`} className="group">
+                <Card className="border-border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer h-full">
                   <CardContent className="pt-6">
-                    <div className="flex items-start justify-between gap-4">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-3">
-                          <div className={`w-3 h-3 rounded-full ${getStatusDot(client)}`} />
-                          <h3 className="text-lg font-semibold text-foreground">{client.robot_name}</h3>
-                          <Badge className={getStatusColor(client)}>{isOnline(client) ? "Online" : "Offline"}</Badge>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">ID: {client.client_id}</p>
-                        <div className="flex flex-wrap gap-2">
-                          {client.modules.map((module) => (
-                            <Badge key={module} variant="outline" className="border-primary/30 text-accent">
-                              {module}
-                            </Badge>
-                          ))}
-                        </div>
+                    {/* Header with Icon and Status */}
+                    <div className="flex items-start justify-between mb-4">
+                      <div className="w-12 h-12 rounded-lg bg-primary/10 flex items-center justify-center text-primary text-xl">
+                        🤖
                       </div>
-                      <div className="text-right">
-                        <p className="text-xs text-muted-foreground">Last activity</p>
-                        <p className="text-sm text-foreground">{getLastActivityText(client.inactive_minutes)}</p>
+                      {getStatusBadge(client)}
+                    </div>
+
+                    {/* Robot Name and ID */}
+                    <h3 className="text-lg font-bold text-foreground mb-1">{client.robot_name}</h3>
+                    <p className="text-sm text-muted-foreground mb-4">ID: {client.client_id}</p>
+
+                    {/* Last Activity */}
+                    <div className="flex items-center gap-1 text-sm text-muted-foreground mb-4">
+                      <span>⏱</span>
+                      <span>Last active: {getLastActivityText(client.inactive_minutes)}</span>
+                    </div>
+
+                    {/* Modules */}
+                    <div className="space-y-2">
+                      <p className="text-xs font-medium text-muted-foreground">Modules ({client.modules.length}):</p>
+                      <div className="flex flex-wrap gap-2">
+                        {client.modules.map((module) => (
+                          <Badge
+                            key={module}
+                            variant="outline"
+                            className="border-primary/30 text-primary bg-primary/5 hover:bg-primary/10"
+                          >
+                            {module}
+                          </Badge>
+                        ))}
                       </div>
                     </div>
                   </CardContent>

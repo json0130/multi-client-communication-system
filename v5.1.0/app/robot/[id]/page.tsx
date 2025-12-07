@@ -141,44 +141,67 @@ export default function RobotDetailPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-2xl mx-auto px-4 py-8">
-        <Link href="/">
-          <Button variant="outline" className="mb-8 bg-transparent">
-            Back to Overview
+      {/* Header */}
+      <div className="border-b border-border bg-card">
+        <div className="max-w-3xl mx-auto px-6 py-6">
+          <h1 className="text-3xl font-bold text-foreground">Robot Central Hub</h1>
+        </div>
+      </div>
+
+      <div className="max-w-3xl mx-auto px-6 py-8">
+        {/* Back Button */}
+        <Link href="/" className="inline-block mb-8">
+          <Button variant="ghost" className="text-primary hover:bg-primary/5 gap-2 pl-0">
+            <span>←</span> Back to Overview
           </Button>
         </Link>
 
         {loading ? (
-          <p className="text-muted-foreground">Loading robot details...</p>
+          <div className="flex items-center justify-center py-12">
+            <p className="text-muted-foreground">Loading robot details...</p>
+          </div>
         ) : error || !client ? (
-          <Card className="bg-card border-destructive/50">
+          <Card className="border-destructive/30 bg-destructive/5">
             <CardContent className="pt-8">
-              <p className="text-destructive">Error: {error || "Robot not found"}</p>
+              <p className="text-destructive font-medium mb-2">Error loading robot</p>
+              <p className="text-sm text-muted-foreground">{error || "Robot not found"}</p>
             </CardContent>
           </Card>
         ) : (
           <>
-            <Card className="bg-card border-border mb-6">
+            {/* Robot Header Card */}
+            <Card className="border-border mb-6">
               <CardContent className="pt-8">
                 <div className="flex items-start justify-between gap-4 mb-6">
-                  <div>
-                    <h1 className="text-3xl font-bold text-foreground mb-2">{client.robot_name}</h1>
-                    <p className="text-muted-foreground text-sm">ID: {client.client_id}</p>
+                  <div className="flex items-start gap-4">
+                    <div className="w-16 h-16 rounded-lg bg-primary/10 flex items-center justify-center text-3xl">
+                      🤖
+                    </div>
+                    <div>
+                      <h1 className="text-3xl font-bold text-foreground">{client.robot_name}</h1>
+                      <p className="text-sm text-muted-foreground mt-1">ID: {client.client_id}</p>
+                    </div>
                   </div>
-                  <div className="text-right">
-                    <Badge className={isOnline ? "bg-green-500/20 text-green-300" : "bg-red-500/20 text-red-300"}>
-                      {isOnline ? "Online" : "Offline"}
-                    </Badge>
-                  </div>
+                  <Badge
+                    className={
+                      isOnline
+                        ? "bg-green-100 text-green-700 hover:bg-green-100"
+                        : "bg-gray-100 text-gray-700 hover:bg-gray-100"
+                    }
+                  >
+                    {isOnline ? "Online" : "Offline"}
+                  </Badge>
                 </div>
 
-                <div className="grid grid-cols-2 gap-4 pt-4 border-t border-border">
+                <div className="grid grid-cols-2 gap-4 pt-6 border-t border-border">
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Last Activity</p>
-                    <p className="text-sm text-foreground">{Math.round(client.inactive_minutes)}m ago</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Status</p>
+                    <p className="text-sm text-foreground">
+                      {isOnline ? "Active" : "Inactive"} ({Math.round(client.inactive_minutes)} min ago)
+                    </p>
                   </div>
                   <div>
-                    <p className="text-xs text-muted-foreground mb-1">Registration Time</p>
+                    <p className="text-xs font-medium text-muted-foreground mb-1">Registered</p>
                     <p className="text-sm text-foreground">
                       {new Date(client.registration_time * 1000).toLocaleDateString()}
                     </p>
@@ -187,28 +210,33 @@ export default function RobotDetailPage() {
               </CardContent>
             </Card>
 
-            <Card className="bg-card border-border mb-6">
+            {/* Modules Section */}
+            <Card className="border-border mb-6">
               <CardHeader>
-                <CardTitle className="text-lg">Enabled Modules</CardTitle>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <span>⚙️</span>
+                  Modules
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
                   {client.modules.map((module) => (
                     <div
                       key={module}
-                      className="flex items-center justify-between p-3 rounded-lg bg-muted/50 border border-border"
+                      className="flex items-center justify-between p-4 rounded-lg bg-secondary border border-border hover:bg-secondary/80 transition-colors"
                     >
                       <span className="text-sm font-medium text-foreground capitalize">{module}</span>
                       <button
                         onClick={() => handleModuleToggle(module)}
                         disabled={saving || !isOnline}
-                        className={`w-12 h-6 rounded-full flex items-center transition-colors ${
-                          moduleStates[module] ? "bg-primary/50" : "bg-muted"
-                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : ""}`}
+                        className={`relative w-12 h-7 rounded-full transition-colors ${
+                          moduleStates[module] ? "bg-primary" : "bg-muted"
+                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                        aria-label={`Toggle ${module}`}
                       >
                         <div
-                          className={`w-5 h-5 rounded-full bg-foreground transition-transform ${
-                            moduleStates[module] ? "translate-x-6" : "translate-x-0.5"
+                          className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${
+                            moduleStates[module] ? "translate-x-6" : "translate-x-1"
                           }`}
                         />
                       </button>
@@ -216,14 +244,20 @@ export default function RobotDetailPage() {
                   ))}
                 </div>
                 {!isOnline && (
-                  <p className="text-xs text-muted-foreground mt-3">Robot must be online to modify module settings</p>
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    ⚠️ Robot must be online to modify module settings
+                  </p>
                 )}
               </CardContent>
             </Card>
 
-            <Card className="bg-card border-border mb-6">
+            {/* Role Selection */}
+            <Card className="border-border mb-6">
               <CardHeader>
-                <CardTitle className="text-lg">Role Selection</CardTitle>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <span>👤</span>
+                  Role Selection
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-2 gap-3">
@@ -232,23 +266,31 @@ export default function RobotDetailPage() {
                       key={role}
                       onClick={() => handleRoleChange(role)}
                       disabled={saving || !isOnline}
-                      className={`p-3 rounded-lg text-sm font-medium transition-colors border ${
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${
                         selectedRole === role
-                          ? "bg-primary/50 border-primary text-foreground"
-                          : "bg-muted/50 border-border text-muted-foreground hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : ""}`}
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-secondary text-foreground border-border hover:border-primary/50"
+                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {role.replace("_", " ")}
                     </button>
                   ))}
                 </div>
-                {!isOnline && <p className="text-xs text-muted-foreground mt-3">Robot must be online to change role</p>}
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    ⚠️ Robot must be online to change role
+                  </p>
+                )}
               </CardContent>
             </Card>
 
-            <Card className="bg-card border-border">
+            {/* Character Selection */}
+            <Card className="border-border">
               <CardHeader>
-                <CardTitle className="text-lg">Character Selection</CardTitle>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <span>😊</span>
+                  Character Selection
+                </CardTitle>
               </CardHeader>
               <CardContent>
                 <div className="grid grid-cols-3 gap-3">
@@ -257,18 +299,20 @@ export default function RobotDetailPage() {
                       key={character}
                       onClick={() => handleCharacterChange(character)}
                       disabled={saving || !isOnline}
-                      className={`p-3 rounded-lg text-sm font-medium transition-colors border ${
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border capitalize ${
                         selectedCharacter === character
-                          ? "bg-primary/50 border-primary text-foreground"
-                          : "bg-muted/50 border-border text-muted-foreground hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : ""}`}
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-secondary text-foreground border-border hover:border-primary/50"
+                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {character}
                     </button>
                   ))}
                 </div>
                 {!isOnline && (
-                  <p className="text-xs text-muted-foreground mt-3">Robot must be online to change character</p>
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    ⚠️ Robot must be online to change character
+                  </p>
                 )}
               </CardContent>
             </Card>
