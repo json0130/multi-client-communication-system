@@ -100,18 +100,18 @@ export default function RobotDetailPage() {
         .filter(([_, isEnabled]) => isEnabled)
         .map(([moduleName]) => moduleName)
 
-      const response = await fetch(`/api/client/${clientId}`, {
+        const response = await fetch(`/api/client/${clientId}/save_all`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          robot_name: robotName,
-          robot_role: rolePrompts[selectedRole],  // Use full prompt
-          modules: enabledModules,
+            robot_name: robotName,
+            robot_role: rolePrompts[selectedRole],  // Use full prompt
+            modules: enabledModules,
         }),
-      })
+        })
 
       if (!response.ok) {
-        throw new Error("Failed to save changes") 
+        throw new Error("Failed to save changes")
       }
 
       setSaveMessage("All changes saved successfully!")

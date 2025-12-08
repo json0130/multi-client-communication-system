@@ -55,7 +55,7 @@ export default function RobotOverviewPage() {
   }, [])
 
   const isOnline = (client: Client) => {
-    return client.status === "active" && client.inactive_minutes < 1
+    return client.status === "active" && client.inactive_minutes < 5
   }
 
   const getStatusBadge = (client: Client) => {
@@ -116,7 +116,7 @@ export default function RobotOverviewPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {clients.map((client) => (
-              <Link key={client.client_id} href={`/robot/${client.client_id}`} className="group">
+              <Link key={client.client_id} href={`/client/${client.client_id}`} className="group">
                 <Card className="border-border hover:border-primary/50 transition-all hover:shadow-md cursor-pointer h-full">
                   <CardContent className="pt-6">
                     {/* Header with Icon and Status */}

@@ -1,65 +1,36 @@
-export async function POST(request: Request, { params }: { params: { id: string } }) {
-  const clientId = params.id
+// app/api/client/[id]/save_all/route.ts  // Or wherever your route file is
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function PATCH(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }  // Add Promise type
+) {
+  const { id: clientId } = await params;  // Await the params Promise and destructure
 
   try {
-    const body = await request.json()
-    const { modules, role, character } = body
+    const body = await request.json();
+    const { robot_name, robot_role, modules } = body;
 
-    // Send all changes to Python server
-    // You may want to adjust these endpoints based on your actual server implementation
-    const promises = []
+    // Send all changes to Python server in a single PATCH request
+    const response = await fetch(`http://localhost:5000/client/${clientId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        robot_name,
+        robot_role,
+        modules,
+      }),
+    });
 
-    // Update modules
-    if (modules) {
-      for (const [moduleName, isEnabled] of Object.entries(modules)) {
-        promises.push(
-          fetch(`http://130.216.239.248:5000/client/${clientId}/modules`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              module: moduleName,
-              enabled: isEnabled,
-            }),
-          }),
-        )
-      }
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      return NextResponse.json({ error: errorData.error || "Failed to save changes" }, { status: response.status });
     }
 
-    // Update role
-    if (role) {
-      promises.push(
-        fetch(`http://130.216.239.248:5000/client/${clientId}/role`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ role }),
-        }),
-      )
-    }
-
-    // Update character
-    if (character) {
-      promises.push(
-        fetch(`http://130.216.239.248:5000/client/${clientId}/character`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ character }),
-        }),
-      )
-    }
-
-    // Wait for all requests to complete
-    const responses = await Promise.all(promises)
-
-    // Check if any request failed
-    const allSuccessful = responses.every((res) => res.ok)
-
-    if (!allSuccessful) {
-      return Response.json({ error: "Some changes failed to save" }, { status: 400 })
-    }
-
-    return Response.json({ success: true, message: "All changes saved" }, { status: 200 })
+    const result = await response.json();
+    return NextResponse.json({ success: true, message: "All changes saved", data: result }, { status: 200 });
   } catch (error) {
-    console.error("Error saving changes:", error)
-    return Response.json({ error: "Failed to save changes" }, { status: 500 })
+    console.error("Error saving changes:", error);
+    return NextResponse.json({ error: "Failed to save changes" }, { status: 500 });
   }
 }
