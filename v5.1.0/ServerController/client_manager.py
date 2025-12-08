@@ -249,6 +249,45 @@ class ClientManager:
         """Return the numeric user_id for a given client_id, or None."""
         return self.id_map.get(client_id)
     
+    def update_client_config(self, client_id: str, update_data: Dict[str, Any]):
+        """Update client configuration in memory and recreate server if necessary"""
+        with self.manager_lock:
+            if client_id not in self.client_infos:
+                raise ValueError(f"Client {client_id} not found")
+            
+            client_info = self.client_infos[client_id]
+            updated = False
+            
+            if 'robot_name' in update_data:
+                client_info.robot_name = update_data['robot_name']
+                updated = True
+            
+            if 'modules' in update_data:
+                new_modules = set(update_data['modules'])
+                if not new_modules.issubset(self.valid_modules):
+                    invalid = new_modules - self.valid_modules
+                    raise ValueError(f"Invalid modules: {invalid}")
+                new_modules.add('rag')
+                if new_modules != client_info.modules:
+                    client_info.modules = new_modules
+                    updated = True
+            
+            # For role, since it's fetched from DB on create, recreate to pick up
+            if updated or 'robot_role' in update_data:
+                if client_id in self.client_servers:
+                    try:
+                        self.client_servers[client_id].cleanup_resources()
+                        del self.client_servers[client_id]
+                        print(f"🧹 Cleaned up old server for {client_info.get_display_name()}")
+                    except Exception as e:
+                        print(f"❌ Error cleaning up server for {client_id}: {e}")
+                
+                # Recreate server to apply changes (will refetch role from DB)
+                self.get_or_create_server_instance(client_id)
+                print(f"🔄 Recreated server for {client_info.get_display_name()}")
+            
+            print(f"✅ Updated client {client_info.get_display_name()} with {update_data}")
+
     def update_client_activity(self, client_id: str):
         """Update last activity timestamp for client"""
         with self.manager_lock:

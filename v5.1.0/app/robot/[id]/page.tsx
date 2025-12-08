@@ -28,6 +28,8 @@ export default function RobotDetailPage() {
   const [selectedCharacter, setSelectedCharacter] = useState<string>("male")
   const [moduleStates, setModuleStates] = useState<Record<string, boolean>>({})
   const [saving, setSaving] = useState(false)
+  const [hasChanges, setHasChanges] = useState(false)
+  const [saveMessage, setSaveMessage] = useState<string | null>(null)
 
   const roles = ["guide", "cooking_robot", "assistant", "greeter"]
   const characters = ["male", "female", "neutral"]
@@ -69,69 +71,52 @@ export default function RobotDetailPage() {
     return () => clearInterval(interval)
   }, [clientId])
 
-  const handleModuleToggle = async (module: string) => {
-    const newState = !moduleStates[module]
-    setModuleStates((prev) => ({ ...prev, [module]: newState }))
-
-    try {
-      setSaving(true)
-      const response = await fetch(`/api/client/${clientId}/modules`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          module,
-          enabled: newState,
-        }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to update module")
-      }
-    } catch (err) {
-      console.error("Error updating module:", err)
-      setModuleStates((prev) => ({ ...prev, [module]: !newState }))
-    } finally {
-      setSaving(false)
-    }
+  const handleModuleToggle = (module: string) => {
+    setModuleStates((prev) => ({ ...prev, [module]: !prev[module] }))
+    setHasChanges(true)
   }
 
-  const handleRoleChange = async (role: string) => {
+  const handleRoleChange = (role: string) => {
     setSelectedRole(role)
-
-    try {
-      setSaving(true)
-      const response = await fetch(`/api/client/${clientId}/role`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ role }),
-      })
-
-      if (!response.ok) {
-        throw new Error("Failed to update role")
-      }
-    } catch (err) {
-      console.error("Error updating role:", err)
-    } finally {
-      setSaving(false)
-    }
+    setHasChanges(true)
   }
 
-  const handleCharacterChange = async (character: string) => {
+  const handleCharacterChange = (character: string) => {
     setSelectedCharacter(character)
+    setHasChanges(true)
+  }
 
+  const handleSaveAll = async () => {
     try {
       setSaving(true)
-      const response = await fetch(`/api/client/${clientId}/character`, {
+      setSaveMessage(null)
+
+      // Collect all changes
+      const changes = {
+        modules: moduleStates,
+        role: selectedRole,
+        character: selectedCharacter,
+      }
+
+      // Send all changes in a single request
+      const response = await fetch(`/api/client/${clientId}/save-all`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ character }),
+        body: JSON.stringify(changes),
       })
 
       if (!response.ok) {
-        throw new Error("Failed to update character")
+        throw new Error("Failed to save changes")
       }
+
+      setSaveMessage("All changes saved successfully!")
+      setHasChanges(false)
+
+      // Clear success message after 3 seconds
+      setTimeout(() => setSaveMessage(null), 3000)
     } catch (err) {
-      console.error("Error updating character:", err)
+      console.error("Error saving changes:", err)
+      setSaveMessage("Failed to save changes. Please try again.")
     } finally {
       setSaving(false)
     }
@@ -228,7 +213,7 @@ export default function RobotDetailPage() {
                       <span className="text-sm font-medium text-foreground capitalize">{module}</span>
                       <button
                         onClick={() => handleModuleToggle(module)}
-                        disabled={saving || !isOnline}
+                        disabled={!isOnline}
                         className={`relative w-12 h-7 rounded-full transition-colors ${
                           moduleStates[module] ? "bg-primary" : "bg-muted"
                         } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
@@ -265,7 +250,7 @@ export default function RobotDetailPage() {
                     <button
                       key={role}
                       onClick={() => handleRoleChange(role)}
-                      disabled={saving || !isOnline}
+                      disabled={!isOnline}
                       className={`p-3 rounded-lg text-sm font-medium transition-all border ${
                         selectedRole === role
                           ? "bg-primary text-primary-foreground border-primary"
@@ -285,7 +270,7 @@ export default function RobotDetailPage() {
             </Card>
 
             {/* Character Selection */}
-            <Card className="border-border">
+            <Card className="border-border mb-6">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
                   <span>😊</span>
@@ -298,7 +283,7 @@ export default function RobotDetailPage() {
                     <button
                       key={character}
                       onClick={() => handleCharacterChange(character)}
-                      disabled={saving || !isOnline}
+                      disabled={!isOnline}
                       className={`p-3 rounded-lg text-sm font-medium transition-all border capitalize ${
                         selectedCharacter === character
                           ? "bg-primary text-primary-foreground border-primary"
@@ -316,6 +301,56 @@ export default function RobotDetailPage() {
                 )}
               </CardContent>
             </Card>
+
+            {hasChanges && (
+              <Card className="border-primary/30 bg-primary/5 mb-6">
+                <CardContent className="pt-6">
+                  <div className="flex items-center justify-between gap-4">
+                    <p className="text-sm text-foreground font-medium">You have unsaved changes</p>
+                    <div className="flex gap-3">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          // Reset to original state
+                          const states: Record<string, boolean> = {}
+                          client.modules.forEach((module: string) => {
+                            states[module] = true
+                          })
+                          setModuleStates(states)
+                          setSelectedRole("guide")
+                          setSelectedCharacter("male")
+                          setHasChanges(false)
+                        }}
+                        disabled={saving}
+                      >
+                        Cancel
+                      </Button>
+                      <Button onClick={handleSaveAll} disabled={saving || !isOnline} className="gap-2">
+                        {saving ? "Saving..." : "Save Changes"}
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
+            {saveMessage && (
+              <Card
+                className={`mb-6 border-2 ${
+                  saveMessage.includes("successfully") ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+                }`}
+              >
+                <CardContent className="pt-4">
+                  <p
+                    className={`text-sm font-medium ${
+                      saveMessage.includes("successfully") ? "text-green-700" : "text-red-700"
+                    }`}
+                  >
+                    {saveMessage}
+                  </p>
+                </CardContent>
+              </Card>
+            )}
           </>
         )}
       </div>

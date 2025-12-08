@@ -55,6 +55,8 @@ class RequestRouter:
                 return self._handle_monitor_request(server, display_name)
             elif endpoint == 'live_stream': 
                 return self._handle_live_stream_request(server, display_name)
+            elif endpoint == 'update':
+                return self._handle_update_request(server, flask_request, display_name)
             else:
                 return jsonify({"error": f"Unknown endpoint: {endpoint}"}), 404
                 
@@ -421,3 +423,52 @@ class RequestRouter:
             "health_conditions": conditions,
             "updated": True
         }), 200
+    
+    def _handle_update_request(self, server, flask_request, display_name: str) -> tuple:
+        """Handle client config update request"""
+        try:
+            update_data = flask_request.json
+            if not update_data:
+                return jsonify({"error": "No update data provided"}), 400
+            
+            # Validate modules if present
+            if 'modules' in update_data:
+                modules = update_data['modules']
+                valid_modules = self.client_manager.valid_modules
+                if not isinstance(modules, list) or not all(m in valid_modules for m in modules):
+                    return jsonify({"error": f"Invalid modules. Valid: {list(valid_modules)}"}), 400
+                # Add 'rag' if not present
+                if 'rag' not in modules:
+                    modules.append('rag')
+            
+            # Update Supabase
+            db_update = {}
+            if 'robot_name' in update_data:
+                db_update['robot_name'] = update_data['robot_name']
+            if 'robot_role' in update_data:
+                db_update['robot_role'] = update_data['robot_role']
+            if 'modules' in update_data:
+                db_update['modules'] = update_data['modules']  # List for DB
+            
+            if db_update:
+                self.db.client.supabase.table('robots').update(db_update).eq('client_id', server.client_id).execute()
+                print(f"📝 Updated DB for {display_name}: {db_update}")
+            
+            # Update local client_manager
+            self.client_manager.update_client_config(server.client_id, update_data)
+            
+            # Broadcast to client if connected
+            if self.socketio:
+                self.socketio.emit('config_updated', update_data, room=server.client_id)
+                print(f"📢 Broadcasted update to {display_name}")
+            
+            return jsonify({
+                "message": f"Client {display_name} updated successfully",
+                "updated_fields": list(update_data.keys())
+            }), 200
+        
+        except ValueError as ve:
+            return jsonify({"error": str(ve)}), 404
+        except Exception as e:
+            print(f"❌ Update error for {display_name}: {e}")
+            return jsonify({"error": "Update failed", "details": str(e)}), 500

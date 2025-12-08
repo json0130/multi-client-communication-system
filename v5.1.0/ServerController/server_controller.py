@@ -261,6 +261,7 @@ class ServerController:
                     "client_modules": "/client/{client_id}/modules (GET)",
                     "client_health": "/client/{client_id}/health (GET)",
                     "client_monitor": "/client/{client_id}/monitor (GET)",
+                    "client_update": "/client/{client_id} (PATCH)",
                     "client_live_stream": "/client/{client_id}/live_stream (GET)",
                     "websocket": "/socket.io/ (send client_init event first)",
                     "infer_topics": "/user/<int:user_id>/infer_topics (POST)",
@@ -421,7 +422,12 @@ class ServerController:
                 return jsonify({
                     "error": f"Failed to remove client: {e}"
                 }), 500
-                
+            
+        @self.app.route('/client/<client_id>', methods=['PATCH'])
+        def update_client(client_id):
+            """Update client configuration such as enabled modules"""
+            return self.request_router.route_client_request(client_id, 'update', request)
+    
         @self.app.route('/user/<int:user_id>/infer_topics', methods=['POST'])
         def user_infer_topics(user_id):
             """Run GPT topic/condition extraction and update the users table."""
