@@ -1,8 +1,9 @@
 # main.py - Simple config concurrent client
+import json
 import sys
 import os
 import logging
-from typing import Optional
+from typing import Any, Dict, Optional
 
 # --- NEW IMPORTS ---
 import serial.tools.list_ports
@@ -95,6 +96,12 @@ class SimpleConcurrentClient(BasicClient):
             logger.info("✅ Client-specific event handlers registered.")
         else:
             logger.error("❌ Cannot register handlers: server_connection or sio not initialized.")
+
+        def on_config_updated(data):
+            logger.info(f"🔄 Received config update: {data}")
+            self.update_config(data)
+
+        self.server_connection.sio.on('config_updated', on_config_updated)
     
     def _on_arduino_connected(self): 
         """Called when Arduino connects""" 
@@ -264,6 +271,41 @@ class SimpleConcurrentClient(BasicClient):
         print("   🛑 Type 'exit' or press Ctrl+C to stop")
         print("="*60)
         print()
+        
+    def update_config(self, new_data: Dict[str, Any]):
+        """Dynamically update config, persist to JSON, and reinitialize modules."""
+        updated_fields = []
+
+        if 'robot_name' in new_data:
+            self.config['robot_name'] = new_data['robot_name']
+            updated_fields.append('robot_name')
+        
+        if 'robot_role' in new_data:
+            self.config['robot_role'] = new_data['robot_role']
+            updated_fields.append('robot_role')
+        
+        if 'modules' in new_data:
+            self.config['modules'] = new_data['modules']
+            updated_fields.append('modules')
+            # Reload modules if changed
+            for module in list(self.input_modules.values()) + list(self.output_modules.values()):
+                module.stop()
+            self.input_modules.clear()
+            self.output_modules.clear()
+            self.setup_all_modules()  # Re-init with new modules
+
+        if updated_fields:
+            # Persist to file
+            try:
+                with open("client_config.json", 'w') as f:
+                    json.dump(self.config, f, indent=4)
+                logger.info(f"💾 Saved updated config to client_config.json: {updated_fields}")
+            except Exception as e:
+                logger.error(f"❌ Failed to save config: {e}")
+        
+        logger.info("✅ Config update applied")
+
+
 
 def main():
     """Simple main function - no configuration needed!"""

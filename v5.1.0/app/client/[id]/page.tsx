@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, useRef } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -39,6 +39,10 @@ export default function RobotDetailPage() {
     assistant: "Your name is ChatBox, a friendly and helpful robot assistant. You assist users with information, answer questions, and engage in casual conversation. You have a warm and approachable personality. Always start your response with one of the following emotion tags in square brackets, like [SAD] or [POSE]. Tags: [GREETING], [WAVE], [POINT], [CONFUSED], [SHRUG], [ANGRY], [SAD], [SLEEP], [DEFAULT], [POSE], Do NOT invent new emotion tags. Choose the tag that best reflects the tone of your response, not necessarily the user's input emotion.",
   };
 
+  const allModules = ["emotion", "speech", "gpt", "rag"]
+  const isFirstLoadRef = useRef(true)
+
+
   useEffect(() => {
     const fetchClient = async () => {
       try {
@@ -56,14 +60,27 @@ export default function RobotDetailPage() {
           throw new Error("Client not found")
         }
 
-        setClient(foundClient)
-        setRobotName(foundClient.robot_name)
-
-        const states: Record<string, boolean> = {}
-        foundClient.modules.forEach((module: string) => {
-          states[module] = true
-        })
-        setModuleStates(states)
+        if (isFirstLoadRef.current) {
+          setClient(foundClient)
+          setRobotName(foundClient.robot_name)
+          const states: Record<string, boolean> = {}
+          foundClient.modules.forEach((module: string) => {
+            states[module] = true
+          })
+          setModuleStates(states)
+          isFirstLoadRef.current = false
+        } else {
+          // Update only status-related fields to preserve user's unsaved changes
+          setClient((prevClient) => {
+            if (!prevClient) return foundClient
+            return {
+              ...prevClient,
+              status: foundClient.status,
+              inactive_minutes: foundClient.inactive_minutes,
+              last_activity: foundClient.last_activity,
+            }
+          })
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : "Failed to load client")
       } finally {
@@ -100,15 +117,15 @@ export default function RobotDetailPage() {
         .filter(([_, isEnabled]) => isEnabled)
         .map(([moduleName]) => moduleName)
 
-        const response = await fetch(`/api/client/${clientId}/save_all`, {
+      const response = await fetch(`/api/client/${clientId}/save-all`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            robot_name: robotName,
-            robot_role: rolePrompts[selectedRole],  // Use full prompt
-            modules: enabledModules,
+          robot_name: robotName,
+          robot_role: rolePrompts[selectedRole],
+          modules: enabledModules,
         }),
-        })
+      })
 
       if (!response.ok) {
         throw new Error("Failed to save changes")
@@ -216,7 +233,7 @@ export default function RobotDetailPage() {
               </CardHeader>
               <CardContent>
                 <div className="space-y-3">
-                  {client.modules.map((module) => (
+                  {allModules.map((module) => (
                     <div
                       key={module}
                       className="flex items-center justify-between p-4 rounded-lg bg-secondary border border-border hover:bg-secondary/80 transition-colors"
@@ -291,8 +308,8 @@ export default function RobotDetailPage() {
                         onClick={() => {
                           setRobotName(client.robot_name)
                           const states: Record<string, boolean> = {}
-                          client.modules.forEach((module: string) => {
-                            states[module] = true
+                          allModules.forEach((module: string) => {
+                            states[module] = client.modules.includes(module)
                           })
                           setModuleStates(states)
                           setSelectedRole("guide")
