@@ -1,4 +1,4 @@
-// app/api/client/[id]/save_all/route.ts  // Or wherever your route file is
+// app/api/client/[id]/route.ts
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function PATCH(
@@ -12,7 +12,7 @@ export async function PATCH(
     const { robot_name, robot_role, modules } = body;
 
     // Send all changes to Python server in a single PATCH request
-    const response = await fetch(`http://localhost:5000/client/${clientId}`, {
+    const response = await fetch(`http://130.216.238.11:5000/client/${clientId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

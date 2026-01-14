@@ -117,7 +117,7 @@ export default function RobotDetailPage() {
         .filter(([_, isEnabled]) => isEnabled)
         .map(([moduleName]) => moduleName)
 
-      const response = await fetch(`/api/client/${clientId}/save-all`, {
+      const response = await fetch(`/api/client/${clientId}/save_all`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
