@@ -143,7 +143,7 @@ export default function RobotDetailPage() {
     }
   }
 
-  const isOnline = client && client.status === "active" && client.inactive_minutes < 5
+  const isOnline = client && client.status === "active" && client.inactive_minutes < 60
 
   return (
     <div className="min-h-screen bg-background">
