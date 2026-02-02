@@ -11,12 +11,25 @@ interface ClientDetail {
   client_id: string
   display_name: string
   robot_name: string
+  role: string
   status: string
   inactive_minutes: number
   last_activity: number
   modules: string[]
   registration_time: number
 }
+
+interface RobotTemplate {
+  id: string
+  name: string
+  role: string
+  modules: string[]
+  description: string
+  createdAt: number
+}
+
+const AVAILABLE_MODULES = ["gpt", "speech", "rag", "vision", "navigation", "manipulation"]
+const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
 
 export default function RobotDetailPage() {
   const params = useParams()
@@ -25,23 +38,23 @@ export default function RobotDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [robotName, setRobotName] = useState<string>("")
-  const [selectedRole, setSelectedRole] = useState<string>("guide")
-  const [moduleStates, setModuleStates] = useState<Record<string, boolean>>({})
+  const [selectedRole, setSelectedRole] = useState<string>("")
+  const [selectedModules, setSelectedModules] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
+  const [templates, setTemplates] = useState<RobotTemplate[]>([])
+  const [showTemplates, setShowTemplates] = useState(false)
 
-  const roles = ["mobile_service", "cooking_robot", "assistant"]
-
-  const rolePrompts: Record<string, string> = {
-    mobile_service: "You are Silbot, a mobile service robot. Your purpose is to perform physical actions like moving, getting items, and navigating spaces upon command. You respond with simple confirmations of your actions. *IMPORTANT*: You must include a gesture tag in your response from [wave, think, celebrate]. For example, if greeted: '[wave] Hello there!'.",
-    cooking_robot: "You are Pepper, a cooking robot. You are friendly, patient, and knowledgeable about food. Your purpose is to assist users with cooking-related tasks—such as preparing meals like breakfast, lunch, or dinner, suggesting recipes, and offering guidance in the kitchen—while keeping interactions warm and engaging.",
-    assistant: "Your name is ChatBox, a friendly and helpful robot assistant. You assist users with information, answer questions, and engage in casual conversation. You have a warm and approachable personality. Always start your response with one of the following emotion tags in square brackets, like [SAD] or [POSE]. Tags: [GREETING], [WAVE], [POINT], [CONFUSED], [SHRUG], [ANGRY], [SAD], [SLEEP], [DEFAULT], [POSE], Do NOT invent new emotion tags. Choose the tag that best reflects the tone of your response, not necessarily the user's input emotion.",
-  };
-
-  const allModules = ["emotion", "speech", "gpt", "rag"]
   const isFirstLoadRef = useRef(true)
 
+  // Load templates from localStorage
+  useEffect(() => {
+    const saved = localStorage.getItem("robot-templates")
+    if (saved) {
+      setTemplates(JSON.parse(saved))
+    }
+  }, [])
 
   useEffect(() => {
     const fetchClient = async () => {
@@ -62,12 +75,9 @@ export default function RobotDetailPage() {
 
         if (isFirstLoadRef.current) {
           setClient(foundClient)
-          setRobotName(foundClient.robot_name)
-          const states: Record<string, boolean> = {}
-          foundClient.modules.forEach((module: string) => {
-            states[module] = true
-          })
-          setModuleStates(states)
+          setRobotName(foundClient.robot_name || "")
+          setSelectedRole(foundClient.role || "")
+          setSelectedModules(foundClient.modules || [])
           isFirstLoadRef.current = false
         } else {
           // Update only status-related fields to preserve user's unsaved changes
@@ -93,8 +103,14 @@ export default function RobotDetailPage() {
     return () => clearInterval(interval)
   }, [clientId])
 
+  const isUnconfigured = () => {
+    return (!client?.modules || client.modules.length === 0) && (!client?.role || client.role === "")
+  }
+
   const handleModuleToggle = (module: string) => {
-    setModuleStates((prev) => ({ ...prev, [module]: !prev[module] }))
+    setSelectedModules((prev) =>
+      prev.includes(module) ? prev.filter((m) => m !== module) : [...prev, module]
+    )
     setHasChanges(true)
   }
 
@@ -108,22 +124,25 @@ export default function RobotDetailPage() {
     setHasChanges(true)
   }
 
+  const handleApplyTemplate = (template: RobotTemplate) => {
+    setSelectedRole(template.role)
+    setSelectedModules(template.modules)
+    setHasChanges(true)
+    setShowTemplates(false)
+  }
+
   const handleSaveAll = async () => {
     try {
       setSaving(true)
       setSaveMessage(null)
-
-      const enabledModules = Object.entries(moduleStates)
-        .filter(([_, isEnabled]) => isEnabled)
-        .map(([moduleName]) => moduleName)
 
       const response = await fetch(`/api/client/${clientId}/save_all`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           robot_name: robotName,
-          robot_role: rolePrompts[selectedRole],
-          modules: enabledModules,
+          robot_role: selectedRole,
+          modules: selectedModules,
         }),
       })
 
@@ -134,6 +153,18 @@ export default function RobotDetailPage() {
       setSaveMessage("All changes saved successfully!")
       setHasChanges(false)
 
+      // Update client state with new values
+      setClient((prev) =>
+        prev
+          ? {
+              ...prev,
+              robot_name: robotName,
+              role: selectedRole,
+              modules: selectedModules,
+            }
+          : null
+      )
+
       setTimeout(() => setSaveMessage(null), 3000)
     } catch (err) {
       console.error("Error saving changes:", err)
@@ -143,7 +174,18 @@ export default function RobotDetailPage() {
     }
   }
 
-  const isOnline = client && client.status === "active" && client.inactive_minutes < 60
+  const handleCancel = () => {
+    if (client) {
+      setRobotName(client.robot_name || "")
+      setSelectedRole(client.role || "")
+      setSelectedModules(client.modules || [])
+      setHasChanges(false)
+    }
+  }
+
+  // Robot is considered online if status is active (regardless of inactive_minutes)
+  // This allows configuration for both "Active" and "Idle" robots
+  const isOnline = client && client.status === "active"
 
   return (
     <div className="min-h-screen bg-background">
@@ -158,7 +200,7 @@ export default function RobotDetailPage() {
         {/* Back Button */}
         <Link href="/" className="inline-block mb-8">
           <Button variant="ghost" className="text-primary hover:bg-primary/5 gap-2 pl-0">
-            <span>←</span> Back to Overview
+            <span>{"<-"}</span> Back to Overview
           </Button>
         </Link>
 
@@ -176,12 +218,50 @@ export default function RobotDetailPage() {
         ) : (
           <>
             {/* Robot Header Card */}
-            <Card className="border-border mb-6">
+            <Card className={`border-border mb-6 ${isUnconfigured() ? "border-orange-200 bg-orange-50/30" : ""}`}>
               <CardContent className="pt-8">
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div className="flex items-start gap-4">
-                    <div className="w-16 h-16 rounded-lg bg-primary/10 flex items-center justify-center text-3xl">
-                      🤖
+                    <div
+                      className={`w-16 h-16 rounded-lg flex items-center justify-center text-3xl ${
+                        isUnconfigured() ? "bg-orange-100 text-orange-500" : "bg-primary/10 text-primary"
+                      }`}
+                    >
+                      {isUnconfigured() ? (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="32"
+                          height="32"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <circle cx="12" cy="12" r="10" />
+                          <line x1="12" y1="8" x2="12" y2="12" />
+                          <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                      ) : (
+                        <svg
+                          xmlns="http://www.w3.org/2000/svg"
+                          width="32"
+                          height="32"
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        >
+                          <rect x="3" y="11" width="18" height="10" rx="2" />
+                          <circle cx="12" cy="5" r="2" />
+                          <path d="M12 7v4" />
+                          <line x1="8" y1="16" x2="8" y2="16" />
+                          <line x1="16" y1="16" x2="16" y2="16" />
+                        </svg>
+                      )}
                     </div>
                     <div className="flex-1">
                       <input
@@ -189,21 +269,30 @@ export default function RobotDetailPage() {
                         value={robotName}
                         onChange={(e) => handleNameChange(e.target.value)}
                         disabled={!isOnline}
-                        className="text-3xl font-bold text-foreground bg-transparent border-b-2 border-transparent hover:border-primary focus:border-primary outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        className="text-3xl font-bold text-foreground bg-transparent border-b-2 border-transparent hover:border-primary focus:border-primary outline-none transition-colors disabled:opacity-50 disabled:cursor-not-allowed w-full"
                         placeholder="Robot name"
                       />
                       <p className="text-sm text-muted-foreground mt-1">ID: {client.client_id}</p>
                     </div>
                   </div>
-                  <Badge
-                    className={
-                      isOnline
-                        ? "bg-green-100 text-green-700 hover:bg-green-100"
-                        : "bg-gray-100 text-gray-700 hover:bg-gray-100"
-                    }
-                  >
-                    {isOnline ? "Online" : "Offline"}
-                  </Badge>
+                  <div className="flex flex-col items-end gap-1">
+                    <Badge
+                      className={
+                        isOnline
+                          ? client.inactive_minutes < 1
+                            ? "bg-green-100 text-green-700 hover:bg-green-100"
+                            : "bg-yellow-100 text-yellow-700 hover:bg-yellow-100"
+                          : "bg-gray-100 text-gray-700 hover:bg-gray-100"
+                      }
+                    >
+                      {isOnline ? (client.inactive_minutes < 1 ? "Active" : "Idle") : "Offline"}
+                    </Badge>
+                    {isUnconfigured() && (
+                      <Badge variant="outline" className="bg-orange-100 text-orange-600 border-orange-200">
+                        Unconfigured
+                      </Badge>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-2 gap-4 pt-6 border-t border-border">
@@ -223,60 +312,113 @@ export default function RobotDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Modules Section */}
-            <Card className="border-border mb-6">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <span>⚙️</span>
-                  Modules
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {allModules.map((module) => (
-                    <div
-                      key={module}
-                      className="flex items-center justify-between p-4 rounded-lg bg-secondary border border-border hover:bg-secondary/80 transition-colors"
+            {/* Apply Template Section (for unconfigured robots) */}
+            {isUnconfigured() && templates.length > 0 && (
+              <Card className="border-primary/30 bg-primary/5 mb-6">
+                <CardHeader>
+                  <CardTitle className="text-lg flex items-center gap-2">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
                     >
-                      <span className="text-sm font-medium text-foreground capitalize">{module}</span>
-                      <button
-                        onClick={() => handleModuleToggle(module)}
-                        disabled={!isOnline}
-                        className={`relative w-12 h-7 rounded-full transition-colors ${
-                          moduleStates[module] ? "bg-primary" : "bg-muted"
-                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-                        aria-label={`Toggle ${module}`}
-                      >
-                        <div
-                          className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                            moduleStates[module] ? "translate-x-6" : "translate-x-1"
-                          }`}
-                        />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-                {!isOnline && (
-                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-                    ⚠️ Robot must be online to modify module settings
+                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                    Quick Setup with Template
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-sm text-muted-foreground mb-4">
+                    Apply a pre-defined template to quickly configure this robot:
                   </p>
-                )}
-              </CardContent>
-            </Card>
+                  {!showTemplates ? (
+                    <Button onClick={() => setShowTemplates(true)} disabled={!isOnline}>
+                      Choose Template
+                    </Button>
+                  ) : (
+                    <div className="space-y-3">
+                      {templates.map((template) => (
+                        <div
+                          key={template.id}
+                          className="flex items-center justify-between p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-colors"
+                        >
+                          <div>
+                            <p className="font-medium text-foreground">{template.name}</p>
+                            <p className="text-sm text-muted-foreground">
+                              {template.role.replace("_", " ")} - {template.modules.length} modules
+                            </p>
+                          </div>
+                          <Button size="sm" onClick={() => handleApplyTemplate(template)} disabled={!isOnline}>
+                            Apply
+                          </Button>
+                        </div>
+                      ))}
+                      <Button variant="outline" size="sm" onClick={() => setShowTemplates(false)}>
+                        Cancel
+                      </Button>
+                    </div>
+                  )}
+                  {!isOnline && (
+                    <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                      Robot must be online to apply a template
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
+            )}
+
+            {/* No Templates Notice */}
+            {isUnconfigured() && templates.length === 0 && (
+              <Card className="border-orange-200 bg-orange-50/50 mb-6">
+                <CardContent className="pt-6">
+                  <p className="text-sm text-orange-700 mb-3">
+                    No templates available. Create a template to quickly configure robots.
+                  </p>
+                  <Link href="/templates">
+                    <Button variant="outline" size="sm">
+                      Create Template
+                    </Button>
+                  </Link>
+                </CardContent>
+              </Card>
+            )}
 
             {/* Role Selection */}
             <Card className="border-border mb-6">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <span>👤</span>
+                  <span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                      <circle cx="12" cy="7" r="4" />
+                    </svg>
+                  </span>
                   Role Selection
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <div className="grid grid-cols-2 gap-3">
-                  {roles.map((role) => (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {AVAILABLE_ROLES.map((role) => (
                     <button
                       key={role}
+                      type="button"
                       onClick={() => handleRoleChange(role)}
                       disabled={!isOnline}
                       className={`p-3 rounded-lg text-sm font-medium transition-all border ${
@@ -291,32 +433,69 @@ export default function RobotDetailPage() {
                 </div>
                 {!isOnline && (
                   <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-                    ⚠️ Robot must be online to change role
+                    Robot must be online to change role
                   </p>
                 )}
               </CardContent>
             </Card>
 
+            {/* Modules Section */}
+            <Card className="border-border mb-6">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                      <circle cx="12" cy="12" r="3" />
+                    </svg>
+                  </span>
+                  Modules
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {AVAILABLE_MODULES.map((module) => (
+                    <button
+                      key={module}
+                      type="button"
+                      onClick={() => handleModuleToggle(module)}
+                      disabled={!isOnline}
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${
+                        selectedModules.includes(module)
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-secondary text-foreground border-border hover:border-primary/50"
+                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                    >
+                      {module}
+                    </button>
+                  ))}
+                </div>
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    Robot must be online to modify modules
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Unsaved Changes Banner */}
             {hasChanges && (
               <Card className="border-primary/30 bg-primary/5 mb-6">
                 <CardContent className="pt-6">
                   <div className="flex items-center justify-between gap-4">
                     <p className="text-sm text-foreground font-medium">You have unsaved changes</p>
                     <div className="flex gap-3">
-                      <Button
-                        variant="outline"
-                        onClick={() => {
-                          setRobotName(client.robot_name)
-                          const states: Record<string, boolean> = {}
-                          allModules.forEach((module: string) => {
-                            states[module] = client.modules.includes(module)
-                          })
-                          setModuleStates(states)
-                          setSelectedRole("guide")
-                          setHasChanges(false)
-                        }}
-                        disabled={saving}
-                      >
+                      <Button variant="outline" onClick={handleCancel} disabled={saving}>
                         Cancel
                       </Button>
                       <Button onClick={handleSaveAll} disabled={saving || !isOnline} className="gap-2">
@@ -328,6 +507,7 @@ export default function RobotDetailPage() {
               </Card>
             )}
 
+            {/* Save Message */}
             {saveMessage && (
               <Card
                 className={`mb-6 border-2 ${

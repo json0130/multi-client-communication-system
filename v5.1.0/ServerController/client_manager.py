@@ -54,7 +54,7 @@ class ClientManager:
         {
             "client_id": "optional_custom_id",
             "robot_name": "HomeAssistant_Robot", 
-            "modules": ["gpt", "emotion", "speech"],
+            "modules": ["gpt", "emotion", "speech"],  # optional
             "config": {"custom_param": "value"}
         }
         
@@ -68,22 +68,17 @@ class ClientManager:
             if not robot_name:
                 return False, "robot_name is required in client_init.json", None
             
-            if not modules:
-                return False, "modules list is required in client_init.json", None
-            
             # Generate or use provided client_id
             client_id = client_init_data.get('client_id')
             if not client_id:
                 client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
             
-            # Validate modules
+            # Validate modules if provided
             modules_set = set(modules)
-            if not modules_set.issubset(self.valid_modules):
+            if modules_set and not modules_set.issubset(self.valid_modules):
                 invalid_modules = modules_set - self.valid_modules
                 return False, f"Invalid modules: {invalid_modules}. Valid options: {self.valid_modules}", None
             
-            modules_set.add('rag')  # Always include RAG module
-
             # Get config overrides
             config_overrides = client_init_data.get('config', {})
             
@@ -109,7 +104,10 @@ class ClientManager:
             with self.manager_lock:
                 self.client_infos[client_id] = client_info
 
-            print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
+            if not modules_set:
+                print(f"📝 Registered client {client_info.get_display_name()} without modules (waiting for server assignment)")
+            else:
+                print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
             
             return True, f"Client {client_info.get_display_name()} registered successfully", client_info
             
@@ -151,7 +149,6 @@ class ClientManager:
     def _create_server_instance(self, client_info: ClientInfo, robot_registry: Dict) -> Optional[RobotServer]:
         """Create a new RobotServer instance for a client"""
         try:
-
             robot_role = 'You are a helpful robot.'  # default fallback
         
             try:
@@ -264,10 +261,9 @@ class ClientManager:
             
             if 'modules' in update_data:
                 new_modules = set(update_data['modules'])
-                if not new_modules.issubset(self.valid_modules):
+                if new_modules and not new_modules.issubset(self.valid_modules):
                     invalid = new_modules - self.valid_modules
                     raise ValueError(f"Invalid modules: {invalid}")
-                new_modules.add('rag')
                 if new_modules != client_info.modules:
                     client_info.modules = new_modules
                     updated = True

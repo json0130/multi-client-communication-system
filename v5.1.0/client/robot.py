@@ -1,4 +1,4 @@
-# main.py - Simple config concurrent client
+# main.py - Simple config concurrent client with server-side configuration support
 import json
 import sys
 import os
@@ -29,12 +29,19 @@ logger = logging.getLogger(__name__)
 class SimpleConcurrentClient(BasicClient):
     """
     Client that uses simple config format and applies sensible defaults
-    Works with minimal config: robot_name, client_id, server_url, modules
+    Works with minimal config: robot_name, client_id, server_url
+    
+    NEW: Supports server-side role/module configuration
+    - Client can connect with minimal config (just name, ID, server URL)
+    - Server can assign role and modules dynamically via 'config_updated' event
     """
     
     def __init__(self, config_file: str = "client_config.json"):
         # This calls the parent __init__ which sets up self.server_connection
         super().__init__(config_file)
+        
+        # Track if we're using server-side configuration
+        self.using_server_config = False
         
         # We define the handlers here, where they have access to 'self' (the client instance)
         # and its output_modules. Then we register them directly on the sio object.
@@ -52,10 +59,14 @@ class SimpleConcurrentClient(BasicClient):
             if response:
                 if 'console_output' in self.output_modules:
                     self.output_modules['console_output'].process_output(response)
+                
+                # Check for any available TTS module
                 if 'edge_tts_output' in self.output_modules:
                     self.output_modules['edge_tts_output'].process_output(response)
-                elif 'pyttsx_tts' in self.output_modules:
-                    self.output_modules['pyttsx_tts'].process_output(response)
+                elif 'tts_output' in self.output_modules:
+                    self.output_modules['tts_output'].process_output(response)
+                elif 'pyttsx_tts_output' in self.output_modules:
+                    self.output_modules['pyttsx_tts_output'].process_output(response)
 
         # 2. Define the new handler for direct commands
         def on_execute_command(data):
@@ -75,13 +86,17 @@ class SimpleConcurrentClient(BasicClient):
                     logger.info(f"✅ Command executed successfully")
                     response_text = response.get('response', '')
                     
-                    # ✅ ADD THIS - Speak the response
+                    # Speak the response with any available TTS
                     if response_text:
                         logger.info(f"🗣️ Speaking response: '{response_text[:100]}...'")
                         
-                        # Speak via TTS
+                        # Try each TTS module
                         if 'edge_tts_output' in self.output_modules:
                             self.output_modules['edge_tts_output'].process_output({'text': response_text})
+                        elif 'tts_output' in self.output_modules:
+                            self.output_modules['tts_output'].process_output({'text': response_text})
+                        elif 'pyttsx_tts_output' in self.output_modules:
+                            self.output_modules['pyttsx_tts_output'].process_output({'text': response_text})
                         
                         # Show in console
                         if 'console_output' in self.output_modules:
@@ -89,19 +104,25 @@ class SimpleConcurrentClient(BasicClient):
                 else:
                     logger.error(f"❌ Failed to execute delegated command")
 
-        # 3. Register these handlers on the SocketIO instance
+        # 3. NEW: Enhanced config_updated handler for server-side configuration
+        def on_config_updated(data):
+            logger.info(f"🔄 Received config update from server: {data}")
+            
+            # Check if this is a full character assignment
+            if 'robot_role' in data or 'modules' in data:
+                logger.info("🎭 Server is assigning character configuration...")
+                self.using_server_config = True
+            
+            self.update_config(data)
+
+        # 4. Register these handlers on the SocketIO instance
         if self.server_connection and self.server_connection.sio:
             self.server_connection.sio.on('chat_response', on_chat_response)
             self.server_connection.sio.on('execute_command', on_execute_command)
+            self.server_connection.sio.on('config_updated', on_config_updated)
             logger.info("✅ Client-specific event handlers registered.")
         else:
             logger.error("❌ Cannot register handlers: server_connection or sio not initialized.")
-
-        def on_config_updated(data):
-            logger.info(f"🔄 Received config update: {data}")
-            self.update_config(data)
-
-        self.server_connection.sio.on('config_updated', on_config_updated)
     
     def _on_arduino_connected(self): 
         """Called when Arduino connects""" 
@@ -152,16 +173,20 @@ class SimpleConcurrentClient(BasicClient):
         return None
     
     def setup_all_modules(self):
-        """Setup all modules with sensible defaults based on simple config"""
+        """Setup all modules with sensible defaults based on simple config
+        
+        NEW: Modules are optional - robot can connect with minimal config
+        and wait for server to assign character/modules
+        """
         
         # === INPUT MODULES ===
-        # This block enables the client to use its keyboard
-        # --- Text Input is now always enabled ---
+        # Text Input is always enabled for basic interaction
         logger.info("⌨️ Setting up text input (always on)...")
         text_input = TextInputModule("text_input")
         self.register_input_module(text_input)
         text_input.start()
         
+        # Only setup other input modules if configured
         if 'speech' in self.config.get('modules', []):
             logger.info("🎤 Setting up voice input...")
             voice_config = self.config.get('voice_config', {
@@ -186,29 +211,59 @@ class SimpleConcurrentClient(BasicClient):
             realsense_input.start()
             if not self.register_input_module(realsense_input):
                 logger.warning("   📸 RealSense failed, registration incomplete.")
-                # You might want to add a fallback to a regular camera here if needed
 
         # === OUTPUT MODULES ===
         
+        # Console output is always enabled
         logger.info("🖥️ Setting up console output...")
         console_output = ConsoleOutputModule("console_output", self.config.get('console_config', {}))
         self.register_output_module(console_output)
         console_output.start()
         
-        logger.info("🎙️ Setting up Edge text-to-speech...")
-        edge_config = self.config.get('edge_tts_config', {
-            'voice': 'en-US-AriaNeural', 'rate': '+0%', 'pitch': '+0Hz', 'remove_emotion_tags': True
-        })
+        # === TTS SETUP ===
+        # Only setup TTS if configured - allows robots to connect without TTS
+        # and have it assigned later by server
         
-        edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
-        if self.register_output_module(edge_tts):
-            logger.info("   ✅ Using Microsoft Edge TTS")
-            edge_tts.start()
+        if 'edge_tts_config' in self.config:
+            logger.info("🎙️ Setting up Edge text-to-speech...")
+            edge_config = self.config.get('edge_tts_config', {
+                'voice': 'en-US-AriaNeural', 
+                'rate': '+0%', 
+                'pitch': '+0Hz', 
+                'remove_emotion_tags': True
+            })
+            
+            edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
+            if self.register_output_module(edge_tts):
+                logger.info("   ✅ Using Microsoft Edge TTS")
+                edge_tts.start()
+            else:
+                logger.warning("   ⚠️ Edge TTS failed. You may need to install it.")
+        elif 'tts_config' in self.config:
+            logger.info("🎙️ Setting up espeak TTS...")
+            tts_config = self.config.get('tts_config')
+            
+            tts_output = TTSOutputModule("tts_output", tts_config)
+            if self.register_output_module(tts_output):
+                logger.info("   ✅ Using espeak TTS (offline)")
+                tts_output.start()
+            else:
+                logger.warning("   ⚠️ espeak TTS failed to initialize")
+        elif 'pyttsx_tts_config' in self.config:
+            logger.info("🎙️ Setting up pyttsx3 TTS...")
+            pyttsx_config = self.config.get('pyttsx_tts_config')
+            
+            pyttsx_tts = PyttsxTTSOutputModule("pyttsx_tts_output", pyttsx_config)
+            if self.register_output_module(pyttsx_tts):
+                logger.info("   ✅ Using pyttsx3 TTS (offline)")
+                pyttsx_tts.start()
+            else:
+                logger.warning("   ⚠️ pyttsx3 TTS failed to initialize")
         else:
-            logger.warning("   ⚠️ Edge TTS failed. You may need to install it.")
-            # Fallback can be added here if needed
+            logger.info("ℹ️  No TTS configured - robot in text-only mode")
+            logger.info("   (TTS can be added later via server configuration)")
 
-        # --- ARDUINO SETUP SECTION (MODIFIED) ---
+        # --- ARDUINO SETUP SECTION ---
         if self.config.get('features', {}).get('arduino_integration', True):
             logger.info("🔌 Setting up Arduino output...")
             
@@ -234,7 +289,6 @@ class SimpleConcurrentClient(BasicClient):
             
             self.arduino_module.on_connected = self._on_arduino_connected
             self.arduino_module.on_disconnected = self._on_arduino_disconnected
-            # Correcting the callback name based on your file
             self.arduino_module.on_connection_error = self._on_arduino_error
             
             if self.register_output_module(self.arduino_module):
@@ -250,17 +304,46 @@ class SimpleConcurrentClient(BasicClient):
         print(f"🏷️  Robot: {self.config.get('robot_name', 'Unknown')}")
         print(f"🆔 Client ID: {self.config.get('client_id', 'Unknown')}")
         print(f"🌐 Server: {self.config.get('server_url', 'Unknown')}")
-        print(f"📦 Server Modules: {', '.join(self.config.get('modules', []))}")
+        
+        # Show role if configured
+        if self.config.get('robot_role'):
+            role_preview = self.config['robot_role'][:60] + "..." if len(self.config.get('robot_role', '')) > 60 else self.config.get('robot_role', '')
+            print(f"🎭 Role: {role_preview}")
+        else:
+            print(f"🎭 Role: (waiting for server configuration)")
+        
+        # Show modules if configured
+        if self.config.get('modules'):
+            print(f"📦 Server Modules: {', '.join(self.config.get('modules', []))}")
+        else:
+            print(f"📦 Server Modules: (waiting for server configuration)")
         
         print("\n📥 INPUT MODULES:")
-        for name, module in self.input_modules.items():
-            status = "✅ Running" # Registration now happens in setup_all_modules
-            print(f"   • {name.replace('_', ' ').title()}: {status}")
+        if self.input_modules:
+            for name, module in self.input_modules.items():
+                status = "✅ Running"
+                print(f"   • {name.replace('_', ' ').title()}: {status}")
+        else:
+            print("   • Text Input: ✅ Running (default)")
         
         print("\n📤 OUTPUT MODULES:")
-        for name, module in self.output_modules.items():
-            status = "✅ Running"
-            print(f"   • {name.replace('_', ' ').title()}: {status}")
+        if self.output_modules:
+            for name, module in self.output_modules.items():
+                status = "✅ Running"
+                # Show which TTS is active
+                if 'tts' in name.lower():
+                    tts_type = ""
+                    if name == 'edge_tts_output':
+                        tts_type = " (Edge TTS - online)"
+                    elif name == 'tts_output':
+                        tts_type = " (espeak - offline)"
+                    elif name == 'pyttsx_tts_output':
+                        tts_type = " (pyttsx3 - offline)"
+                    print(f"   • {name.replace('_', ' ').title()}: {status}{tts_type}")
+                else:
+                    print(f"   • {name.replace('_', ' ').title()}: {status}")
+        else:
+            print("   • Console Output: ✅ Running (default)")
         
         print("\n💡 USAGE:")
         if 'voice_input' in self.input_modules:
@@ -269,11 +352,19 @@ class SimpleConcurrentClient(BasicClient):
             print("   📸 Camera automatically sends emotion data")
         
         print("   🛑 Type 'exit' or press Ctrl+C to stop")
+        
+        # Show server config status
+        if self.using_server_config:
+            print("\n🌐 Configuration managed by server")
+        
         print("="*60)
         print()
         
     def update_config(self, new_data: Dict[str, Any]):
-        """Dynamically update config, persist to JSON, and reinitialize modules."""
+        """Dynamically update config, persist to JSON, and reinitialize modules.
+        
+        NEW: Enhanced to support server-side character assignment
+        """
         updated_fields = []
 
         if 'robot_name' in new_data:
@@ -283,11 +374,15 @@ class SimpleConcurrentClient(BasicClient):
         if 'robot_role' in new_data:
             self.config['robot_role'] = new_data['robot_role']
             updated_fields.append('robot_role')
+            logger.info(f"🎭 Role updated: {new_data['robot_role'][:60]}...")
         
         if 'modules' in new_data:
             self.config['modules'] = new_data['modules']
             updated_fields.append('modules')
+            logger.info(f"📦 Modules updated: {', '.join(new_data['modules'])}")
+            
             # Reload modules if changed
+            logger.info("🔄 Reloading modules with new configuration...")
             for module in list(self.input_modules.values()) + list(self.output_modules.values()):
                 module.stop()
             self.input_modules.clear()
@@ -308,7 +403,15 @@ class SimpleConcurrentClient(BasicClient):
 
 
 def main():
-    """Simple main function - no configuration needed!"""
+    """Simple main function - minimal configuration required!
+    
+    Robot can now connect with just:
+    - robot_name
+    - client_id  
+    - server_url
+    
+    Role and modules can be assigned by server later.
+    """
     print("🤖 ChatBox Client System")
     print("📋 Using simple configuration format...")
     
@@ -322,7 +425,14 @@ def main():
         
     except FileNotFoundError:
         print("❌ Error: client_config.json not found")
-        # Provide a helpful template
+        print("\n💡 Minimum required config:")
+        print("""
+{
+    "robot_name": "MyRobot",
+    "client_id": "Robot_001",
+    "server_url": "http://localhost:5000"
+}
+        """)
         return 1
         
     except KeyboardInterrupt:

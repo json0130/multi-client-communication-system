@@ -278,6 +278,32 @@ class ServerController:
         def register_client():
             try:
                 config = request.json
+                
+                # Allow server-side configuration if not provided by client
+                if config and 'client_id' in config:
+                    try:
+                        # Check for existing configuration in Supabase
+                        existing = self.supabase_client.supabase.table('robots')\
+                            .select('*').eq('client_id', config['client_id']).execute()
+                        
+                        if existing.data:
+                            saved_config = existing.data[0]
+                            # Preserve server-side settings if not provided in request
+                            if 'robot_role' not in config:
+                                config['robot_role'] = saved_config.get('robot_role')
+                            if 'modules' not in config:
+                                config['modules'] = saved_config.get('modules') or []
+                            if 'voice_config' not in config:
+                                config['voice_config'] = saved_config.get('voice_config') or {}
+                            if 'hardware' not in config:
+                                config['hardware'] = saved_config.get('hardware_config') or {}
+                    except Exception as e:
+                        print(f"⚠️ Error fetching existing config: {e}")
+
+                # Set defaults for required fields if still missing or empty
+                if config and not config.get('robot_role'):
+                    config['robot_role'] = "You are a helpful robot."
+
                 # First register with Supabase
                 result = self.supabase_client.register_robot(config)
                 print(f"--- DEBUG: register_client result: {result} ---")

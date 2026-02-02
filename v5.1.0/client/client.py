@@ -1,4 +1,4 @@
-# client.py - Base Client and Abstract Classes
+# client.py - Base Client and Abstract Classes with Server-Side Config Support
 import json
 import time
 import threading
@@ -103,7 +103,11 @@ class ServerConnection:
         def on_client_init_response(data):
             if data.get('success'):
                 logger.info(f"✅ Client initialized: {data.get('client_id')}")
-                logger.info(f"   🎯 Enabled modules: {data.get('enabled_modules', [])}")
+                enabled_modules = data.get('enabled_modules', [])
+                if enabled_modules:
+                    logger.info(f"   🎯 Enabled modules: {enabled_modules}")
+                else:
+                    logger.info(f"   🎯 No modules enabled (waiting for server configuration)")
                 self.initialized = True
             else:
                 logger.error(f"❌ Client initialization failed: {data.get('message')}")
@@ -113,13 +117,24 @@ class ServerConnection:
             logger.error(f"❌ Server error: {data.get('message')}")
     
     def _send_client_init(self):
+        """Send client initialization - modules and role are now optional"""
         client_init_data = {
             "robot_name": self.client_config.get('robot_name', 'BasicClient'),
-            "modules": self.client_config.get('modules', ['gpt']),
+            "modules": self.client_config.get('modules', []),  # Empty list if not set
             "client_id": self.client_id,
             "config": self.client_config.get('server_config', {})
         }
+        
+        # Include robot_role only if it exists
+        if 'robot_role' in self.client_config:
+            client_init_data['robot_role'] = self.client_config['robot_role']
+        
         logger.info("📋 Sending client initialization...")
+        if client_init_data['modules']:
+            logger.debug(f"   Modules: {client_init_data['modules']}")
+        else:
+            logger.debug("   Modules: (waiting for server configuration)")
+        
         self.sio.emit('client_init', client_init_data)
 
     def ensure_connected(self):
@@ -221,7 +236,12 @@ class ServerConnection:
             return False
 
 class BasicClient:
-    """Main client class that manages modules and server communication"""
+    """Main client class that manages modules and server communication
+    
+    NEW: Supports server-side configuration
+    - robot_role and modules are optional in client config
+    - Can be assigned dynamically by server via config_updated event
+    """
     
     def __init__(self, config_file: str = "client_config.json"):
         self.config = self._load_config(config_file)
@@ -246,7 +266,13 @@ class BasicClient:
         logger.info(f"🤖 Initializing {self.config['robot_name']}")
         logger.info(f"   🆔 ID: {self.config['client_id']}")
         logger.info(f"   🌐 Server: {self.config['server_url']}")
-        logger.info(f"   📦 Modules: {', '.join(self.config['modules'])}")
+        
+        # Modules are now optional
+        modules = self.config.get('modules', [])
+        if modules:
+            logger.info(f"   📦 Modules: {', '.join(modules)}")
+        else:
+            logger.info(f"   📦 Modules: (waiting for server configuration)")
     
     def _heartbeat_thread(self):
         """
@@ -271,7 +297,6 @@ class BasicClient:
                 logger.warning(f"⚠️ Heartbeat error: {e}")
                 time.sleep(self.HEARTBEAT_INTERVAL) # Wait before retrying on error
         logger.info("❤️ Heartbeat thread stopped")
-    # -----------------------------------
 
     def _load_config(self, config_file: str) -> Optional[Dict]:
         try:
@@ -327,7 +352,7 @@ class BasicClient:
             engineio_logger=False
         )
         
-        # --- CHANGE 1: Call the new handler registration method ---
+        # Call the new handler registration method
         # This ensures handlers are registered AFTER self.sio is created.
         self._register_event_handlers()
         
@@ -354,7 +379,6 @@ class BasicClient:
         except Exception as e:
             logger.error(f"❌ WebSocket connection failed: {e}")
 
-    # --- CHANGE 2: Add this new placeholder method ---
     def _register_event_handlers(self):
         """
         Placeholder for subclasses to register their SocketIO event handlers.
@@ -494,13 +518,30 @@ class BasicClient:
             return False
     
     def register_via_http(self):
-        print("📡 Registering client via HTTP...")
+        """Register client via HTTP - robot_role is now optional"""
+        logger.info("📡 Registering client via HTTP...")
         url = f"{self.server_connection.server_url}/register_client"
+        
         payload = {
             "robot_name": self.config.get('robot_name', 'BasicClient'),
-            "modules": self.config.get('modules', ['gpt']),
-            "client_id": self.config.get('client_id', 'basic_client_001'),
-            "robot_role": self.config.get('robot_role', 'default')
+            "modules": self.config.get('modules', []),  # Empty list if not set
+            "client_id": self.config.get('client_id', 'basic_client_001')
         }
-        response = requests.post(url, json=payload)
-        print("HTTP registration response:", response.json())
+        
+        # Only include robot_role if it exists in config
+        if 'robot_role' in self.config:
+            payload['robot_role'] = self.config['robot_role']
+        else:
+            logger.debug("   No robot_role in config - will be assigned by server")
+        
+        try:
+            response = requests.post(url, json=payload, timeout=10)
+            response_data = response.json()
+            logger.info(f"📡 HTTP registration response: {response_data}")
+            
+            # Check if server assigned a role
+            if 'robot_role' in response_data and 'robot_role' not in self.config:
+                logger.info(f"🎭 Server assigned role: {response_data['robot_role'][:60]}...")
+                
+        except Exception as e:
+            logger.error(f"❌ HTTP registration failed: {e}")
