@@ -20,7 +20,8 @@ class ClientInfo:
     registration_time: float
     last_activity: float
     user_id: int
-    
+    character: Optional[str] = None
+
     def get_display_name(self) -> str:
         """Get display name for logging: [client_id] robot_name"""
         return f"[{self.client_id}] {self.robot_name}"
@@ -64,7 +65,8 @@ class ClientManager:
             # Extract and validate required fields
             robot_name = client_init_data.get('robot_name')
             modules = client_init_data.get('modules', [])
-            
+            character = client_init_data.get('character')
+
             if not robot_name:
                 return False, "robot_name is required in client_init.json", None
             
@@ -94,6 +96,7 @@ class ClientManager:
                 client_id=client_id,
                 robot_name=robot_name,
                 modules=modules_set,
+                character=character,
                 config_overrides=config_overrides,
                 registration_time=time.time(),
                 last_activity=time.time(),
@@ -254,6 +257,7 @@ class ClientManager:
             
             client_info = self.client_infos[client_id]
             updated = False
+            fields_that_require_recreate = False
             
             if 'robot_name' in update_data:
                 client_info.robot_name = update_data['robot_name']
@@ -264,12 +268,34 @@ class ClientManager:
                 if new_modules and not new_modules.issubset(self.valid_modules):
                     invalid = new_modules - self.valid_modules
                     raise ValueError(f"Invalid modules: {invalid}")
+                
                 if new_modules != client_info.modules:
                     client_info.modules = new_modules
                     updated = True
+                    fields_that_require_recreate = True
+            
+            # === NEW: Handle character ===
+            if 'character' in update_data:
+                client_info.character = update_data['character']  # assumes you add this field to ClientInfo
+                client_info.config_overrides['character'] = update_data['character']
+                updated = True
+                fields_that_require_recreate = True
+                print(f"🎭 Character updated to: {update_data['character']}")
+            
+            # === NEW: Handle edge_tts_config (voice settings) ===
+            if 'edge_tts_config' in update_data:
+                client_info.config_overrides['edge_tts_config'] = update_data['edge_tts_config']
+                updated = True
+                fields_that_require_recreate = True
+                voice = update_data['edge_tts_config'].get('voice', 'unknown')
+                print(f"🎙️ Edge TTS config updated (voice: {voice})")
             
             # For role, since it's fetched from DB on create, recreate to pick up
-            if updated or 'robot_role' in update_data:
+            if (updated and fields_that_require_recreate) or \
+            'robot_role' in update_data or \
+            'character' in update_data or \
+            'edge_tts_config' in update_data:
+                
                 if client_id in self.client_servers:
                     try:
                         self.client_servers[client_id].cleanup_resources()
@@ -280,9 +306,9 @@ class ClientManager:
                 
                 # Recreate server to apply changes (will refetch role from DB)
                 self.get_or_create_server_instance(client_id)
-                print(f"🔄 Recreated server for {client_info.get_display_name()}")
+                print(f"🔄 Recreated server for {client_info.get_display_name()} (config changed)")
             
-            print(f"✅ Updated client {client_info.get_display_name()} with {update_data}")
+            print(f"✅ Updated client {client_info.get_display_name()} with {list(update_data.keys())}")
 
     def update_client_activity(self, client_id: str):
         """Update last activity timestamp for client"""
@@ -302,6 +328,7 @@ class ClientManager:
                 clients_status[client_id] = {
                     "robot_name": client_info.robot_name,
                     "display_name": client_info.get_display_name(),
+                    "character": getattr(client_info, 'character', None), 
                     "modules": list(client_info.modules),
                     "status": server_status,
                     "registration_time": client_info.registration_time,

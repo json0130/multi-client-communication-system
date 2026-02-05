@@ -461,45 +461,59 @@ class RequestRouter:
         }), 200
     
     def _handle_update_request(self, server, flask_request, display_name: str) -> tuple:
-        """Handle client config update request with role template processing"""
+        """Handle client config update request with role template + character/voice processing"""
         try:
             update_data = flask_request.json
             if not update_data:
                 return jsonify({"error": "No update data provided"}), 400
-            
+
             # Get robot name for role template processing
             robot_name = update_data.get('robot_name') or getattr(server, 'robot_name', 'Robot')
-            
-            # NEW: Process role_name if provided (generates full robot_role)
+
+            # === ROLE HANDLING (unchanged) ===
             if 'robot_role' in update_data:
                 role_name = update_data['robot_role']
-                
                 if role_name in AVAILABLE_ROLES:
-                    # Generate the full role prompt using the template
                     robot_role = get_role_prompt(role_name, robot_name)
-                    
-                    # Add both role_name and generated robot_role to update
                     update_data['robot_role'] = robot_role
-                    
-                    print(f"🎭 Generated role for {display_name}:")
-                    print(f"   Role: {role_name}")
-                    print(f"   Prompt: {robot_role[:80]}...")
+                    print(f"🎭 Generated role for {display_name}: {role_name}")
                 else:
-                    return jsonify({
-                        "error": f"Invalid role_name. Available: {', '.join(AVAILABLE_ROLES)}"
-                    }), 400
-            
-            # Validate modules if present
+                    return jsonify({"error": f"Invalid role_name. Available: {', '.join(AVAILABLE_ROLES)}"}), 400
+
+            # === NEW: CHARACTER → EDGE_TTS_CONFIG ===
+            if 'character' in update_data:
+                character_id = update_data['character']
+                voice_map = {
+                    "male_friendly": "en-US-GuyNeural",
+                    "female_friendly": "en-US-JennyNeural",
+                    "male_professional": "en-US-DavisNeural",
+                    "female_professional": "en-US-AriaNeural",
+                    "child_friendly": "en-US-AnaNeural",
+                    "elderly_friendly": "en-US-SaraNeural",
+                }
+
+                if character_id in voice_map:
+                    voice = voice_map[character_id]
+                    edge_tts_config = {
+                        "voice": voice,
+                        "playback_device": "hw:2,0"          # change if you want per-robot device later
+                    }
+                    update_data['edge_tts_config'] = edge_tts_config
+
+                    print(f"🎙️ Character '{character_id}' → voice '{voice}' for {display_name}")
+                else:
+                    return jsonify({"error": f"Invalid character ID: {character_id}"}), 400
+
+            # === MODULES VALIDATION (unchanged) ===
             if 'modules' in update_data:
                 modules = update_data['modules']
                 valid_modules = self.client_manager.valid_modules
                 if not isinstance(modules, list) or not all(m in valid_modules for m in modules):
                     return jsonify({"error": f"Invalid modules. Valid: {list(valid_modules)}"}), 400
-                # Add 'rag' if not present
                 if 'rag' not in modules:
                     modules.append('rag')
-            
-            # Update Supabase
+
+            # === DB UPDATE (now also stores character) ===
             db_update = {}
             if 'robot_name' in update_data:
                 db_update['robot_name'] = update_data['robot_name']
@@ -508,31 +522,30 @@ class RequestRouter:
             if 'role_name' in update_data:
                 db_update['role_name'] = update_data['role_name']
             if 'modules' in update_data:
-                db_update['modules'] = update_data['modules']  # List for DB
-            
+                db_update['modules'] = update_data['modules']
+            if 'character' in update_data:                     # ← NEW
+                db_update['character'] = update_data['character']
+
             if db_update:
                 self.db.client.supabase.table('robots').update(db_update).eq('client_id', server.client_id).execute()
                 print(f"📝 Updated DB for {display_name}: {db_update}")
-            
-            # Update local client_manager
+
+            # === Update client_manager (now carries edge_tts_config) ===
             self.client_manager.update_client_config(server.client_id, update_data)
-            
-            # Broadcast to client if connected
+
+            # === Broadcast full config to client ===
             if self.socketio:
-                # Send the full robot_role to client (not just role_name)
-                client_update = update_data.copy()
+                client_update = update_data.copy()                     # now contains edge_tts_config
                 self.socketio.emit('config_updated', client_update, room=server.client_id)
-                print(f"📢 Broadcasted update to {display_name}")
-            
+                print(f"📢 Broadcasted config update (incl. voice) to {display_name}")
+
             return jsonify({
                 "message": f"Client {display_name} updated successfully",
                 "updated_fields": list(update_data.keys()),
-                "role_name": update_data.get('role_name'),
-                "robot_role": update_data.get('robot_role', '')[:80] + "..." if 'robot_role' in update_data else None
+                "character": update_data.get('character'),
+                "voice": update_data.get('edge_tts_config', {}).get('voice')
             }), 200
-        
-        except ValueError as ve:
-            return jsonify({"error": str(ve)}), 404
+
         except Exception as e:
             print(f"❌ Update error for {display_name}: {e}")
             import traceback

@@ -12,6 +12,7 @@ export interface RobotTemplate {
   id: string
   name: string
   role: string
+  character: string
   modules: string[]
   description: string
   createdAt: number
@@ -19,6 +20,14 @@ export interface RobotTemplate {
 
 const AVAILABLE_MODULES = ["gpt", "speech", "rag", "emotion"]
 const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
+const AVAILABLE_CHARACTERS = [
+  { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
+  { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
+  { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
+  { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
+]
 
 export default function TemplatesPage() {
   const [templates, setTemplates] = useState<RobotTemplate[]>([])
@@ -28,6 +37,7 @@ export default function TemplatesPage() {
   // Form state
   const [formName, setFormName] = useState("")
   const [formRole, setFormRole] = useState("")
+  const [formCharacter, setFormCharacter] = useState("")
   const [formModules, setFormModules] = useState<string[]>([])
   const [formDescription, setFormDescription] = useState("")
 
@@ -48,6 +58,7 @@ export default function TemplatesPage() {
   const resetForm = () => {
     setFormName("")
     setFormRole("")
+    setFormCharacter("")
     setFormModules([])
     setFormDescription("")
     setIsCreating(false)
@@ -61,6 +72,7 @@ export default function TemplatesPage() {
       id: editingId || `template-${Date.now()}`,
       name: formName,
       role: formRole,
+      character: formCharacter,
       modules: formModules,
       description: formDescription,
       createdAt: editingId ? templates.find((t) => t.id === editingId)?.createdAt || Date.now() : Date.now(),
@@ -78,6 +90,7 @@ export default function TemplatesPage() {
   const handleEditTemplate = (template: RobotTemplate) => {
     setFormName(template.name)
     setFormRole(template.role)
+    setFormCharacter(template.character || "")
     setFormModules(template.modules)
     setFormDescription(template.description)
     setEditingId(template.id)
@@ -169,6 +182,28 @@ export default function TemplatesPage() {
                       }`}
                     >
                       {role.replace("_", " ")}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Character Selection */}
+              <div className="space-y-2">
+                <Label>Character (Voice)</Label>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {AVAILABLE_CHARACTERS.map((char) => (
+                    <button
+                      key={char.id}
+                      type="button"
+                      onClick={() => setFormCharacter(char.id)}
+                      className={`px-4 py-3 rounded-lg text-sm font-medium transition-all border text-left ${
+                        formCharacter === char.id
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card text-foreground border-border hover:border-primary/50"
+                      }`}
+                    >
+                      <span className="block">{char.name}</span>
+                      <span className="block text-xs opacity-70">{char.voice}</span>
                     </button>
                   ))}
                 </div>
@@ -271,6 +306,16 @@ export default function TemplatesPage() {
                       {template.role.replace("_", " ")}
                     </Badge>
                   </div>
+
+                  {/* Character */}
+                  {template.character && (
+                    <div className="mb-4">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Character:</p>
+                      <Badge variant="secondary" className="capitalize">
+                        {AVAILABLE_CHARACTERS.find((c) => c.id === template.character)?.name || template.character}
+                      </Badge>
+                    </div>
+                  )}
 
                   {/* Modules */}
                   <div className="space-y-2 mb-4">

@@ -363,41 +363,52 @@ class SimpleConcurrentClient(BasicClient):
     def update_config(self, new_data: Dict[str, Any]):
         """Dynamically update config, persist to JSON, and reinitialize modules.
         
-        NEW: Enhanced to support server-side character assignment
+        Now also supports character/voice → edge_tts_config
         """
         updated_fields = []
 
         if 'robot_name' in new_data:
             self.config['robot_name'] = new_data['robot_name']
             updated_fields.append('robot_name')
-        
+
         if 'robot_role' in new_data:
             self.config['robot_role'] = new_data['robot_role']
             updated_fields.append('robot_role')
             logger.info(f"🎭 Role updated: {new_data['robot_role'][:60]}...")
-        
+
+        if 'character' in new_data:                                   # ← NEW
+            self.config['character'] = new_data['character']
+            updated_fields.append('character')
+            logger.info(f"🎭 Character updated: {new_data['character']}")
+
+        if 'edge_tts_config' in new_data:                             # ← NEW
+            self.config['edge_tts_config'] = new_data['edge_tts_config']
+            updated_fields.append('edge_tts_config')
+            voice = new_data['edge_tts_config'].get('voice')
+            logger.info(f"🎙️ TTS voice updated to: {voice}")
+
         if 'modules' in new_data:
             self.config['modules'] = new_data['modules']
             updated_fields.append('modules')
             logger.info(f"📦 Modules updated: {', '.join(new_data['modules'])}")
-            
-            # Reload modules if changed
-            logger.info("🔄 Reloading modules with new configuration...")
+
+        # Reload modules if anything that affects them changed
+        if 'modules' in new_data or 'edge_tts_config' in new_data:
+            logger.info("🔄 Reloading modules because TTS/voice or modules changed...")
             for module in list(self.input_modules.values()) + list(self.output_modules.values()):
                 module.stop()
             self.input_modules.clear()
             self.output_modules.clear()
-            self.setup_all_modules()  # Re-init with new modules
+            self.setup_all_modules()   # will now pick up the new edge_tts_config
 
         if updated_fields:
-            # Persist to file
             try:
                 with open("client_config.json", 'w') as f:
                     json.dump(self.config, f, indent=4)
-                logger.info(f"💾 Saved updated config to client_config.json: {updated_fields}")
+                logger.info(f"💾 Saved updated config: {updated_fields}")
             except Exception as e:
                 logger.error(f"❌ Failed to save config: {e}")
-        
+
         logger.info("✅ Config update applied")
 
 

@@ -12,6 +12,7 @@ interface ClientDetail {
   display_name: string
   robot_name: string
   role: string
+  character: string
   status: string
   inactive_minutes: number
   last_activity: number
@@ -23,6 +24,7 @@ interface RobotTemplate {
   id: string
   name: string
   role: string
+  character: string
   modules: string[]
   description: string
   createdAt: number
@@ -30,6 +32,14 @@ interface RobotTemplate {
 
 const AVAILABLE_MODULES = ["gpt", "speech", "rag", "emotion"]
 const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
+const AVAILABLE_CHARACTERS = [
+  { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
+  { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
+  { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
+  { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
+]
 
 export default function RobotDetailPage() {
   const params = useParams()
@@ -39,6 +49,7 @@ export default function RobotDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [robotName, setRobotName] = useState<string>("")
   const [selectedRole, setSelectedRole] = useState<string>("")
+  const [selectedCharacter, setSelectedCharacter] = useState<string>("")
   const [selectedModules, setSelectedModules] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
@@ -77,6 +88,7 @@ export default function RobotDetailPage() {
           setClient(foundClient)
           setRobotName(foundClient.robot_name || "")
           setSelectedRole(foundClient.role || "")
+          setSelectedCharacter(foundClient.character || "")
           setSelectedModules(foundClient.modules || [])
           isFirstLoadRef.current = false
         } else {
@@ -119,6 +131,11 @@ export default function RobotDetailPage() {
     setHasChanges(true)
   }
 
+  const handleCharacterChange = (character: string) => {
+    setSelectedCharacter(character)
+    setHasChanges(true)
+  }
+
   const handleNameChange = (newName: string) => {
     setRobotName(newName)
     setHasChanges(true)
@@ -126,6 +143,7 @@ export default function RobotDetailPage() {
 
   const handleApplyTemplate = (template: RobotTemplate) => {
     setSelectedRole(template.role)
+    setSelectedCharacter(template.character || "")
     setSelectedModules(template.modules)
     setHasChanges(true)
     setShowTemplates(false)
@@ -142,6 +160,7 @@ export default function RobotDetailPage() {
         body: JSON.stringify({
           robot_name: robotName,
           robot_role: selectedRole,
+          character: selectedCharacter,
           modules: selectedModules,
         }),
       })
@@ -160,6 +179,7 @@ export default function RobotDetailPage() {
               ...prev,
               robot_name: robotName,
               role: selectedRole,
+              character: selectedCharacter,
               modules: selectedModules,
             }
           : null
@@ -178,6 +198,7 @@ export default function RobotDetailPage() {
     if (client) {
       setRobotName(client.robot_name || "")
       setSelectedRole(client.role || "")
+      setSelectedCharacter(client.character || "")
       setSelectedModules(client.modules || [])
       setHasChanges(false)
     }
@@ -279,13 +300,13 @@ export default function RobotDetailPage() {
                     <Badge
                       className={
                         isOnline
-                          ? client.inactive_minutes < 5
+                          ? client.inactive_minutes < 1
                             ? "bg-green-100 text-green-700 hover:bg-green-100"
                             : "bg-yellow-100 text-yellow-700 hover:bg-yellow-100"
                           : "bg-gray-100 text-gray-700 hover:bg-gray-100"
                       }
                     >
-                      {isOnline ? (client.inactive_minutes < 5 ? "Active" : "Idle") : "Offline"}
+                      {isOnline ? (client.inactive_minutes < 1 ? "Active" : "Idle") : "Offline"}
                     </Badge>
                     {isUnconfigured() && (
                       <Badge variant="outline" className="bg-orange-100 text-orange-600 border-orange-200">
@@ -434,6 +455,60 @@ export default function RobotDetailPage() {
                 {!isOnline && (
                   <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
                     Robot must be online to change role
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Character Selection */}
+            <Card className="border-border mb-6">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <span>
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                      <line x1="12" x2="12" y1="19" y2="22" />
+                    </svg>
+                  </span>
+                  Character (Voice)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Select a character personality that determines the robot's voice for TTS:
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {AVAILABLE_CHARACTERS.map((char) => (
+                    <button
+                      key={char.id}
+                      type="button"
+                      onClick={() => handleCharacterChange(char.id)}
+                      disabled={!isOnline}
+                      className={`p-4 rounded-lg text-left transition-all border ${
+                        selectedCharacter === char.id
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-secondary text-foreground border-border hover:border-primary/50"
+                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                    >
+                      <span className="block font-medium">{char.name}</span>
+                      <span className="block text-xs opacity-70 mt-1">{char.voice}</span>
+                    </button>
+                  ))}
+                </div>
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    Robot must be online to change character
                   </p>
                 )}
               </CardContent>
