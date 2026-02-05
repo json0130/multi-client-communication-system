@@ -28,7 +28,7 @@ interface RobotTemplate {
   createdAt: number
 }
 
-const AVAILABLE_MODULES = ["gpt", "speech", "rag", "vision", "navigation", "manipulation"]
+const AVAILABLE_MODULES = ["gpt", "speech", "rag", "emotion"]
 const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
 
 export default function RobotDetailPage() {
@@ -279,13 +279,13 @@ export default function RobotDetailPage() {
                     <Badge
                       className={
                         isOnline
-                          ? client.inactive_minutes < 1
+                          ? client.inactive_minutes < 5
                             ? "bg-green-100 text-green-700 hover:bg-green-100"
                             : "bg-yellow-100 text-yellow-700 hover:bg-yellow-100"
                           : "bg-gray-100 text-gray-700 hover:bg-gray-100"
                       }
                     >
-                      {isOnline ? (client.inactive_minutes < 1 ? "Active" : "Idle") : "Offline"}
+                      {isOnline ? (client.inactive_minutes < 5 ? "Active" : "Idle") : "Offline"}
                     </Badge>
                     {isUnconfigured() && (
                       <Badge variant="outline" className="bg-orange-100 text-orange-600 border-orange-200">

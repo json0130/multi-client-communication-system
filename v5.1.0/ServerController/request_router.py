@@ -1,4 +1,4 @@
-# request_router.py - COMPLETE FIX with unified delegation handling
+# request_router.py - COMPLETE FIX with unified delegation handling and server-side role templates
 
 import time
 import json
@@ -11,6 +11,42 @@ from flask import jsonify, Response
 from client_manager import ClientManager
 from database import Database
 from Modules.gpt_client import GPTClient
+
+# Role templates for server-side processing
+ROLE_TEMPLATES = {
+    "cooking_robot": "{robot_name}, a cooking robot. You are friendly, patient, and knowledgeable about food. Your purpose is to assist users with cooking-related tasks—such as preparing meals like breakfast, lunch, or dinner, suggesting recipes, and offering guidance in the kitchen—while keeping interactions warm and engaging.",
+    
+    "guide": "{robot_name}, an enthusiastic and knowledgeable tour guide robot. Your purpose is to provide engaging information about exhibits, landmarks, or facilities, answer visitor questions, and help people navigate spaces. You communicate clearly, adapt explanations to different age groups, and make learning fun and memorable.",
+    
+    "assistant": "{robot_name}, a versatile and helpful assistant robot. You are professional, efficient, and friendly. Your purpose is to help people with a wide variety of tasks—from answering questions and providing information to scheduling, reminders, and general support. You adapt to different situations and prioritize being helpful while maintaining a warm, approachable demeanor.",
+    
+    "greeter": "{robot_name}, a friendly and welcoming greeter robot. Your purpose is to welcome visitors, provide initial information about the facility or event, help with directions, and create a positive first impression. You are warm, enthusiastic, and attentive to people's needs, making everyone feel valued and comfortable.",
+    
+    "security": "{robot_name}, a vigilant and professional security robot. Your purpose is to monitor areas, detect unusual activities, provide safety information, and assist with emergency procedures. You are calm, authoritative when needed, and focused on maintaining a safe environment. You balance being approachable with being observant and responsive to security concerns.",
+    
+    "cleaning": "{robot_name}, an efficient and thorough cleaning robot. Your purpose is to maintain clean and hygienic spaces, identify areas that need attention, and optimize cleaning schedules. You are detail-oriented, systematic, and take pride in creating comfortable environments. You communicate clearly about cleaning status and work around people's activities with minimal disruption."
+}
+
+AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
+
+def get_role_prompt(role_name: str, robot_name: str) -> str:
+    """
+    Generate a role prompt based on the role name and robot name.
+    
+    Args:
+        role_name: The role identifier (e.g., 'cooking_robot', 'guide')
+        robot_name: The actual name of the robot (e.g., 'Pepper', 'Alex')
+    
+    Returns:
+        A formatted role prompt string with "You are" prefix
+    """
+    if role_name in ROLE_TEMPLATES:
+        template = ROLE_TEMPLATES[role_name]
+        return f"You are {template.format(robot_name=robot_name)}"
+    else:
+        # Default fallback role
+        return f"You are {robot_name}, a helpful robot assistant. You are friendly, professional, and ready to help with various tasks. You communicate clearly and adapt to different situations to provide the best assistance possible."
+
 
 class RequestRouter:
     """
@@ -425,11 +461,33 @@ class RequestRouter:
         }), 200
     
     def _handle_update_request(self, server, flask_request, display_name: str) -> tuple:
-        """Handle client config update request"""
+        """Handle client config update request with role template processing"""
         try:
             update_data = flask_request.json
             if not update_data:
                 return jsonify({"error": "No update data provided"}), 400
+            
+            # Get robot name for role template processing
+            robot_name = update_data.get('robot_name') or getattr(server, 'robot_name', 'Robot')
+            
+            # NEW: Process role_name if provided (generates full robot_role)
+            if 'robot_role' in update_data:
+                role_name = update_data['robot_role']
+                
+                if role_name in AVAILABLE_ROLES:
+                    # Generate the full role prompt using the template
+                    robot_role = get_role_prompt(role_name, robot_name)
+                    
+                    # Add both role_name and generated robot_role to update
+                    update_data['robot_role'] = robot_role
+                    
+                    print(f"🎭 Generated role for {display_name}:")
+                    print(f"   Role: {role_name}")
+                    print(f"   Prompt: {robot_role[:80]}...")
+                else:
+                    return jsonify({
+                        "error": f"Invalid role_name. Available: {', '.join(AVAILABLE_ROLES)}"
+                    }), 400
             
             # Validate modules if present
             if 'modules' in update_data:
@@ -447,6 +505,8 @@ class RequestRouter:
                 db_update['robot_name'] = update_data['robot_name']
             if 'robot_role' in update_data:
                 db_update['robot_role'] = update_data['robot_role']
+            if 'role_name' in update_data:
+                db_update['role_name'] = update_data['role_name']
             if 'modules' in update_data:
                 db_update['modules'] = update_data['modules']  # List for DB
             
@@ -459,16 +519,22 @@ class RequestRouter:
             
             # Broadcast to client if connected
             if self.socketio:
-                self.socketio.emit('config_updated', update_data, room=server.client_id)
+                # Send the full robot_role to client (not just role_name)
+                client_update = update_data.copy()
+                self.socketio.emit('config_updated', client_update, room=server.client_id)
                 print(f"📢 Broadcasted update to {display_name}")
             
             return jsonify({
                 "message": f"Client {display_name} updated successfully",
-                "updated_fields": list(update_data.keys())
+                "updated_fields": list(update_data.keys()),
+                "role_name": update_data.get('role_name'),
+                "robot_role": update_data.get('robot_role', '')[:80] + "..." if 'robot_role' in update_data else None
             }), 200
         
         except ValueError as ve:
             return jsonify({"error": str(ve)}), 404
         except Exception as e:
             print(f"❌ Update error for {display_name}: {e}")
+            import traceback
+            traceback.print_exc()
             return jsonify({"error": "Update failed", "details": str(e)}), 500
