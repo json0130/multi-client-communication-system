@@ -231,8 +231,32 @@ class SimpleConcurrentClient(BasicClient):
                 'rate': '+0%', 
                 'pitch': '+0Hz', 
                 'remove_emotion_tags': True
-            })
+            }).copy()
             
+            # === NEW: Apply OCEAN traits to TTS config locally on startup ===
+            ocean_traits = self.config.get('ocean_traits')
+            if ocean_traits:
+                # Extraversion -> Speed and Pitch
+                e_score = ocean_traits.get('extraversion', 0.5)
+                rate_adj = int((e_score - 0.5) * 20) # +/- 10%
+                pitch_adj = int((e_score - 0.5) * 20) # +/- 10Hz
+
+                # Neuroticism -> Speed variance
+                n_score = ocean_traits.get('neuroticism', 0.5)
+                n_rate_mod = int((n_score - 0.5) * 10) # +/- 5%
+                
+                final_rate_val = rate_adj + n_rate_mod
+                edge_config['rate'] = f"{'+' if final_rate_val >= 0 else ''}{final_rate_val}%"
+
+                # Agreeableness -> Pitch
+                a_score = ocean_traits.get('agreeableness', 0.5)
+                a_pitch_mod = int((a_score - 0.5) * 10) # +/- 5Hz
+                
+                final_pitch_val = pitch_adj + a_pitch_mod
+                edge_config['pitch'] = f"{'+' if final_pitch_val >= 0 else ''}{final_pitch_val}Hz"
+                
+                logger.info(f"   🌊 Applying OCEAN TTS adjustments: rate={edge_config['rate']}, pitch={edge_config['pitch']}")
+
             edge_tts = EdgeTTSOutputModule("edge_tts_output", edge_config)
             if self.register_output_module(edge_tts):
                 logger.info("   ✅ Using Microsoft Edge TTS")
@@ -380,6 +404,11 @@ class SimpleConcurrentClient(BasicClient):
             self.config['character'] = new_data['character']
             updated_fields.append('character')
             logger.info(f"🎭 Character updated: {new_data['character']}")
+
+        if 'ocean_traits' in new_data:                                # ← NEW
+            self.config['ocean_traits'] = new_data['ocean_traits']
+            updated_fields.append('ocean_traits')
+            logger.info(f"🌊 OCEAN traits updated: {new_data['ocean_traits']}")
 
         if 'edge_tts_config' in new_data:                             # ← NEW
             self.config['edge_tts_config'] = new_data['edge_tts_config']

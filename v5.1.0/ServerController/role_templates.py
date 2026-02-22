@@ -1,5 +1,29 @@
 # role_templates.py - Predefined role prompts for different robot characters
 
+# OCEAN Model Descriptors for Personality Generation
+OCEAN_DESCRIPTORS = {
+    "openness": {
+        "high": ["creative", "curious", "imaginative", "intellectual"],
+        "low": ["practical", "conventional", "down-to-earth", "traditional"]
+    },
+    "conscientiousness": {
+        "high": ["organized", "disciplined", "reliable", "hardworking"],
+        "low": ["spontaneous", "disorganized", "flexible", "relaxed"]
+    },
+    "extraversion": {
+        "high": ["outgoing", "energetic", "talkative", "sociable"],
+        "low": ["reserved", "quiet", "reflective", "solitary"]
+    },
+    "agreeableness": {
+        "high": ["friendly", "cooperative", "kind", "compassionate"],
+        "low": ["critical", "competitive", "blunt", "skeptical"]
+    },
+    "neuroticism": {
+        "high": ["sensitive", "emotional", "anxious", "reactive"],
+        "low": ["calm", "confident", "stable", "resilient"]
+    }
+}
+
 def get_role_prompt(role_name: str, robot_name: str) -> str:
     """
     Get a role prompt based on the role name and robot name.

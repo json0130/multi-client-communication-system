@@ -297,6 +297,8 @@ class ServerController:
                                 config['voice_config'] = saved_config.get('voice_config') or {}
                             if 'hardware' not in config:
                                 config['hardware'] = saved_config.get('hardware_config') or {}
+                            if 'ocean_traits' not in config:
+                                config['ocean_traits'] = saved_config.get('ocean_traits')
                     except Exception as e:
                         print(f"⚠️ Error fetching existing config: {e}")
 

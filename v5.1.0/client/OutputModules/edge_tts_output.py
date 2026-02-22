@@ -83,7 +83,12 @@ class EdgeTTSOutputModule(OutputModule):
                 
                 try:
                     # Generate MP3
-                    communicate = edge_tts.Communicate(test_text, self.voice)
+                    communicate = edge_tts.Communicate(
+                        test_text, 
+                        self.voice,
+                        rate=self.rate,
+                        pitch=self.pitch
+                    )
                     await communicate.save(temp_mp3)
                     
                     # Convert MP3 to WAV
@@ -282,7 +287,12 @@ class EdgeTTSOutputModule(OutputModule):
         import edge_tts
         
         # Use plain text WITHOUT SSML formatting to avoid XML/HTML artifacts
-        communicate = edge_tts.Communicate(text, self.voice)
+        communicate = edge_tts.Communicate(
+            text, 
+            self.voice,
+            rate=self.rate,
+            pitch=self.pitch
+        )
         await communicate.save(mp3_file)
         
         # Convert MP3 to WAV with correct format for USB speaker

@@ -21,6 +21,7 @@ class ClientInfo:
     last_activity: float
     user_id: int
     character: Optional[str] = None
+    ocean_traits: Optional[Dict[str, float]] = None
 
     def get_display_name(self) -> str:
         """Get display name for logging: [client_id] robot_name"""
@@ -91,12 +92,30 @@ class ClientManager:
             else:
                 user_id = self.id_map[client_id]
             
+            # Get OCEAN traits if provided
+            ocean_traits = client_init_data.get('ocean_traits')
+            
+            # === NEW: Compute initial TTS config from OCEAN traits (Apply on Register) ===
+            if ocean_traits:
+                # Get current config from request (sent by client)
+                current_tts_config = config_overrides.get('edge_tts_config')
+                
+                # Calculate OCEAN-based config
+                # This will take the client's voice/device settings (from current_tts_config)
+                # and APPEND/OVERWRITE the rate and pitch based on OCEAN traits.
+                new_tts_config = self._compute_tts_config_from_ocean(ocean_traits, current_tts_config)
+                
+                if new_tts_config:
+                    config_overrides['edge_tts_config'] = new_tts_config
+                    print(f"🎙️ Initial TTS config auto-adjusted for {robot_name}: {new_tts_config}")
+            
             # Create client info
             client_info = ClientInfo(
                 client_id=client_id,
                 robot_name=robot_name,
                 modules=modules_set,
                 character=character,
+                ocean_traits=ocean_traits,
                 config_overrides=config_overrides,
                 registration_time=time.time(),
                 last_activity=time.time(),
@@ -167,11 +186,25 @@ class ClientManager:
                 print(f"   Using default role instead")
             
             # Create custom configuration for this client
+
+            # Adapt thresholds based on Neuroticism (Sensitivity)
+            base_confidence = 25.0
+            base_change_threshold = 20.0
+            
+            if client_info.ocean_traits:
+                n_score = client_info.ocean_traits.get('neuroticism', 0.5)
+                # High N (1.0) -> Lower threshold (More sensitive/reactive)
+                # Low N (0.0) -> Higher threshold (More stable/calm)
+                adjustment = (n_score - 0.5) * 20.0
+                base_change_threshold -= adjustment
+                
+                print(f"🧠 Adapted emotion threshold for {client_info.robot_name}: {base_change_threshold} (N={n_score})")
+
             server_config = {
                 # 🚀 SPEED IMPROVEMENTS - Emotion Processing
             'emotion_processing_interval': 0.2,    # Changed from 0.1 - process every 200ms instead of 100ms
-            'confidence_threshold': 25.0,          # Changed from 30.0 - lower threshold for faster processing
-            'emotion_change_threshold': 20.0,      # Changed from 15.0 - less frequent updates
+            'confidence_threshold': base_confidence,          # Changed from 30.0 - lower threshold for faster processing
+            'emotion_change_threshold': base_change_threshold,      # Changed from 15.0 - less frequent updates
             'emotion_window_size': 3,              # Changed from 5 - smaller window for faster processing
             
             # 🚀 SPEED IMPROVEMENTS - Video Streaming for Monitors
@@ -196,6 +229,7 @@ class ClientManager:
             "user_id": client_info.user_id,  # stored this earlier
 
             "robot_role": robot_role,
+            "ocean_traits": client_info.ocean_traits,  # Pass traits to server
 
                 **client_info.config_overrides  # Apply client-specific overrides
             }
@@ -282,6 +316,8 @@ class ClientManager:
                 fields_that_require_recreate = True
                 print(f"🎭 Character updated to: {update_data['character']}")
             
+
+
             # === NEW: Handle edge_tts_config (voice settings) ===
             if 'edge_tts_config' in update_data:
                 client_info.config_overrides['edge_tts_config'] = update_data['edge_tts_config']
@@ -289,11 +325,29 @@ class ClientManager:
                 fields_that_require_recreate = True
                 voice = update_data['edge_tts_config'].get('voice', 'unknown')
                 print(f"🎙️ Edge TTS config updated (voice: {voice})")
+
+            # === NEW: Handle ocean_traits ===
+            if 'ocean_traits' in update_data:
+                client_info.ocean_traits = update_data['ocean_traits']
+                updated = True
+                fields_that_require_recreate = True
+                print(f"🌊 OCEAN traits updated for {client_info.get_display_name()}")
             
+            # === NEW: If OCEAN traits changed, re-compute TTS config ===
+            # But only if edge_tts_config wasn't manually updated in this request
+            if ('ocean_traits' in update_data or client_info.ocean_traits) and 'edge_tts_config' not in update_data:
+                traits = client_info.ocean_traits
+                if traits:
+                    new_tts_config = self._compute_tts_config_from_ocean(traits, client_info.config_overrides.get('edge_tts_config'))
+                    if new_tts_config:
+                        client_info.config_overrides['edge_tts_config'] = new_tts_config
+                        print(f"🎙️ Auto-adjusted TTS config based on OCEAN: {new_tts_config}")
+
             # For role, since it's fetched from DB on create, recreate to pick up
             if (updated and fields_that_require_recreate) or \
             'robot_role' in update_data or \
             'character' in update_data or \
+            'ocean_traits' in update_data or \
             'edge_tts_config' in update_data:
                 
                 if client_id in self.client_servers:
@@ -329,6 +383,7 @@ class ClientManager:
                     "robot_name": client_info.robot_name,
                     "display_name": client_info.get_display_name(),
                     "character": getattr(client_info, 'character', None), 
+                    "ocean_traits": getattr(client_info, 'ocean_traits', None), 
                     "modules": list(client_info.modules),
                     "status": server_status,
                     "registration_time": client_info.registration_time,
@@ -414,10 +469,50 @@ class ClientManager:
                     print(f"❌ Error removing server for '{client_id}': {e}")
             
             # Remove client info
-            if client_id in self.client_infos:
-                client_info = self.client_infos[client_id]
-                del self.client_infos[client_id]
-                print(f"🗑️ Removed client {client_info.get_display_name()}")
-                removed = True
-            
-            return removed
+        return removed
+
+    def _compute_tts_config_from_ocean(self, traits: Dict[str, float], current_config: Optional[Dict] = None) -> Dict:
+        """
+        Compute TTS configuration (rate, pitch, volume) based on OCEAN traits.
+        Preserves existing valid 'voice' selection if present.
+        """
+        if not traits:
+            return current_config or {}
+
+        # Default config
+        config = current_config.copy() if current_config else {}
+        if 'voice' not in config:
+            config['voice'] = 'en-US-AriaNeural' # Default
+
+        # 1. Extraversion -> Speed (Rate) and Pitch
+        # High E: Faster, Higher Pitch
+        # Low E: Slower, Lower Pitch
+        e_score = traits.get('extraversion', 0.5)
+        
+        # Rate: Range from -10% to +10%
+        rate_adj = int((e_score - 0.5) * 20)
+        
+        # Pitch: Range from -10Hz to +10Hz
+        pitch_adj = int((e_score - 0.5) * 20) 
+
+        # 2. Neuroticism -> Speed variance
+        # High N = slightly faster (anxious)
+        n_score = traits.get('neuroticism', 0.5)
+        n_rate_mod = int((n_score - 0.5) * 10) # +/- 5%
+        
+        # Combine rate
+        final_rate_val = rate_adj + n_rate_mod
+        final_rate_str = f"{'+' if final_rate_val >= 0 else ''}{final_rate_val}%"
+
+        # 3. Agreeableness -> Pitch
+        # High A: Higher pitch (friendly)
+        a_score = traits.get('agreeableness', 0.5)
+        a_pitch_mod = int((a_score - 0.5) * 10) # +/- 5Hz
+        
+        final_pitch_val = pitch_adj + a_pitch_mod
+        final_pitch_str = f"{'+' if final_pitch_val >= 0 else ''}{final_pitch_val}Hz"
+
+        config['rate'] = final_rate_str
+        config['pitch'] = final_pitch_str
+        
+        return config

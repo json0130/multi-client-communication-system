@@ -14,7 +14,7 @@ export async function PATCH(
     const { robot_name, robot_role, character, modules } = body;
 
     // Forward ALL fields to the Python backend
-    const response = await fetch(`http://130.216.238.62:5000/client/${clientId}`, {
+    const response = await fetch(`http://130.216.239.118:5000/client/${clientId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

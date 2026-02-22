@@ -18,6 +18,7 @@ class SupabaseClient:
                 "modules": config.get("modules", []),
                 "hardware_config": config.get("hardware", {}),
                 "voice_config": config.get("voice_config", {}),
+                "ocean_traits": config.get("ocean_traits", None),
                 "last_connected": datetime.now().isoformat()
             }
 
@@ -31,5 +32,24 @@ class SupabaseClient:
             return None
 
         except Exception as e:
-            print(f"Error registering robot: {e}")
+            # Check for missing column error (PGRST204) specifically for ocean_traits
+            if "ocean_traits" in str(e) and "column" in str(e):
+                print(f"⚠️ Warning: 'ocean_traits' column missing in Supabase. Retrying without it.")
+                try:
+                    # Remove ocean_traits and retry
+                    if "ocean_traits" in robot_data:
+                        del robot_data["ocean_traits"]
+                    
+                    result = self.supabase.table("robots")\
+                        .upsert(robot_data, on_conflict="client_id")\
+                        .execute()
+                        
+                    if result.data:
+                        print(f"Robot {config['robot_name']} registered successfully (without ocean_traits)")
+                        return result.data[0]
+                except Exception as retry_e:
+                    print(f"❌ Error registering robot (retry failed): {retry_e}")
+                    return None
+
+            print(f"❌ Error registering robot: {e}")
             return None

@@ -118,16 +118,25 @@ class ServerConnection:
     
     def _send_client_init(self):
         """Send client initialization - modules and role are now optional"""
+        # Prepare config overrides
+        server_config = self.client_config.get('server_config', {}).copy()
+        if 'edge_tts_config' in self.client_config:
+            server_config['edge_tts_config'] = self.client_config['edge_tts_config']
+
         client_init_data = {
             "robot_name": self.client_config.get('robot_name', 'BasicClient'),
             "modules": self.client_config.get('modules', []),  # Empty list if not set
             "client_id": self.client_id,
-            "config": self.client_config.get('server_config', {})
+            "config": server_config
         }
         
         # Include robot_role only if it exists
         if 'robot_role' in self.client_config:
             client_init_data['robot_role'] = self.client_config['robot_role']
+            
+        # Include ocean_traits if present
+        if 'ocean_traits' in self.client_config:
+            client_init_data['ocean_traits'] = self.client_config['ocean_traits']
         
         logger.info("📋 Sending client initialization...")
         if client_init_data['modules']:
@@ -522,10 +531,16 @@ class BasicClient:
         logger.info("📡 Registering client via HTTP...")
         url = f"{self.server_connection.server_url}/register_client"
         
+        # Prepare config overrides (same as WebSocket init)
+        server_config = self.config.get('server_config', {}).copy()
+        if 'edge_tts_config' in self.config:
+            server_config['edge_tts_config'] = self.config['edge_tts_config']
+
         payload = {
             "robot_name": self.config.get('robot_name', 'BasicClient'),
             "modules": self.config.get('modules', []),  # Empty list if not set
-            "client_id": self.config.get('client_id', 'basic_client_001')
+            "client_id": self.config.get('client_id', 'basic_client_001'),
+            "config": server_config
         }
         
         # Only include robot_role if it exists in config
@@ -533,6 +548,10 @@ class BasicClient:
             payload['robot_role'] = self.config['robot_role']
         else:
             logger.debug("   No robot_role in config - will be assigned by server")
+            
+        # Include ocean_traits if present
+        if 'ocean_traits' in self.config:
+            payload['ocean_traits'] = self.config['ocean_traits']
         
         try:
             response = requests.post(url, json=payload, timeout=10)

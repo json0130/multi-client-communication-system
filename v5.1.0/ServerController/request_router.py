@@ -525,10 +525,27 @@ class RequestRouter:
                 db_update['modules'] = update_data['modules']
             if 'character' in update_data:                     # ← NEW
                 db_update['character'] = update_data['character']
+            if 'ocean_traits' in update_data:
+                db_update['ocean_traits'] = update_data['ocean_traits']
 
             if db_update:
-                self.db.client.supabase.table('robots').update(db_update).eq('client_id', server.client_id).execute()
-                print(f"📝 Updated DB for {display_name}: {db_update}")
+                try:
+                    self.db.client.supabase.table('robots').update(db_update).eq('client_id', server.client_id).execute()
+                    print(f"📝 Updated DB for {display_name}: {db_update}")
+                except Exception as e:
+                    # Check for missing column error (PGRST204)
+                    if "ocean_traits" in str(e) and "column" in str(e):
+                        print(f"⚠️ Warning: 'ocean_traits' column missing in Supabase. Retrying update without it.")
+                        if "ocean_traits" in db_update:
+                            del db_update["ocean_traits"]
+                        
+                        try:
+                            self.db.client.supabase.table('robots').update(db_update).eq('client_id', server.client_id).execute()
+                            print(f"📝 Updated DB for {display_name} (without ocean_traits): {db_update}")
+                        except Exception as retry_e:
+                            print(f"❌ Error updating DB (retry failed): {retry_e}")
+                    else:
+                        print(f"❌ Error updating DB: {e}")
 
             # === Update client_manager (now carries edge_tts_config) ===
             self.client_manager.update_client_config(server.client_id, update_data)

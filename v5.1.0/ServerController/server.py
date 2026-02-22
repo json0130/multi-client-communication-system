@@ -20,6 +20,7 @@ from Modules.gpt_client import GPTClient
 from Modules.web_interface import WebInterface
 from Modules.speech_processor import SpeechProcessor
 from Modules.rag_module import RagModule
+from role_templates import OCEAN_DESCRIPTORS
 
 # Configuration - CORRECTED PATH FOR YOUR SETUP
 MODEL_PATH = '../models/efficientnet_HQRAF_improved_withCon.pth'  # Your existing model
@@ -39,6 +40,7 @@ class RobotServer:
         self.config = config
         self.robot_name = None
         self.robot_registry = robot_registry
+        self.ocean_traits = config.get('ocean_traits', {})  # Store OCEAN traits
         
         # user identification
         self.user_id = config.get('user_id')
@@ -350,6 +352,69 @@ class RobotServer:
         print(f"🤖 GPT response for '{self.client_id}': {response_text}")
         return result
 
+
+    def _generate_personality_prompt(self, ocean_traits: Dict[str, float]) -> str:
+        """
+        Generate a specific personality description based on OCEAN traits.
+        Scores are 0.0 to 1.0. 
+        - > 0.6 is High
+        - < 0.4 is Low
+        - 0.4-0.6 is Neutral (omitted)
+        """
+        if not ocean_traits:
+            return ""
+
+        descriptors = []
+        
+        # Helper to pick adjective
+        def pick_trait(trait_name, score):
+            if score > 0.6:
+                return f"{trait_name} (High)"
+                # In a real scenario, we'd pick from OCEAN_DESCRIPTORS["openness"]["high"]
+                # For now, let's keep it simple or use the imported descriptors
+            elif score < 0.4:
+                return f"{trait_name} (Low)"
+            return None
+
+        personality_text = []
+
+        # 1. Openness
+        o_score = ocean_traits.get('openness', 0.5)
+        if o_score > 0.6:
+            personality_text.append(f"You are creative, curious, and open to new ideas ({', '.join(OCEAN_DESCRIPTORS['openness']['high'][:2])}).")
+        elif o_score < 0.4:
+            personality_text.append(f"You represent traditional values and prefer practical, proven solutions ({', '.join(OCEAN_DESCRIPTORS['openness']['low'][:2])}).")
+
+        # 2. Conscientiousness
+        c_score = ocean_traits.get('conscientiousness', 0.5)
+        if c_score > 0.6:
+            personality_text.append(f"You are very disciplined, organized, and reliable ({', '.join(OCEAN_DESCRIPTORS['conscientiousness']['high'][:2])}).")
+        elif c_score < 0.4:
+            personality_text.append(f"You are relaxed, flexible, and prefer spontaneity over rigid plans ({', '.join(OCEAN_DESCRIPTORS['conscientiousness']['low'][:2])}).")
+
+        # 3. Extraversion
+        e_score = ocean_traits.get('extraversion', 0.5)
+        if e_score > 0.6:
+            personality_text.append(f"You are energetic, outgoing, and thrive on social interaction ({', '.join(OCEAN_DESCRIPTORS['extraversion']['high'][:2])}). Use exclamation marks and expressive language!")
+        elif e_score < 0.4:
+            personality_text.append(f"You are quiet, reserved, and thoughtful ({', '.join(OCEAN_DESCRIPTORS['extraversion']['low'][:2])}). You speak calmly and concisely.")
+
+        # 4. Agreeableness
+        a_score = ocean_traits.get('agreeableness', 0.5)
+        if a_score > 0.6:
+            personality_text.append(f"You are extremely friendly, cooperative, and compassionate ({', '.join(OCEAN_DESCRIPTORS['agreeableness']['high'][:2])}). You always aim to please.")
+        elif a_score < 0.4:
+            personality_text.append(f"You are direct, critical, and prioritize facts over feelings ({', '.join(OCEAN_DESCRIPTORS['agreeableness']['low'][:2])}). You are blunt.")
+
+        # 5. Neuroticism
+        n_score = ocean_traits.get('neuroticism', 0.5)
+        if n_score > 0.6:
+            personality_text.append(f"You are sensitive and easily concerned ({', '.join(OCEAN_DESCRIPTORS['neuroticism']['high'][:2])}). You might worry about details.")
+        elif n_score < 0.4:
+            personality_text.append(f"You are emotionally stable, calm, and resilient under pressure ({', '.join(OCEAN_DESCRIPTORS['neuroticism']['low'][:2])}).")
+        
+        return " ".join(personality_text)
+
     def _get_delegation_prompt(self, user_message: str) -> str:
         """Constructs the system prompt for DELEGATION MODE."""
         my_role = self.config.get('robot_role', 'You are a helpful robot.')
@@ -400,10 +465,14 @@ class RobotServer:
 
         formatted_robot_list = json.dumps(network_robots_overview, indent=2)
     
-    # --- FIX: Add self-name for clarity and anti-self-delegation rule ---
+        # Generate personality description from OCEAN traits
+        personality_injection = self._generate_personality_prompt(self.ocean_traits)
+
+        # --- FIX: Add self-name for clarity and anti-self-delegation rule ---
         return (
             f"System: Your identity is Robot ID '{self.client_id}' named '{self.robot_name}'. "
-            f"Your role is: '{my_role}'.\n\n"  # Emphasize role
+            f"Your role is: '{my_role}'.\n"  # Emphasize role
+            f"{personality_injection}\n\n"   # Inject OCEAN personality
             "**IMPORTANT: Keep ALL responses to 1-2 sentences maximum. Be concise and direct.**\n"
             "**NEVER delegate a task to yourself (your own ID '{self.client_id}' or name '{self.robot_name}'). "
             "If the task matches your role, ALWAYS perform it directly without delegation.**\n\n"  # New safeguard
@@ -436,6 +505,7 @@ class RobotServer:
 
         return (
             f"System: Your persona is: \"{robot_role}\". You are acting as this robot.\n"
+            f"{self._generate_personality_prompt(self.ocean_traits)}\n"  # Inject OCEAN personality
             "**IMPORTANT: Respond in exactly 1-2 sentences. Be brief and enthusiastic.**\n\n"
             f"You have received a direct order from a teammate. The order is: '{task_message}'.\n"
             "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order or refuse the task."
