@@ -30,15 +30,15 @@ interface RobotTemplate {
   createdAt: number
 }
 
-const AVAILABLE_MODULES = ["gpt", "speech", "rag", "emotion"]
+const AVAILABLE_MODULES = ["gpt", "speech", "rag", "vision", "navigation", "manipulation"]
 const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
 const AVAILABLE_CHARACTERS = [
   { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
   { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
-  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-NZ-MitchellNeural" },
   { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
   { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
-  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-NZ-MollyNeural" },
 ]
 
 export default function RobotDetailPage() {
@@ -176,12 +176,12 @@ export default function RobotDetailPage() {
       setClient((prev) =>
         prev
           ? {
-              ...prev,
-              robot_name: robotName,
-              role: selectedRole,
-              character: selectedCharacter,
-              modules: selectedModules,
-            }
+            ...prev,
+            robot_name: robotName,
+            role: selectedRole,
+            character: selectedCharacter,
+            modules: selectedModules,
+          }
           : null
       )
 
@@ -244,9 +244,8 @@ export default function RobotDetailPage() {
                 <div className="flex items-start justify-between gap-4 mb-6">
                   <div className="flex items-start gap-4">
                     <div
-                      className={`w-16 h-16 rounded-lg flex items-center justify-center text-3xl ${
-                        isUnconfigured() ? "bg-orange-100 text-orange-500" : "bg-primary/10 text-primary"
-                      }`}
+                      className={`w-16 h-16 rounded-lg flex items-center justify-center text-3xl ${isUnconfigured() ? "bg-orange-100 text-orange-500" : "bg-primary/10 text-primary"
+                        }`}
                     >
                       {isUnconfigured() ? (
                         <svg
@@ -333,83 +332,88 @@ export default function RobotDetailPage() {
               </CardContent>
             </Card>
 
-            {/* Apply Template Section (for unconfigured robots) */}
-            {isUnconfigured() && templates.length > 0 && (
-              <Card className="border-primary/30 bg-primary/5 mb-6">
-                <CardHeader>
-                  <CardTitle className="text-lg flex items-center gap-2">
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
-                      <polyline points="14 2 14 8 20 8" />
-                    </svg>
-                    Quick Setup with Template
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <p className="text-sm text-muted-foreground mb-4">
-                    Apply a pre-defined template to quickly configure this robot:
-                  </p>
-                  {!showTemplates ? (
-                    <Button onClick={() => setShowTemplates(true)} disabled={!isOnline}>
-                      Choose Template
-                    </Button>
-                  ) : (
-                    <div className="space-y-3">
-                      {templates.map((template) => (
-                        <div
-                          key={template.id}
-                          className="flex items-center justify-between p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-colors"
-                        >
-                          <div>
-                            <p className="font-medium text-foreground">{template.name}</p>
-                            <p className="text-sm text-muted-foreground">
-                              {template.role.replace("_", " ")} - {template.modules.length} modules
-                            </p>
-                          </div>
-                          <Button size="sm" onClick={() => handleApplyTemplate(template)} disabled={!isOnline}>
-                            Apply
-                          </Button>
-                        </div>
-                      ))}
-                      <Button variant="outline" size="sm" onClick={() => setShowTemplates(false)}>
-                        Cancel
+            {/* Apply Template Section */}
+            <Card className={`mb-6 ${isUnconfigured() ? "border-primary/30 bg-primary/5" : "border-border"}`}>
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <svg
+                    xmlns="http://www.w3.org/2000/svg"
+                    width="20"
+                    height="20"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  {isUnconfigured() ? "Quick Setup with Template" : "Apply Template"}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  {isUnconfigured()
+                    ? "Apply a pre-defined template to quickly configure this robot:"
+                    : "Swap the current configuration by applying a template:"}
+                </p>
+                {templates.length > 0 ? (
+                  <>
+                    {!showTemplates ? (
+                      <Button onClick={() => setShowTemplates(true)} disabled={!isOnline} variant={isUnconfigured() ? "default" : "outline"}>
+                        Choose Template
                       </Button>
-                    </div>
-                  )}
-                  {!isOnline && (
-                    <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
-                      Robot must be online to apply a template
+                    ) : (
+                      <div className="space-y-3">
+                        {templates.map((template) => {
+                          const charName = AVAILABLE_CHARACTERS.find((c) => c.id === template.character)?.name
+                          return (
+                            <div
+                              key={template.id}
+                              className="flex items-center justify-between p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-colors"
+                            >
+                              <div>
+                                <p className="font-medium text-foreground">{template.name}</p>
+                                <p className="text-sm text-muted-foreground">
+                                  {template.role.replace("_", " ")}
+                                  {charName ? ` / ${charName}` : ""}
+                                  {" - "}
+                                  {template.modules.length} module{template.modules.length !== 1 ? "s" : ""}
+                                </p>
+                              </div>
+                              <Button size="sm" onClick={() => handleApplyTemplate(template)} disabled={!isOnline}>
+                                Apply
+                              </Button>
+                            </div>
+                          )
+                        })}
+                        <Button variant="outline" size="sm" onClick={() => setShowTemplates(false)}>
+                          Cancel
+                        </Button>
+                      </div>
+                    )}
+                  </>
+                ) : (
+                  <div>
+                    <p className="text-sm text-muted-foreground mb-3">
+                      No templates available yet. Create one to quickly configure robots.
                     </p>
-                  )}
-                </CardContent>
-              </Card>
-            )}
-
-            {/* No Templates Notice */}
-            {isUnconfigured() && templates.length === 0 && (
-              <Card className="border-orange-200 bg-orange-50/50 mb-6">
-                <CardContent className="pt-6">
-                  <p className="text-sm text-orange-700 mb-3">
-                    No templates available. Create a template to quickly configure robots.
+                    <Link href="/templates">
+                      <Button variant="outline" size="sm">
+                        Create Template
+                      </Button>
+                    </Link>
+                  </div>
+                )}
+                {!isOnline && templates.length > 0 && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    Robot must be online to apply a template
                   </p>
-                  <Link href="/templates">
-                    <Button variant="outline" size="sm">
-                      Create Template
-                    </Button>
-                  </Link>
-                </CardContent>
-              </Card>
-            )}
+                )}
+              </CardContent>
+            </Card>
 
             {/* Role Selection */}
             <Card className="border-border mb-6">
@@ -442,11 +446,10 @@ export default function RobotDetailPage() {
                       type="button"
                       onClick={() => handleRoleChange(role)}
                       disabled={!isOnline}
-                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${
-                        selectedRole === role
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-secondary text-foreground border-border hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${selectedRole === role
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary text-foreground border-border hover:border-primary/50"
+                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {role.replace("_", " ")}
                     </button>
@@ -495,11 +498,10 @@ export default function RobotDetailPage() {
                       type="button"
                       onClick={() => handleCharacterChange(char.id)}
                       disabled={!isOnline}
-                      className={`p-4 rounded-lg text-left transition-all border ${
-                        selectedCharacter === char.id
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-secondary text-foreground border-border hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      className={`p-4 rounded-lg text-left transition-all border ${selectedCharacter === char.id
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary text-foreground border-border hover:border-primary/50"
+                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       <span className="block font-medium">{char.name}</span>
                       <span className="block text-xs opacity-70 mt-1">{char.voice}</span>
@@ -545,11 +547,10 @@ export default function RobotDetailPage() {
                       type="button"
                       onClick={() => handleModuleToggle(module)}
                       disabled={!isOnline}
-                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${
-                        selectedModules.includes(module)
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-secondary text-foreground border-border hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${selectedModules.includes(module)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-secondary text-foreground border-border hover:border-primary/50"
+                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {module}
                     </button>
@@ -585,15 +586,13 @@ export default function RobotDetailPage() {
             {/* Save Message */}
             {saveMessage && (
               <Card
-                className={`mb-6 border-2 ${
-                  saveMessage.includes("successfully") ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
-                }`}
+                className={`mb-6 border-2 ${saveMessage.includes("successfully") ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+                  }`}
               >
                 <CardContent className="pt-4">
                   <p
-                    className={`text-sm font-medium ${
-                      saveMessage.includes("successfully") ? "text-green-700" : "text-red-700"
-                    }`}
+                    className={`text-sm font-medium ${saveMessage.includes("successfully") ? "text-green-700" : "text-red-700"
+                      }`}
                   >
                     {saveMessage}
                   </p>

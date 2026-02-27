@@ -23,10 +23,10 @@ const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "secu
 const AVAILABLE_CHARACTERS = [
   { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
   { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
-  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-NZ-MitchellNeural" },
   { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
   { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
-  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-NZ-MollyNeural" },
 ]
 
 export default function TemplatesPage() {
@@ -175,11 +175,10 @@ export default function TemplatesPage() {
                       key={role}
                       type="button"
                       onClick={() => setFormRole(role)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
-                        formRole === role
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
-                      }`}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formRole === role
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
+                        }`}
                     >
                       {role.replace("_", " ")}
                     </button>
@@ -196,11 +195,10 @@ export default function TemplatesPage() {
                       key={char.id}
                       type="button"
                       onClick={() => setFormCharacter(char.id)}
-                      className={`px-4 py-3 rounded-lg text-sm font-medium transition-all border text-left ${
-                        formCharacter === char.id
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
-                      }`}
+                      className={`px-4 py-3 rounded-lg text-sm font-medium transition-all border text-left ${formCharacter === char.id
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
+                        }`}
                     >
                       <span className="block">{char.name}</span>
                       <span className="block text-xs opacity-70">{char.voice}</span>
@@ -218,11 +216,10 @@ export default function TemplatesPage() {
                       key={module}
                       type="button"
                       onClick={() => toggleModule(module)}
-                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${
-                        formModules.includes(module)
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
-                      }`}
+                      className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formModules.includes(module)
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
+                        }`}
                     >
                       {module}
                     </button>

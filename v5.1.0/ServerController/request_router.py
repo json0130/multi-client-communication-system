@@ -486,10 +486,10 @@ class RequestRouter:
                 voice_map = {
                     "male_friendly": "en-US-GuyNeural",
                     "female_friendly": "en-US-JennyNeural",
-                    "male_professional": "en-US-DavisNeural",
+                    "male_professional": "en-NZ-MitchellNeural",
                     "female_professional": "en-US-AriaNeural",
                     "child_friendly": "en-US-AnaNeural",
-                    "elderly_friendly": "en-US-SaraNeural",
+                    "elderly_friendly": "en-NZ-MollyNeural",
                 }
 
                 if character_id in voice_map:
