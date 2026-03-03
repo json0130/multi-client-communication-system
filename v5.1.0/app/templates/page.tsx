@@ -7,26 +7,30 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { OceanRadarChart, OceanSliders, DEFAULT_OCEAN_TRAITS } from "@/components/ui/ocean-radar-chart"
+import type { OceanTraits } from "@/components/ui/ocean-radar-chart"
 
 export interface RobotTemplate {
   id: string
   name: string
   role: string
+  rolePrompt: string
   character: string
   modules: string[]
   description: string
+  oceanTraits: OceanTraits
   createdAt: number
 }
 
-const AVAILABLE_MODULES = ["gpt", "speech", "rag", "emotion"]
+const AVAILABLE_MODULES = ["gpt", "speech", "rag", "vision", "navigation", "manipulation"]
 const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "security", "cleaning"]
 const AVAILABLE_CHARACTERS = [
   { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
   { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
-  { id: "male_professional", name: "Male Professional", voice: "en-NZ-MitchellNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
   { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
   { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
-  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-NZ-MollyNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
 ]
 
 export default function TemplatesPage() {
@@ -37,11 +41,12 @@ export default function TemplatesPage() {
   // Form state
   const [formName, setFormName] = useState("")
   const [formRole, setFormRole] = useState("")
+  const [formRolePrompt, setFormRolePrompt] = useState("")
   const [formCharacter, setFormCharacter] = useState("")
   const [formModules, setFormModules] = useState<string[]>([])
   const [formDescription, setFormDescription] = useState("")
+  const [formOceanTraits, setFormOceanTraits] = useState<OceanTraits>({ ...DEFAULT_OCEAN_TRAITS })
 
-  // Load templates from localStorage on mount
   useEffect(() => {
     const saved = localStorage.getItem("robot-templates")
     if (saved) {
@@ -49,7 +54,6 @@ export default function TemplatesPage() {
     }
   }, [])
 
-  // Save templates to localStorage whenever they change
   const saveTemplates = (newTemplates: RobotTemplate[]) => {
     localStorage.setItem("robot-templates", JSON.stringify(newTemplates))
     setTemplates(newTemplates)
@@ -58,9 +62,11 @@ export default function TemplatesPage() {
   const resetForm = () => {
     setFormName("")
     setFormRole("")
+    setFormRolePrompt("")
     setFormCharacter("")
     setFormModules([])
     setFormDescription("")
+    setFormOceanTraits({ ...DEFAULT_OCEAN_TRAITS })
     setIsCreating(false)
     setEditingId(null)
   }
@@ -72,9 +78,11 @@ export default function TemplatesPage() {
       id: editingId || `template-${Date.now()}`,
       name: formName,
       role: formRole,
+      rolePrompt: formRolePrompt,
       character: formCharacter,
       modules: formModules,
       description: formDescription,
+      oceanTraits: formOceanTraits,
       createdAt: editingId ? templates.find((t) => t.id === editingId)?.createdAt || Date.now() : Date.now(),
     }
 
@@ -90,9 +98,11 @@ export default function TemplatesPage() {
   const handleEditTemplate = (template: RobotTemplate) => {
     setFormName(template.name)
     setFormRole(template.role)
+    setFormRolePrompt(template.rolePrompt || "")
     setFormCharacter(template.character || "")
     setFormModules(template.modules)
     setFormDescription(template.description)
+    setFormOceanTraits(template.oceanTraits || { ...DEFAULT_OCEAN_TRAITS })
     setEditingId(template.id)
     setIsCreating(true)
   }
@@ -176,14 +186,30 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => setFormRole(role)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formRole === role
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card text-foreground border-border hover:border-primary/50"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       {role.replace("_", " ")}
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Role Prompt */}
+              <div className="space-y-2">
+                <Label htmlFor="rolePrompt">Role Prompt</Label>
+                <p className="text-xs text-muted-foreground">
+                  System prompt given to the robot to define its behavior and role context.
+                </p>
+                <textarea
+                  id="rolePrompt"
+                  value={formRolePrompt}
+                  onChange={(e) => setFormRolePrompt(e.target.value)}
+                  placeholder="e.g., You are a helpful kitchen assistant robot. You help users find recipes, guide them through cooking steps, and provide nutritional information."
+                  rows={4}
+                  className="flex w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y"
+                />
               </div>
 
               {/* Character Selection */}
@@ -196,14 +222,37 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => setFormCharacter(char.id)}
                       className={`px-4 py-3 rounded-lg text-sm font-medium transition-all border text-left ${formCharacter === char.id
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card text-foreground border-border hover:border-primary/50"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       <span className="block">{char.name}</span>
                       <span className="block text-xs opacity-70">{char.voice}</span>
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* OCEAN Personality Traits */}
+              <div className="space-y-4">
+                <div>
+                  <Label>OCEAN Personality Traits</Label>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Drag points on the chart or use sliders to set personality dimensions (0.0 - 1.0).
+                  </p>
+                </div>
+                <div className="flex flex-col items-center gap-6">
+                  <div>
+                    <OceanRadarChart
+                      traits={formOceanTraits}
+                      onChange={setFormOceanTraits}
+                      size={240}
+                      color="59, 130, 246"
+                    />
+                  </div>
+                  <div className="w-full">
+                    <OceanSliders traits={formOceanTraits} onChange={setFormOceanTraits} />
+                  </div>
                 </div>
               </div>
 
@@ -217,8 +266,8 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => toggleModule(module)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formModules.includes(module)
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "bg-card text-foreground border-border hover:border-primary/50"
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       {module}
@@ -306,11 +355,42 @@ export default function TemplatesPage() {
 
                   {/* Character */}
                   {template.character && (
-                    <div className="mb-4">
+                    <div className="mb-3">
                       <p className="text-xs font-medium text-muted-foreground mb-1">Character:</p>
                       <Badge variant="secondary" className="capitalize">
                         {AVAILABLE_CHARACTERS.find((c) => c.id === template.character)?.name || template.character}
                       </Badge>
+                    </div>
+                  )}
+
+                  {/* Role Prompt Preview */}
+                  {template.rolePrompt && (
+                    <div className="mb-3">
+                      <p className="text-xs font-medium text-muted-foreground mb-1">Role Prompt:</p>
+                      <p className="text-xs text-muted-foreground bg-muted/50 rounded-md p-2 line-clamp-2">
+                        {template.rolePrompt}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* OCEAN Mini Chart */}
+                  {template.oceanTraits && (
+                    <div className="mb-3 flex items-center gap-4">
+                      <div className="shrink-0">
+                        <OceanRadarChart
+                          traits={template.oceanTraits}
+                          disabled
+                          size={120}
+                          color="59, 130, 246"
+                        />
+                      </div>
+                      <div className="text-xs text-muted-foreground space-y-0.5">
+                        <p>O: {template.oceanTraits.openness.toFixed(1)}</p>
+                        <p>C: {template.oceanTraits.conscientiousness.toFixed(1)}</p>
+                        <p>E: {template.oceanTraits.extraversion.toFixed(1)}</p>
+                        <p>A: {template.oceanTraits.agreeableness.toFixed(1)}</p>
+                        <p>N: {template.oceanTraits.neuroticism.toFixed(1)}</p>
+                      </div>
                     </div>
                   )}
 

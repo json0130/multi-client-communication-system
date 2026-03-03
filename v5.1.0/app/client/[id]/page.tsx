@@ -6,17 +6,21 @@ import { useParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { OceanRadarChart, OceanSliders, DEFAULT_OCEAN_TRAITS } from "@/components/ui/ocean-radar-chart"
+import type { OceanTraits } from "@/components/ui/ocean-radar-chart"
 
 interface ClientDetail {
   client_id: string
   display_name: string
   robot_name: string
   role: string
+  rolePrompt: string
   character: string
   status: string
   inactive_minutes: number
   last_activity: number
   modules: string[]
+  oceanTraits: OceanTraits
   registration_time: number
 }
 
@@ -24,9 +28,11 @@ interface RobotTemplate {
   id: string
   name: string
   role: string
+  rolePrompt: string
   character: string
   modules: string[]
   description: string
+  oceanTraits: OceanTraits
   createdAt: number
 }
 
@@ -35,10 +41,10 @@ const AVAILABLE_ROLES = ["guide", "cooking_robot", "assistant", "greeter", "secu
 const AVAILABLE_CHARACTERS = [
   { id: "male_friendly", name: "Male Friendly", voice: "en-US-GuyNeural" },
   { id: "female_friendly", name: "Female Friendly", voice: "en-US-JennyNeural" },
-  { id: "male_professional", name: "Male Professional", voice: "en-NZ-MitchellNeural" },
+  { id: "male_professional", name: "Male Professional", voice: "en-US-DavisNeural" },
   { id: "female_professional", name: "Female Professional", voice: "en-US-AriaNeural" },
   { id: "child_friendly", name: "Child Friendly", voice: "en-US-AnaNeural" },
-  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-NZ-MollyNeural" },
+  { id: "elderly_friendly", name: "Elderly Friendly", voice: "en-US-SaraNeural" },
 ]
 
 export default function RobotDetailPage() {
@@ -49,8 +55,10 @@ export default function RobotDetailPage() {
   const [error, setError] = useState<string | null>(null)
   const [robotName, setRobotName] = useState<string>("")
   const [selectedRole, setSelectedRole] = useState<string>("")
+  const [selectedRolePrompt, setSelectedRolePrompt] = useState<string>("")
   const [selectedCharacter, setSelectedCharacter] = useState<string>("")
   const [selectedModules, setSelectedModules] = useState<string[]>([])
+  const [selectedOceanTraits, setSelectedOceanTraits] = useState<OceanTraits>({ ...DEFAULT_OCEAN_TRAITS })
   const [saving, setSaving] = useState(false)
   const [hasChanges, setHasChanges] = useState(false)
   const [saveMessage, setSaveMessage] = useState<string | null>(null)
@@ -88,11 +96,12 @@ export default function RobotDetailPage() {
           setClient(foundClient)
           setRobotName(foundClient.robot_name || "")
           setSelectedRole(foundClient.role || "")
+          setSelectedRolePrompt(foundClient.rolePrompt || "")
           setSelectedCharacter(foundClient.character || "")
           setSelectedModules(foundClient.modules || [])
+          setSelectedOceanTraits(foundClient.oceanTraits || { ...DEFAULT_OCEAN_TRAITS })
           isFirstLoadRef.current = false
         } else {
-          // Update only status-related fields to preserve user's unsaved changes
           setClient((prevClient) => {
             if (!prevClient) return foundClient
             return {
@@ -141,10 +150,22 @@ export default function RobotDetailPage() {
     setHasChanges(true)
   }
 
+  const handleOceanChange = (traits: OceanTraits) => {
+    setSelectedOceanTraits(traits)
+    setHasChanges(true)
+  }
+
+  const handleRolePromptChange = (prompt: string) => {
+    setSelectedRolePrompt(prompt)
+    setHasChanges(true)
+  }
+
   const handleApplyTemplate = (template: RobotTemplate) => {
     setSelectedRole(template.role)
+    setSelectedRolePrompt(template.rolePrompt || "")
     setSelectedCharacter(template.character || "")
     setSelectedModules(template.modules)
+    setSelectedOceanTraits(template.oceanTraits || { ...DEFAULT_OCEAN_TRAITS })
     setHasChanges(true)
     setShowTemplates(false)
   }
@@ -160,8 +181,10 @@ export default function RobotDetailPage() {
         body: JSON.stringify({
           robot_name: robotName,
           robot_role: selectedRole,
+          role_prompt: selectedRolePrompt,
           character: selectedCharacter,
           modules: selectedModules,
+          ocean_traits: selectedOceanTraits,
         }),
       })
 
@@ -172,15 +195,16 @@ export default function RobotDetailPage() {
       setSaveMessage("All changes saved successfully!")
       setHasChanges(false)
 
-      // Update client state with new values
       setClient((prev) =>
         prev
           ? {
             ...prev,
             robot_name: robotName,
             role: selectedRole,
+            rolePrompt: selectedRolePrompt,
             character: selectedCharacter,
             modules: selectedModules,
+            oceanTraits: selectedOceanTraits,
           }
           : null
       )
@@ -198,14 +222,14 @@ export default function RobotDetailPage() {
     if (client) {
       setRobotName(client.robot_name || "")
       setSelectedRole(client.role || "")
+      setSelectedRolePrompt(client.rolePrompt || "")
       setSelectedCharacter(client.character || "")
       setSelectedModules(client.modules || [])
+      setSelectedOceanTraits(client.oceanTraits || { ...DEFAULT_OCEAN_TRAITS })
       setHasChanges(false)
     }
   }
 
-  // Robot is considered online if status is active (regardless of inactive_minutes)
-  // This allows configuration for both "Active" and "Idle" robots
   const isOnline = client && client.status === "active"
 
   return (
@@ -248,33 +272,13 @@ export default function RobotDetailPage() {
                         }`}
                     >
                       {isUnconfigured() ? (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="32"
-                          height="32"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <circle cx="12" cy="12" r="10" />
                           <line x1="12" y1="8" x2="12" y2="12" />
                           <line x1="12" y1="16" x2="12.01" y2="16" />
                         </svg>
                       ) : (
-                        <svg
-                          xmlns="http://www.w3.org/2000/svg"
-                          width="32"
-                          height="32"
-                          viewBox="0 0 24 24"
-                          fill="none"
-                          stroke="currentColor"
-                          strokeWidth="2"
-                          strokeLinecap="round"
-                          strokeLinejoin="round"
-                        >
+                        <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                           <rect x="3" y="11" width="18" height="10" rx="2" />
                           <circle cx="12" cy="5" r="2" />
                           <path d="M12 7v4" />
@@ -336,17 +340,7 @@ export default function RobotDetailPage() {
             <Card className={`mb-6 ${isUnconfigured() ? "border-primary/30 bg-primary/5" : "border-border"}`}>
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
                     <polyline points="14 2 14 8 20 8" />
                   </svg>
@@ -374,14 +368,24 @@ export default function RobotDetailPage() {
                               key={template.id}
                               className="flex items-center justify-between p-4 rounded-lg bg-card border border-border hover:border-primary/50 transition-colors"
                             >
-                              <div>
-                                <p className="font-medium text-foreground">{template.name}</p>
-                                <p className="text-sm text-muted-foreground">
-                                  {template.role.replace("_", " ")}
-                                  {charName ? ` / ${charName}` : ""}
-                                  {" - "}
-                                  {template.modules.length} module{template.modules.length !== 1 ? "s" : ""}
-                                </p>
+                              <div className="flex items-center gap-4">
+                                {template.oceanTraits && (
+                                  <div className="shrink-0 hidden sm:block">
+                                    <OceanRadarChart traits={template.oceanTraits} disabled size={80} color="59, 130, 246" />
+                                  </div>
+                                )}
+                                <div>
+                                  <p className="font-medium text-foreground">{template.name}</p>
+                                  <p className="text-sm text-muted-foreground">
+                                    {template.role.replace("_", " ")}
+                                    {charName ? ` / ${charName}` : ""}
+                                    {" - "}
+                                    {template.modules.length} module{template.modules.length !== 1 ? "s" : ""}
+                                  </p>
+                                  {template.rolePrompt && (
+                                    <p className="text-xs text-muted-foreground mt-1 line-clamp-1">{template.rolePrompt}</p>
+                                  )}
+                                </div>
                               </div>
                               <Button size="sm" onClick={() => handleApplyTemplate(template)} disabled={!isOnline}>
                                 Apply
@@ -419,22 +423,10 @@ export default function RobotDetailPage() {
             <Card className="border-border mb-6">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-                      <circle cx="12" cy="7" r="4" />
-                    </svg>
-                  </span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
+                    <circle cx="12" cy="7" r="4" />
+                  </svg>
                   Role Selection
                 </CardTitle>
               </CardHeader>
@@ -463,33 +455,51 @@ export default function RobotDetailPage() {
               </CardContent>
             </Card>
 
+            {/* Role Prompt */}
+            <Card className="border-border mb-6">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                  </svg>
+                  Role Prompt
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-3">
+                  System prompt given to the robot to define its behavior and understand its role.
+                </p>
+                <textarea
+                  value={selectedRolePrompt}
+                  onChange={(e) => handleRolePromptChange(e.target.value)}
+                  disabled={!isOnline}
+                  placeholder="e.g., You are a helpful kitchen assistant robot. You help users find recipes, guide them through cooking steps, and provide nutritional information."
+                  rows={4}
+                  className="flex w-full rounded-lg border border-border bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring resize-y disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    Robot must be online to change role prompt
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Character Selection */}
             <Card className="border-border mb-6">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
-                      <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                      <line x1="12" x2="12" y1="19" y2="22" />
-                    </svg>
-                  </span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z" />
+                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                    <line x1="12" x2="12" y1="19" y2="22" />
+                  </svg>
                   Character (Voice)
                 </CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-sm text-muted-foreground mb-4">
-                  Select a character personality that determines the robot's voice for TTS:
+                  Select a character personality that determines the robot{"'"}s voice for TTS:
                 </p>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {AVAILABLE_CHARACTERS.map((char) => (
@@ -516,26 +526,54 @@ export default function RobotDetailPage() {
               </CardContent>
             </Card>
 
+            {/* OCEAN Personality Traits */}
+            <Card className="border-border mb-6">
+              <CardHeader>
+                <CardTitle className="text-lg flex items-center gap-2">
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+                  </svg>
+                  OCEAN Personality Traits
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm text-muted-foreground mb-4">
+                  Configure the Big Five personality dimensions. Drag points on the chart or adjust the sliders (0.0 - 1.0 scale, 0.1 intervals).
+                </p>
+                <div className="flex flex-col items-center gap-6">
+                  <div>
+                    <OceanRadarChart
+                      traits={selectedOceanTraits}
+                      onChange={isOnline ? handleOceanChange : undefined}
+                      disabled={!isOnline}
+                      size={240}
+                      color="59, 130, 246"
+                    />
+                  </div>
+                  <div className="w-full">
+                    <OceanSliders
+                      traits={selectedOceanTraits}
+                      onChange={handleOceanChange}
+                      disabled={!isOnline}
+                    />
+                  </div>
+                </div>
+                {!isOnline && (
+                  <p className="text-xs text-muted-foreground mt-4 p-3 bg-yellow-50 rounded-lg border border-yellow-100">
+                    Robot must be online to change personality traits
+                  </p>
+                )}
+              </CardContent>
+            </Card>
+
             {/* Modules Section */}
             <Card className="border-border mb-6">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <span>
-                    <svg
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="2"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                    >
-                      <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
-                      <circle cx="12" cy="12" r="3" />
-                    </svg>
-                  </span>
+                  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
                   Modules
                 </CardTitle>
               </CardHeader>
