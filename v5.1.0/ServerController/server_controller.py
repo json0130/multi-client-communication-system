@@ -462,6 +462,35 @@ class ServerController:
             return self.request_router.route_user_request(user_id, 'infer_topics', request)
 
         
+        @self.app.route('/templates', methods=['GET'])
+        def get_templates():
+            """Get all UI templates"""
+            templates = self.supabase_client.get_templates()
+            return jsonify({"templates": templates})
+
+        @self.app.route('/templates', methods=['POST'])
+        def save_template():
+            """Create or update a template"""
+            if not request.is_json:
+                return jsonify({"error": "Invalid request: JSON required"}), 400
+            
+            template_data = request.get_json()
+            saved = self.supabase_client.save_template(template_data)
+            
+            if saved:
+                return jsonify({"status": "success", "template": saved}), 200
+            else:
+                return jsonify({"error": "Failed to save template"}), 500
+
+        @self.app.route('/templates/<template_id>', methods=['DELETE'])
+        def delete_template(template_id):
+            """Delete a template"""
+            success = self.supabase_client.delete_template(template_id)
+            if success:
+                return jsonify({"status": "success", "message": f"Template {template_id} deleted"}), 200
+            else:
+                return jsonify({"error": "Failed to delete template"}), 500
+                
         @self.app.after_request
         def after_request(response):
             response.headers.add('Access-Control-Allow-Origin', '*')

@@ -47,17 +47,21 @@ export default function TemplatesPage() {
   const [formDescription, setFormDescription] = useState("")
   const [formOceanTraits, setFormOceanTraits] = useState<OceanTraits>({ ...DEFAULT_OCEAN_TRAITS })
 
-  useEffect(() => {
-    const saved = localStorage.getItem("robot-templates")
-    if (saved) {
-      setTemplates(JSON.parse(saved))
+  const fetchTemplates = async () => {
+    try {
+      const res = await fetch("/api/templates")
+      if (res.ok) {
+        const data = await res.json()
+        setTemplates(data.templates || [])
+      }
+    } catch (e) {
+      console.error("Failed to fetch templates", e)
     }
-  }, [])
-
-  const saveTemplates = (newTemplates: RobotTemplate[]) => {
-    localStorage.setItem("robot-templates", JSON.stringify(newTemplates))
-    setTemplates(newTemplates)
   }
+
+  useEffect(() => {
+    fetchTemplates()
+  }, [])
 
   const resetForm = () => {
     setFormName("")
@@ -71,7 +75,7 @@ export default function TemplatesPage() {
     setEditingId(null)
   }
 
-  const handleCreateTemplate = () => {
+  const handleCreateTemplate = async () => {
     if (!formName || !formRole) return
 
     const newTemplate: RobotTemplate = {
@@ -86,13 +90,25 @@ export default function TemplatesPage() {
       createdAt: editingId ? templates.find((t) => t.id === editingId)?.createdAt || Date.now() : Date.now(),
     }
 
-    if (editingId) {
-      saveTemplates(templates.map((t) => (t.id === editingId ? newTemplate : t)))
-    } else {
-      saveTemplates([...templates, newTemplate])
+    try {
+      const res = await fetch("/api/templates", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(newTemplate),
+      })
+      if (res.ok) {
+        if (editingId) {
+          setTemplates(templates.map((t) => (t.id === editingId ? newTemplate : t)))
+        } else {
+          setTemplates([...templates, newTemplate])
+        }
+        resetForm()
+      } else {
+        console.error("Failed to save template")
+      }
+    } catch (e) {
+      console.error("Error saving template", e)
     }
-
-    resetForm()
   }
 
   const handleEditTemplate = (template: RobotTemplate) => {
@@ -107,8 +123,19 @@ export default function TemplatesPage() {
     setIsCreating(true)
   }
 
-  const handleDeleteTemplate = (id: string) => {
-    saveTemplates(templates.filter((t) => t.id !== id))
+  const handleDeleteTemplate = async (id: string) => {
+    try {
+      const res = await fetch(`/api/templates/${id}`, {
+        method: "DELETE",
+      })
+      if (res.ok) {
+        setTemplates(templates.filter((t) => t.id !== id))
+      } else {
+        console.error("Failed to delete template")
+      }
+    } catch (e) {
+      console.error("Error deleting template", e)
+    }
   }
 
   const toggleModule = (module: string) => {
@@ -186,8 +213,8 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => setFormRole(role)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formRole === role
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       {role.replace("_", " ")}
@@ -222,8 +249,8 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => setFormCharacter(char.id)}
                       className={`px-4 py-3 rounded-lg text-sm font-medium transition-all border text-left ${formCharacter === char.id
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       <span className="block">{char.name}</span>
@@ -266,8 +293,8 @@ export default function TemplatesPage() {
                       type="button"
                       onClick={() => toggleModule(module)}
                       className={`px-4 py-2 rounded-lg text-sm font-medium transition-all border ${formModules.includes(module)
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-card text-foreground border-border hover:border-primary/50"
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-foreground border-border hover:border-primary/50"
                         }`}
                     >
                       {module}

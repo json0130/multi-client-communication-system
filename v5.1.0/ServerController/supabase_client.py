@@ -53,3 +53,42 @@ class SupabaseClient:
 
             print(f"❌ Error registering robot: {e}")
             return None
+
+    def get_templates(self) -> list:
+        """
+        Fetch all robot templates from the database
+        """
+        try:
+            result = self.supabase.table("templates").select("*").execute()
+            return result.data if result.data else []
+        except Exception as e:
+            print(f"❌ Error fetching templates: {e}")
+            return []
+
+    def save_template(self, template_data: dict) -> dict:
+        """
+        Save or update a template
+        """
+        try:
+            result = self.supabase.table("templates")\
+                .upsert(template_data, on_conflict="id")\
+                .execute()
+            if result.data:
+                print(f"Template {template_data.get('name')} saved successfully")
+                return result.data[0]
+            return None
+        except Exception as e:
+            print(f"❌ Error saving template: {e}")
+            return None
+
+    def delete_template(self, template_id: str) -> bool:
+        """
+        Delete a template by ID
+        """
+        try:
+            result = self.supabase.table("templates").delete().eq("id", template_id).execute()
+            print(f"Template {template_id} deleted successfully")
+            return True
+        except Exception as e:
+            print(f"❌ Error deleting template: {e}")
+            return False
