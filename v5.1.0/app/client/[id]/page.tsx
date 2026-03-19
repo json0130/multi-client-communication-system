@@ -67,12 +67,20 @@ export default function RobotDetailPage() {
 
   const isFirstLoadRef = useRef(true)
 
-  // Load templates from localStorage
+  // Load templates from database
   useEffect(() => {
-    const saved = localStorage.getItem("robot-templates")
-    if (saved) {
-      setTemplates(JSON.parse(saved))
+    const fetchTemplates = async () => {
+      try {
+        const res = await fetch("/api/templates")
+        if (res.ok) {
+          const data = await res.json()
+          setTemplates(data.templates || [])
+        }
+      } catch (e) {
+        console.error("Failed to fetch templates", e)
+      }
     }
+    fetchTemplates()
   }, [])
 
   useEffect(() => {

@@ -1,4 +1,4 @@
-# gpt_client.py - OpenAI GPT Integration
+# openrouter_client.py - OpenRouter Integration
 import os
 import re
 from openai import OpenAI
@@ -11,8 +11,8 @@ class Message:
     role: str
     content: str
 
-class GPTClient:
-    """OpenAI GPT client for emotion-aware chat responses"""
+class OpenRouterClient:
+    """OpenRouter client for emotion-aware chat responses"""
     
     def __init__(self):
         self.client = None
@@ -21,21 +21,24 @@ class GPTClient:
 
         
     def setup_openai(self):
-        """Setup OpenAI client"""
+        """Setup OpenRouter client"""
         try:
             # Try to get API key from environment variables
-            api_key = os.getenv('OPENAI_API_KEY')
+            api_key = os.getenv('OPENROUTER_API_KEY')
             if not api_key:
-                print("Warning: OPENAI_API_KEY not set in environment")
-                print("Please set your OpenAI API key: export OPENAI_API_KEY='your-key-here'")
+                print("Warning: OPENROUTER_API_KEY not set in environment")
+                print("Please set your OpenRouter API key: export OPENROUTER_API_KEY='your-key-here'")
                 return False
 
-            self.client = OpenAI(api_key=api_key)
+            self.client = OpenAI(
+                base_url="https://openrouter.ai/api/v1",
+                api_key=api_key,
+            )
             self.available = True
-            print("OpenAI client initialized")
+            print("OpenRouter client initialized")
             return True
         except Exception as e:
-            print(f"OpenAI setup failed: {e}")
+            print(f"OpenRouter setup failed: {e}")
             self.available = False
             return False
     
@@ -57,7 +60,7 @@ class GPTClient:
             
             # This is now a clean, generic function. It just passes the prompts along.
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="arcee-ai/trinity-large-preview:free",
                 messages=messages,
                 timeout=10
             )
@@ -104,7 +107,7 @@ class GPTClient:
                 messages.append({"role": msg.role, "content": msg.content})
 
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="arcee-ai/trinity-large-preview:free",
                 messages=messages,
                 temperature=temperature,
                 timeout=20
@@ -118,7 +121,7 @@ class GPTClient:
 
         except Exception as e:
             print(f"❌ Error in dynamic prompt request: {e}")
-            return "[DEFAULT] Sorry, I encountered an error during the advanced request."
+            return "[DEFAULT, OpenRouter] Sorry, I encountered an error during the advanced request."
     
     def clear_history(self):
         """Clear conversation history"""
@@ -162,7 +165,7 @@ class GPTClient:
         )
 
         resp = self.client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="arcee-ai/trinity-large-preview:free",
             messages=[
                 {"role": "system", "content": sys_prompt},
                 {"role": "user", "content": joined}

@@ -1,6 +1,6 @@
 export async function GET() {
   try {
-    const response = await fetch("http://130.216.239.118:5000/api/robots", {
+    const response = await fetch("http://130.216.238.51:5000/api/robots", {
       headers: { "Content-Type": "application/json" },
     })
 

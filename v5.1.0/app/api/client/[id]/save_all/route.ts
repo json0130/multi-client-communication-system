@@ -11,7 +11,7 @@ export async function PATCH(
     const { robot_name, robot_role, role_prompt, character, modules, ocean_traits } = body
 
     // Send all changes to Python server in a single PATCH request
-    const response = await fetch(`http://130.216.239.118:5000/client/${clientId}`, {
+    const response = await fetch(`http://130.216.238.51:5000/client/${clientId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({

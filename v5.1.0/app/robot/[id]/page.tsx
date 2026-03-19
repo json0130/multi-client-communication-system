@@ -100,7 +100,7 @@ export default function RobotDetailPage() {
         .filter(([_, isEnabled]) => isEnabled)
         .map(([moduleName]) => moduleName)
 
-      const response = await fetch(`/api/client/${clientId}`, {
+      const response = await fetch(`/api/client/${clientId}/save_all`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -111,7 +111,7 @@ export default function RobotDetailPage() {
       })
 
       if (!response.ok) {
-        throw new Error("Failed to save changes") 
+        throw new Error("Failed to save changes")
       }
 
       setSaveMessage("All changes saved successfully!")
@@ -225,15 +225,13 @@ export default function RobotDetailPage() {
                       <button
                         onClick={() => handleModuleToggle(module)}
                         disabled={!isOnline}
-                        className={`relative w-12 h-7 rounded-full transition-colors ${
-                          moduleStates[module] ? "bg-primary" : "bg-muted"
-                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                        className={`relative w-12 h-7 rounded-full transition-colors ${moduleStates[module] ? "bg-primary" : "bg-muted"
+                          } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                         aria-label={`Toggle ${module}`}
                       >
                         <div
-                          className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${
-                            moduleStates[module] ? "translate-x-6" : "translate-x-1"
-                          }`}
+                          className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-transform ${moduleStates[module] ? "translate-x-6" : "translate-x-1"
+                            }`}
                         />
                       </button>
                     </div>
@@ -262,11 +260,10 @@ export default function RobotDetailPage() {
                       key={role}
                       onClick={() => handleRoleChange(role)}
                       disabled={!isOnline}
-                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${
-                        selectedRole === role
+                      className={`p-3 rounded-lg text-sm font-medium transition-all border ${selectedRole === role
                           ? "bg-primary text-primary-foreground border-primary"
                           : "bg-secondary text-foreground border-border hover:border-primary/50"
-                      } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
+                        } ${!isOnline ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
                     >
                       {role.replace("_", " ")}
                     </button>
@@ -313,15 +310,13 @@ export default function RobotDetailPage() {
 
             {saveMessage && (
               <Card
-                className={`mb-6 border-2 ${
-                  saveMessage.includes("successfully") ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
-                }`}
+                className={`mb-6 border-2 ${saveMessage.includes("successfully") ? "border-green-200 bg-green-50" : "border-red-200 bg-red-50"
+                  }`}
               >
                 <CardContent className="pt-4">
                   <p
-                    className={`text-sm font-medium ${
-                      saveMessage.includes("successfully") ? "text-green-700" : "text-red-700"
-                    }`}
+                    className={`text-sm font-medium ${saveMessage.includes("successfully") ? "text-green-700" : "text-red-700"
+                      }`}
                   >
                     {saveMessage}
                   </p>

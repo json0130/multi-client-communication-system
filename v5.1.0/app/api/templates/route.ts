@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-const PYTHON_SERVER_URL = "http://130.216.239.118:5000"
+const PYTHON_SERVER_URL = "http://130.216.238.51:5000"
 
 export async function GET() {
     try {

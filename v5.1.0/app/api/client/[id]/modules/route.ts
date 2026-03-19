@@ -1,9 +1,9 @@
-export async function POST(req: Request, { params }: { params: { id: string } }) {
+export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
-    const clientId = params.id
+    const { id: clientId } = await params;
     const body = await req.json()
 
-    const response = await fetch(`http://130.216.239.118:5000/client/${clientId}/modules`, {
+    const response = await fetch(`http://130.216.238.51:5000/client/${clientId}/modules`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

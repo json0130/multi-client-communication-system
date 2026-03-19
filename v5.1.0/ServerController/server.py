@@ -17,6 +17,7 @@ uid = db.create_user(name="Standalone")  # Create a default user for standalone 
 # Import modular components
 from Modules.emotion_processor import EmotionProcessor
 from Modules.gpt_client import GPTClient
+from Modules.openrouter_client import OpenRouterClient
 from Modules.web_interface import WebInterface
 from Modules.speech_processor import SpeechProcessor
 from Modules.rag_module import RagModule
@@ -151,20 +152,21 @@ class RobotServer:
             
             # Initialize GPT Module
             if 'gpt' in self.enabled_modules:
-                print(f"  🤖 Initializing GPT client...")
+                print(f"  🤖 Initializing OpenRouter client (Temporary Fallback)...")
                 try:
-                    self.gpt_client = GPTClient()
+                    # Switch this back to GPTClient() when OpenAI limits are restored
+                    self.gpt_client = OpenRouterClient()
                     if self.gpt_client.setup_openai():
                         success_count += 1
-                        print(f"    ✅ GPT client initialized")
+                        print(f"    ✅ OpenRouter client initialized")
                     else:
-                        print(f"    ❌ GPT client initialization failed")
+                        print(f"    ❌ OpenRouter client initialization failed")
                         
                 except Exception as e:
-                    print(f"    ❌ GPT initialization error: {e}")
+                    print(f"    ❌ OpenRouter initialization error: {e}")
             else:
                 # Create mock GPT client for compatibility
-                self.gpt_client = GPTClient()
+                self.gpt_client = OpenRouterClient()
                 print(f"  🤖 GPT module disabled")
                 
             # Initialize RAG Module
@@ -325,8 +327,12 @@ class RobotServer:
         else:
             final_prompt = self._get_delegation_prompt(message)
             
+        # Calculate temperature derived from openness (0.0=0.2, 0.5=0.7, 1.0=1.2)
+        openness_score = self.ocean_traits.get('openness', 0.5) if self.ocean_traits else 0.5
+        calculated_temperature = max(0.1, min(1.5, 0.2 + (openness_score * 1.0)))
+            
         # 2. Both modes use the same flexible GPT call
-        response_text = self.gpt_client.ask_with_dynamic_prompt(final_prompt)
+        response_text = self.gpt_client.ask_with_dynamic_prompt(final_prompt, temperature=calculated_temperature)
             
         # 3. Log the interaction to the database and update RAG
         if self.config.get("database") and self.user_id is not None:
