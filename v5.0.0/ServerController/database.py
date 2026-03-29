@@ -10,7 +10,7 @@ class Database:
         
         supabase_url = os.getenv('SUPABASE_URL')
         supabase_key = os.getenv('SUPABASE_KEY')
-        
+
         if not supabase_url or not supabase_key:
             raise ValueError("SUPABASE_URL and SUPABASE_KEY must be set in .env file")
             
@@ -153,3 +153,21 @@ class Database:
             .execute()
         )
         return [row["message"] for row in resp.data or [] if row.get("message")]
+    
+    def get_active_robots(self) -> list:
+        """
+        Fetch all active robots and their roles from the Supabase table.
+        Replace 'robots' with your actual table name if it's different!
+        """
+        try:
+            resp = (
+                self.client.supabase
+                .table("robots")  # <--- Change this if your table name is different
+                .select("client_id, role, status")
+                .eq("status", "active") # Only get online/active robots
+                .execute()
+            )
+            return resp.data or []
+        except Exception as e:
+            print(f"❌ Failed to fetch active robots from DB: {e}")
+            return []

@@ -1,2 +1,16 @@
 *.env
 *.pth
+
+# Python cache
+__pycache__/
+*.pyc
+
+# RAG / FAISS indexes
+v5.0.0/ServerController/rag_indexes/
+
+# Environment
+venv/
+.env
+
+# OS
+.DS_Store

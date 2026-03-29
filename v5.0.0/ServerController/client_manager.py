@@ -47,44 +47,52 @@ class ClientManager:
     
     def process_client_init(self, client_init_data: Dict[str, Any]) -> tuple[bool, str, Optional[ClientInfo]]:
         """
-        Process client_init.json data and register client
-        
-        Expected format:
-        {
-            "client_id": "optional_custom_id",
-            "robot_name": "HomeAssistant_Robot", 
-            "modules": ["gpt", "emotion", "speech"],
-            "config": {"custom_param": "value"}
-        }
-        
-        Returns: (success, message, client_info)
+        Process client_init.json data and register client.
+        STANDARDIZED METHOD: WebSockets ONLY update 'is_active'. 
+        Tags and Roles must be configured via the HTTP /register_client endpoint.
         """
         try:
-            # Extract and validate required fields
             robot_name = client_init_data.get('robot_name')
             modules = client_init_data.get('modules', [])
             
             if not robot_name:
                 return False, "robot_name is required in client_init.json", None
-            
             if not modules:
                 return False, "modules list is required in client_init.json", None
             
-            # Generate or use provided client_id
             client_id = client_init_data.get('client_id')
             if not client_id:
                 client_id = f"{robot_name.lower().replace(' ', '_')}_{uuid.uuid4().hex[:6]}"
             
-            # Validate modules
             modules_set = set(modules)
             if not modules_set.issubset(self.valid_modules):
                 invalid_modules = modules_set - self.valid_modules
                 return False, f"Invalid modules: {invalid_modules}. Valid options: {self.valid_modules}", None
             
-            modules_set.add('rag')  # Always include RAG module
+            modules_set.add('rag')
 
-            # Get config overrides
-            config_overrides = client_init_data.get('config', {})
+            # 🛠️ STANDARDIZED DB LOGIC: Only manage the "Active" status here.
+            if self.db and hasattr(self.db, 'client'):
+                try:
+                    # Check if the robot exists in the DB
+                    existing = self.db.client.supabase.table('robots').select('client_id').eq('client_id', client_id).execute()
+                    
+                    if existing.data and len(existing.data) > 0:
+                        # Robot exists: Just turn it "ON"
+                        self.db.client.supabase.table('robots').update({'is_active': True}).eq('client_id', client_id).execute()
+                        print(f"🔌 {client_id} connected. Marked as active in DB.")
+                    else:
+                        # Robot doesn't exist yet: Create a basic skeleton so the DB doesn't crash
+                        print(f"⚠️ {client_id} connected but wasn't registered via HTTP. Creating skeleton DB entry.")
+                        self.db.client.supabase.table('robots').insert({
+                            'client_id': client_id,
+                            'robot_name': robot_name,
+                            'is_active': True,
+                            'robot_role': 'You are a helpful assistant.', # Fallback
+                            'allowed_tags': ['[DEFAULT]']                 # Fallback
+                        }).execute()
+                except Exception as db_e:
+                    print(f"⚠️ WebSocket DB Save Warning: {db_e}")
             
             # Ensure user exists first
             if client_id not in self.id_map:
@@ -98,18 +106,16 @@ class ClientManager:
                 client_id=client_id,
                 robot_name=robot_name,
                 modules=modules_set,
-                config_overrides=config_overrides,
+                config_overrides=client_init_data.get('config', {}),
                 registration_time=time.time(),
                 last_activity=time.time(),
                 user_id=user_id
             )
             
-            # Register the client
             with self.manager_lock:
                 self.client_infos[client_id] = client_info
 
             print(f"📝 Registered client {client_info.get_display_name()} with modules: {list(modules_set)}")
-            
             return True, f"Client {client_info.get_display_name()} registered successfully", client_info
             
         except Exception as e:
@@ -150,55 +156,54 @@ class ClientManager:
     def _create_server_instance(self, client_info: ClientInfo, robot_registry: Dict) -> Optional[RobotServer]:
         """Create a new RobotServer instance for a client"""
         try:
-
-            robot_role = 'You are a helpful robot.'  # default fallback
+            robot_role = client_info.config_overrides.get('robot_role', 'You are a helpful robot.')  
+            allowed_tags = client_info.config_overrides.get('allowed_tags', ['[DEFAULT]'])
         
             try:
-                # Correct path: self.db.client.supabase.table()
-                robot_data = self.db.client.supabase.table('robots').select('robot_role').eq('client_id', client_info.client_id).execute()
+                robot_data = self.db.client.supabase.table('robots').select('robot_role, allowed_tags').eq('client_id', client_info.client_id).execute()
                 
                 if robot_data.data and len(robot_data.data) > 0:
-                    robot_role = robot_data.data[0].get('robot_role', robot_role)
+                    db_role = robot_data.data[0].get('robot_role')
+                    db_tags = robot_data.data[0].get('allowed_tags')
+                    
+                    if db_role: robot_role = db_role
+                    if db_tags and isinstance(db_tags, list): allowed_tags = db_tags
+                    
                     print(f"🔍 DEBUG: Loaded robot_role for {client_info.client_id}: {robot_role[:100]}...")
+                    print(f"🔍 DEBUG: Loaded allowed_tags for {client_info.client_id}: {allowed_tags}")
             except Exception as e:
-                print(f"⚠️ Could not fetch robot_role from DB for {client_info.client_id}: {e}")
-                print(f"   Using default role instead")
+                print(f"⚠️ Could not fetch robot_role/tags from DB for {client_info.client_id}: {e}")
+            
+            # 🛠️ THE FIX: Remove role and tags from overrides so they don't crush the Database values!
+            safe_overrides = {k: v for k, v in client_info.config_overrides.items() if k not in ['robot_role', 'allowed_tags']}
             
             # Create custom configuration for this client
             server_config = {
-                # 🚀 SPEED IMPROVEMENTS - Emotion Processing
-            'emotion_processing_interval': 0.2,    # Changed from 0.1 - process every 200ms instead of 100ms
-            'confidence_threshold': 25.0,          # Changed from 30.0 - lower threshold for faster processing
-            'emotion_change_threshold': 20.0,      # Changed from 15.0 - less frequent updates
-            'emotion_window_size': 3,              # Changed from 5 - smaller window for faster processing
-            
-            # 🚀 SPEED IMPROVEMENTS - Video Streaming for Monitors
-            'stream_fps': 6,                       # Changed from 30 - much lower FPS for monitors
-            'monitor_quality': 50,                 # NEW - lower JPEG quality for faster encoding
-            'monitor_resolution': (320, 240),      # NEW - smaller resolution for much faster streaming
-            'frame_skip_ratio': 3,                 # NEW - skip 2 out of every 3 frames for monitors
-            'frame_cache_duration': 0.15,         # NEW - cache frames for 150ms to avoid re-encoding
-            
-            # 🚀 SPEED IMPROVEMENTS - WebSocket Settings
-            'broadcast_throttle': 0.2,            # NEW - limit broadcasts to 5 per second
-            'emotion_update_threshold': 0.1,      # Changed from 0.05 - less frequent emotion updates
-            
-            # Original settings (kept the same)
-            'whisper_model_size': 'base',
-            'whisper_device': 'auto', 
-            'whisper_compute_type': 'float16',
-            'max_audio_length': 30,
-            'sample_rate': 16000,
-            
-            "database": self.db,     # pass Database instance
-            "user_id": client_info.user_id,  # stored this earlier
+                'emotion_processing_interval': 0.2,    
+                'confidence_threshold': 25.0,          
+                'emotion_change_threshold': 20.0,      
+                'emotion_window_size': 3,              
+                'stream_fps': 6,                       
+                'monitor_quality': 50,                 
+                'monitor_resolution': (320, 240),      
+                'frame_skip_ratio': 3,                 
+                'frame_cache_duration': 0.15,         
+                'broadcast_throttle': 0.2,            
+                'emotion_update_threshold': 0.1,      
+                'whisper_model_size': 'base',
+                'whisper_device': 'auto', 
+                'whisper_compute_type': 'float16',
+                'max_audio_length': 30,
+                'sample_rate': 16000,
+                "database": self.db,     
+                "user_id": client_info.user_id,  
 
-            "robot_role": robot_role,
+                "robot_role": robot_role,      # <--- DB truth
+                "allowed_tags": allowed_tags,  # <--- DB truth
 
-                **client_info.config_overrides  # Apply client-specific overrides
+                **safe_overrides  # <--- No longer overwriting our DB values!
             }
             
-            # Create server instance with client-specific modules
             server = RobotServer.create_for_client(
                 client_id=client_info.client_id,
                 enabled_modules=client_info.modules,
@@ -206,9 +211,7 @@ class ClientManager:
                 robot_registry=self.robot_registry
             )
             
-            # Store robot name in server for logging
             server.robot_name = client_info.robot_name
-            
             return server
                 
         except Exception as e:

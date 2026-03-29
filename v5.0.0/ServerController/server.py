@@ -17,6 +17,7 @@ uid = db.create_user(name="Standalone")  # Create a default user for standalone 
 # Import modular components
 from Modules.emotion_processor import EmotionProcessor
 from Modules.gpt_client import GPTClient
+from Modules.llm_processor import OllamaClient
 from Modules.web_interface import WebInterface
 from Modules.speech_processor import SpeechProcessor
 from Modules.rag_module import RagModule
@@ -76,6 +77,7 @@ class RobotServer:
         # ✅ ADD THIS DEBUG LINE:
         print(f"🔍 DEBUG [{client_id}]: config keys = {list(config.keys())}")
         print(f"🔍 DEBUG [{client_id}]: robot_role = {config.get('robot_role', 'NOT FOUND')}")
+        print(f"🔍 DEBUG [{client_id}]: initial allowed_tags in config = {config.get('allowed_tags', 'NOT FOUND')}")
         
         print(f"🎯 Created server instance for client '{self.client_id}' with modules: {list(self.enabled_modules)}")
         print(f"🚀 Performance settings: {self.monitor_resolution} @ {self.monitor_quality}% quality, skip ratio: {self.frame_skip_ratio}")
@@ -151,8 +153,8 @@ class RobotServer:
             if 'gpt' in self.enabled_modules:
                 print(f"  🤖 Initializing GPT client...")
                 try:
-                    self.gpt_client = GPTClient()
-                    if self.gpt_client.setup_openai():
+                    self.gpt_client = OllamaClient(model_name="qwen2.5:7b")
+                    if self.gpt_client.setup_client():
                         success_count += 1
                         print(f"    ✅ GPT client initialized")
                     else:
@@ -162,7 +164,7 @@ class RobotServer:
                     print(f"    ❌ GPT initialization error: {e}")
             else:
                 # Create mock GPT client for compatibility
-                self.gpt_client = GPTClient()
+                self.gpt_client = OllamaClient(model_name="qwen2.5:3b")
                 print(f"  🤖 GPT module disabled")
                 
             # Initialize RAG Module
@@ -241,6 +243,13 @@ class RobotServer:
             
             return self.components_initialized
     
+    def _prepare_monitor_frame(self, frame):
+        """Helper for monitor frame resizing (fallback if not defined elsewhere)"""
+        import cv2
+        if frame is None:
+            return None
+        return cv2.resize(frame, self.monitor_resolution)
+
     def process_image_frame(self, frame_data: Dict[str, Any]) -> Dict[str, Any]:
         """
         Process image frame for emotion/facial recognition and update individual monitoring
@@ -311,10 +320,25 @@ class RobotServer:
             print(f"❌ Image processing error for '{self.client_id}': {e}")
             raise RuntimeError(f"Image processing failed: {e}")
 
+    def _get_allowed_tags_info(self, config_tags: list) -> tuple[str, str]:
+        """Helper to cleanly format the allowed tags from the config."""
+        # print(f"🔍 DEBUG [_get_allowed_tags_info]: Received config_tags = {config_tags}")
+        if config_tags and isinstance(config_tags, list) and len(config_tags) > 0:
+            allowed_list = ", ".join(config_tags)
+            safe_example = config_tags[0]
+            # print(f"🔍 DEBUG [_get_allowed_tags_info]: Returning list = '{allowed_list}', example = '{safe_example}'")
+            return allowed_list, safe_example
+        
+        print("⚠️ DEBUG [_get_allowed_tags_info]: config_tags empty/invalid, falling back to [DEFAULT]")
+        return "[DEFAULT]", "[DEFAULT]"
+
     def process_chat_message(self, message: str, is_delegated_command: bool = False) -> Dict[str, Any]:
         """
         Processes a chat message. Decides whether to use delegation or execution logic.
         """
+
+        self._refresh_config_from_db()
+
         print(f"🧠 Robot '{self.client_id}' processing message. Delegated: {is_delegated_command}")
 
         # 1. Get the appropriate prompt from a helper method
@@ -325,9 +349,9 @@ class RobotServer:
             
         # 2. Both modes use the same flexible GPT call
         response_text = self.gpt_client.ask_with_dynamic_prompt(final_prompt)
-            
+        
         # 3. Log the interaction to the database and update RAG
-        if self.config.get("database") and self.user_id is not None:
+        if self.config.get("database") and getattr(self, 'user_id', None) is not None:
             try:
                 self.config["database"].insert_chat_log(self.user_id, message, response_text)
                 if self.rag:
@@ -337,6 +361,7 @@ class RobotServer:
 
         # 4. Process and return the final result
         bot_emotion = self.gpt_client.extract_emotion_tag(response_text)
+        print(f"🔍 DEBUG [process_chat_message] EXTRACTED TAG: '{bot_emotion}'")
             
         result = {
             'response': response_text,
@@ -347,93 +372,155 @@ class RobotServer:
             'client_id': self.client_id
         }
             
-        print(f"🤖 GPT response for '{self.client_id}': {response_text}")
+        print(f"🤖 GPT response for '{self.client_id}' mapped to final output.")
         return result
+
 
     def _get_delegation_prompt(self, user_message: str) -> str:
         """Constructs the system prompt for DELEGATION MODE."""
         my_role = self.config.get('robot_role', 'You are a helpful robot.')
+        my_tags_list = self.config.get('allowed_tags', ['[DEFAULT]'])
+        
+        allowed_tags, example_tag = self._get_allowed_tags_info(my_tags_list)
+        print (f'{allowed_tags}')
+
+        active_robots = self._get_active_robots_info()
+        if not active_robots or active_robots.strip() == "":
+            active_robots = "None. You are currently the only active robot on the network."
+            
+        print(f"🤖 Active Robots injected into prompt: \n{active_robots}")
+
 
         rag_context = ""
         if self.rag:
             try:
                 context_texts = self.rag.search(user_message, top_k=5)
                 if context_texts:
-                    print(f"🔍 RAG: Found {len(context_texts)} relevant messages")
-                    print(f"🔍 RAG: Retrieved context:")
-                    for i, text in enumerate(context_texts, 1):
-                        print(f"   {i}. '{text}'")
-                    
                     rag_context += "The user has previously told you:\n"
                     rag_context += "\n".join(f'- "{text}"' for text in context_texts)
-                    rag_context += "\n\n Try refer to this information when answering their questions."
-                    
-                    print(f"🔍 RAG: Injected context into prompt")
-                else:
-                    print(f"🔍 RAG: No context found")
             except Exception as e:
-                print(f"⚠️ RAG search failed: {e}")
+                pass
         
-        network_robots_overview = []
-        try:
-            # Fetch all robots from Supabase
-            robots_data = self.config['database'].client.supabase.table('robots').select('client_id, robot_name, robot_role').execute()
-            
-            if robots_data.data:
-                for robot in robots_data.data:
-                    # Don't include yourself in the team list
-                    if robot['client_id'] != self.client_id:
-                        network_robots_overview.append({
-                            "robot_id": robot['client_id'],
-                            "robot_name": robot['robot_name'],
-                            "role_description": robot['robot_role']
-                        })
-                
-                print(f"🔍 DEBUG: Loaded {len(network_robots_overview)} teammates from database")
-            else:
-                print(f"⚠️ No other robots found in database")
-                
-        except Exception as e:
-            print(f"⚠️ Failed to fetch robot registry from DB: {e}")
-            # Fallback to empty list if DB fetch fails
-            network_robots_overview = []
+        return f"""System: You are {self.client_id}. Your role is: '{my_role}'.
 
-        formatted_robot_list = json.dumps(network_robots_overview, indent=2)
+*** MANDATORY FORMATTING ***
+1.THE VERY FIRST CHARACTER of your response MUST be an open bracket '['. Never start with a word, greeting, or space.\n"
+2. CRITICAL: You may ONLY use EXACTLY ONE tag from this list: {allowed_tags}. Do NOT add a second tag in the middle of your sentence!
+3. DO NOT use angle brackets.
 
-        return (
-            f"System: Your identity is Robot ID '{self.client_id}' and your role is: '{my_role}'.\n\n"
-            "**IMPORTANT: Keep ALL responses to 1-2 sentences maximum. Be concise and direct.**\n\n"
-            f"{rag_context}\n\n"
-            "You have a base capability to answer simple conversational questions.\n\n"
-            f"Here is your team: {formatted_robot_list}\n\n"
-            "Follow these decision steps:\n"
-            "1. Is the user's request a simple conversational question? If YES, answer it directly, must include gesture tag if provided.\n"
-            "2. Does this task match YOUR specific role? If YES, perform it.\n"
-            "3. If the task does NOT match your role, you MUST delegate it.\n\n"
-            "**When Delegating - You MUST Include Both:**\n"
-            "1. First: A brief explanation to the user (1 sentence)\n"
-            "2. Then: The JSON command block\n\n"
-            "Example Delegation Format:\n"
-            "I can't cook, but Pepper can help with that.\n"
-            "```json\n"
-            '{ "target_robot_id": "Pepper_001", "task": "Pepper, can you make toast for the user?" }\n'
-            "```\n\n"
-            "The task MUST start with the robot's name.\n"
-            f"\nUser: {user_message}"
-        )
+{rag_context}
+
+*** TEAMMATES & DELEGATION RULES ***
+CURRENTLY AVAILABLE ACTIVE ROBOTS:
+{active_robots}
+
+**CRITICAL RULES** HOW TO HANDLE REQUESTS (FOLLOW THESE STEPS IN ORDER):
+
+STEP 1: SELF-CHECK
+Can you fulfill the request using your own role? 
+- If YES: Just answer the user normally. Ignore steps 2 and 3.
+
+Step 2: Check TEAMMATES
+If you CANNOT fulfill the request, carefully read the "CURRENTLY AVAILABLE ACTIVE ROBOTS" list. Is there a teammate whose role matches what the user wants?
+- If NO (list is empty or no match): Politely explain that neither you nor any available teammate can do that.
+  (Example: [{example_tag}] I'm sorry, but I can't build a spaceship, and none of the active robots on my team can either.)
+- If YES (a teammate matches): Tell the user you cannot do it, state the teammate's name who can, and ASK the user if they want you to ask that teammate. DO NOT output JSON yet.
+  (Example: [{example_tag}] I cannot cook pizzas, but ChefBot can. Would you like me to ask them to make one for you?)
+
+STEP 3: EXECUTE DELEGATION (JSON FORMAT)
+ONLY if the user is explicitly saying "yes" to your previous offer to delegate:
+You MUST output your spoken confirmation AND a JSON block with the exact ID from the active list.
+(Example if user says "Yes please"):
+{example_tag} I will ask them right away!
+```json
+{{"target_robot_id": "<EXACT_ID_FROM_ACTIVE_LIST>", "task": "<Target_Name>, can you please help the user?"}}
+```
+      
+CRITICAL DELEGATION RULES:
+1. Never invent or hallucinate robot names. Must use exact names and IDs from the "CURRENTLY AVAILABLE ACTIVE ROBOTS" list.
+2. Only delegate to ONE robot at a time. Do NOT ask multiple robots for help in the same response.
+3. If the user agrees to delegation, you MUST respond with the exact JSON format shown above, filling in the target_robot_id and task appropriately. This is the ONLY way to delegate tasks.
+4. If the user does not agree to delegation, do NOT delegate and do NOT send the JSON. Instead, offer alternative help as described in Step 2.
+5. Always be polite and helpful, even if delegation is not possible.
+
+User: {user_message}
+Assistant: """
+
 
     def _get_execution_prompt(self, task_message: str) -> str:
         """Constructs the system prompt for EXECUTION MODE."""
-        # --- FIX: Fetch the role from the robot_registry for consistency ---
         robot_role = self.config.get('robot_role', 'You are a helpful robot.')
+        my_tags_list = self.config.get('allowed_tags', ['[DEFAULT]'])
+        # print(f"🔍 DEBUG [_get_execution_prompt]: Fetched allowed_tags from config = {my_tags_list}")
+        
+        # DYNAMICALLY grab this specific robot's tags!
+        allowed_tags, example_tag = self._get_allowed_tags_info(my_tags_list)
 
         return (
             f"System: Your persona is: \"{robot_role}\". You are acting as this robot.\n"
-            "**IMPORTANT: Respond in exactly 1-2 sentences. Be brief and enthusiastic.**\n\n"
+            "*** MANDATORY FORMATTING ***\n"
+            f"1. The VERY FIRST CHARACTER of your response MUST be an emotion tag from this exact list: {allowed_tags}.\n"
+            "2. Keep spoken responses to 1 or 2 sentences maximum.\n"
+            "3. CRITICAL: DO NOT use angle brackets like <WAVE>. You must ONLY use square brackets [ ] at the very beginning of the sentence.\n\n"
+            f"Correct format: {example_tag} Here is my response.\n"
+            f"Incorrect format: {example_tag.strip('[]')} Here is my response.\n"
             f"You have received a direct order from a teammate. The order is: '{task_message}'.\n"
-            "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order or refuse the task."
-            f"\nUser: {task_message}"
+            "Your only job is to respond in character with a confident confirmation that you are executing this exact order now. Do not question the order.\n\n"
+            "*** EXAMPLES OF CORRECT RESPONSES ***\n"
+            f"User: '{task_message}'\n"
+            f"Assistant: {example_tag} I am executing that command right away!\n\n"
+            f"User: '{task_message}'\n"
+            f"Assistant: "
         )
+    
+    def _refresh_config_from_db(self):
+        """Fetches the absolute latest tags and role directly from Supabase"""
+        try:
+            db = self.config.get('database')
+            if db and hasattr(db, 'client'):
+                response = db.client.supabase.table('robots').select('robot_role, allowed_tags').eq('client_id', self.client_id).execute()
+                
+                if response.data and len(response.data) > 0:
+                    latest_data = response.data[0]
+                    
+                    # Live update the RAM config!
+                    if latest_data.get('robot_role'):
+                        self.config['robot_role'] = latest_data['robot_role']
+                    if latest_data.get('allowed_tags'):
+                        self.config['allowed_tags'] = latest_data['allowed_tags']
+        except Exception as e:
+            print(f"⚠️ Failed to sync tags with DB: {e}")
+
+    def _get_active_robots_info(self) -> str:
+        """Fetches a formatted list of currently active robots and their roles from Supabase."""
+        try:
+            db = self.config.get('database')
+            if db and hasattr(db, 'client'):
+                # 1. Query DB for active robots, excluding itself
+                response = db.client.supabase.table('robots').select(
+                    'client_id, robot_name, robot_role'
+                ).eq('is_active', True).neq('client_id', self.client_id).execute()
+                
+                active_robots = response.data
+                
+                # 2. If no other robots are online
+                if not active_robots:
+                    return "No other robots are currently online."
+                
+                # 3. Format the list for the LLM
+                info_lines = []
+                for robot in active_robots:
+                    r_id = robot.get('client_id')
+                    r_name = robot.get('robot_name')
+                    r_role = robot.get('robot_role', 'No specific role.')
+                    info_lines.append(f"- ID: '{r_id}' (Name: {r_name}) | Role: {r_role}")
+                
+                return "\n".join(info_lines)
+                
+        except Exception as e:
+            print(f"⚠️ Failed to fetch active robots: {e}")
+            
+        return "No other robots are currently online."
     
     def process_speech_input(self, audio_b64: str) -> Dict[str, Any]:
         """

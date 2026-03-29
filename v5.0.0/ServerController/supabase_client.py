@@ -15,10 +15,12 @@ class SupabaseClient:
                 "client_id": config["client_id"],
                 "robot_name": config["robot_name"],
                 "robot_role": config["robot_role"],
+                'is_active': True,
+                'allowed_tags': config.get('allowed_tags', ['[DEFAULT]']),
                 "modules": config.get("modules", []),
                 "hardware_config": config.get("hardware", {}),
-                "voice_config": config.get("voice_config", {}),
-                "last_connected": datetime.now().isoformat()
+                "voice_config": config.get("voice_config", {})
+                # "last_connected": datetime.now().isoformat()
             }
 
             result = self.supabase.table("robots")\
