@@ -14,3 +14,6 @@ venv/
 
 # OS
 .DS_Store
+
+v6.0.0/ServerController/rag_indexes/
+v6.0.0/tools/
