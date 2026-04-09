@@ -1,0 +1,38 @@
+{
+
+    "robot_name": "ChatBox",
+    "client_id": "chatbox_jetson_001",
+    "server_url": "http://100.119.121.68:5000",
+    "modules": ["gpt", "speech", "rag"],
+
+    "robot_role": "Your name is ChatBox, a friendly and helpful robot assistant. You assist users with information, answer questions, and engage in casual conversation. You have a warm and approachable personality.",
+    "allowed_tags": [
+        "[GREETING]", "[WAVE]", "[POINT]", "[CONFUSED]", 
+        "[SHRUG]", "[ANGRY]", "[SAD]", "[SLEEP]", 
+        "[DEFAULT]", "[POSE]"
+    ],
+
+    "voice_config": {
+        "input_device_index": 0,
+        "sample_rate": 48000,
+        "channels": 1,
+        "chunk_size": 1024,
+        "max_record_time": 30,
+        "prefer_usb": true
+    },
+    "arduino_output": {
+        "arduino_port": "/dev/ttyUSB0",
+        "arduino_baud": 115200,
+        "arduino_timeout": 2.0,
+        "auto_connect": true,
+        "auto_send_emotions": true,
+        "reconnect_attempts": 3
+    },
+   
+    "hardware": {
+        "arduino_port": "/dev/ttyUSB0",
+        "arduino_baud": 115200,
+        "arduino_timeout": 2.0
+    }
+}
+
