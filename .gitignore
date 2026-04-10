@@ -9,7 +9,7 @@ __pycache__/
 v5.0.0/ServerController/rag_indexes/
 
 # Environment
-venv/
+robot/
 .env
 
 # OS
