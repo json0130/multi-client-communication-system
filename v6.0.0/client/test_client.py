@@ -102,12 +102,33 @@ class MockJay:
 
     def _on_message(self, data: dict):
         event = data.get("event")
+
         if event == "chat_response":
             response  = data.get("response", "")
             clean     = data.get("clean_text", re.sub(r"\[.*?\]", "", response).strip())
             tag       = data.get("emotion_tag", "")
             print(f"\n  Jay [{tag}]: {clean}")
             print("  You: ", end="", flush=True)
+
+        elif event == "persona_update":
+            name  = data.get("persona_name", "Unknown")
+            role  = data.get("robot_role", "")
+            voice = data.get("voice_config", {})
+            caps  = data.get("capabilities", {})
+            mods  = data.get("modules", [])
+            active_caps = [k for k, v in caps.items() if v]
+
+            print(f"\n  ── Persona update received ──")
+            print(f"  Name     : {name}")
+            print(f"  Modules  : {', '.join(mods)}")
+            print(f"  Voice    : {voice.get('gender','?')} / {voice.get('language','?')} / {voice.get('rate','?')}")
+            if active_caps:
+                print(f"  Caps     : {', '.join(active_caps)}")
+            if role:
+                print(f"  Role     : {role[:80]}{'...' if len(role) > 80 else ''}")
+            print(f"  ────────────────────────────")
+            print("  You: ", end="", flush=True)
+
         else:
             logger.debug(f"Unknown event: {event}")
 

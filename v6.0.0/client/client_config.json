@@ -1,17 +1,43 @@
 {
     "robot_name": "Jay",
-    "client_id":  "jay_001",
+    "client_id": "jay_001",
     "server_url": "http://127.0.0.1:5000",
-
-    "ws_port":    8765,
+    "ws_port": 8765,
     "ip_address": "127.0.0.1",
-
-    "modules": ["gpt"],
-
-    "robot_role": "Your name is Jay, a friendly and helpful robot assistant.",
-    "allowed_tags": ["[DEFAULT]", "[WAVE]", "[HAPPY]", "[SAD]", "[CONFUSED]"],
-
+    "modules": [
+        "gpt",
+        "speech",
+        "rag"
+    ],
+    "robot_role": "You are a friendly and helpful robot assistant. You speak warmly, answer questions clearly, and always try to make the person feel comfortable. Keep responses concise and natural.",
+    "allowed_tags": [
+        "[DEFAULT]",
+        "[WAVE]",
+        "[HAPPY]",
+        "[SAD]",
+        "[CONFUSED]",
+        "[GREETING]"
+    ],
     "features": {
         "arduino_integration": false
+    },
+    "voice_config": {
+        "rate": "+0%",
+        "pitch": "+0Hz",
+        "gender": "female",
+        "language": "en",
+        "provider": "gtts"
+    },
+    "capabilities": {
+        "navigation": false,
+        "face_recognition": false,
+        "emotion_understanding": false
+    },
+    "personality": {
+        "A": 0.9,
+        "C": 0.7,
+        "E": 0.8,
+        "N": 0.3,
+        "O": 0.6
     }
 }

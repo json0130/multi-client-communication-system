@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { getRobots, getPersonas } from './api'
 import RobotCard from './components/RobotCard'
 import PersonaCard from './components/PersonaCard'
@@ -17,6 +17,15 @@ function RobotIcon() {
   )
 }
 
+function SearchIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="6.5" cy="6.5" r="4.5"/>
+      <path d="M10.5 10.5L14 14"/>
+    </svg>
+  )
+}
+
 export default function App() {
   const [tab, setTab]           = useState('robots')
   const [robots, setRobots]     = useState([])
@@ -24,6 +33,8 @@ export default function App() {
   const [loading, setLoading]   = useState(true)
   const [showModal, setShowModal] = useState(false)
   const [lastSync, setLastSync] = useState(null)
+  const [search, setSearch]     = useState('')
+  const [filter, setFilter]     = useState('all') // all | online | offline
 
   const fetchAll = useCallback(async () => {
     try {
@@ -38,14 +49,26 @@ export default function App() {
     }
   }, [])
 
-  // Initial load
   useEffect(() => { fetchAll() }, [fetchAll])
 
-  // Auto-refresh every 5 seconds
   useEffect(() => {
     const id = setInterval(fetchAll, REFRESH_INTERVAL)
     return () => clearInterval(id)
   }, [fetchAll])
+
+  // Filtered + searched robots
+  const filteredRobots = useMemo(() => {
+    return robots.filter(r => {
+      const matchesSearch = !search ||
+        r.robot_name?.toLowerCase().includes(search.toLowerCase()) ||
+        r.client_id?.toLowerCase().includes(search.toLowerCase())
+      const matchesFilter =
+        filter === 'all' ||
+        (filter === 'online'  &&  r.ws_connected) ||
+        (filter === 'offline' && !r.ws_connected)
+      return matchesSearch && matchesFilter
+    })
+  }, [robots, search, filter])
 
   const onlineCount  = robots.filter(r => r.ws_connected).length
   const offlineCount = robots.length - onlineCount
@@ -68,16 +91,10 @@ export default function App() {
           <span className="header-title">Robot Management</span>
         </div>
         <nav className="nav-tabs">
-          <button
-            className={`nav-tab ${tab === 'robots' ? 'active' : ''}`}
-            onClick={() => setTab('robots')}
-          >
+          <button className={`nav-tab ${tab === 'robots'   ? 'active' : ''}`} onClick={() => setTab('robots')}>
             Robots {robots.length > 0 && `(${robots.length})`}
           </button>
-          <button
-            className={`nav-tab ${tab === 'personas' ? 'active' : ''}`}
-            onClick={() => setTab('personas')}
-          >
+          <button className={`nav-tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
             Personas {personas.length > 0 && `(${personas.length})`}
           </button>
         </nav>
@@ -86,21 +103,58 @@ export default function App() {
             <span />
             Auto-refresh 5s
           </div>
+          <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={fetchAll}>
+            Refresh
+          </button>
         </div>
       </header>
 
       {/* Main */}
       <main className="main">
-        {/* Robots tab */}
+
+        {/* ── Robots tab ── */}
         {tab === 'robots' && (
           <>
             <div className="page-header">
               <div>
                 <div className="page-title">Connected robots</div>
                 <div className="page-meta">
-                  {onlineCount} online · {offlineCount} offline
+                  <span style={{ color: 'var(--online)' }}>{onlineCount} online</span>
+                  {' · '}
+                  {offlineCount} offline
                   {lastSync && ` · synced ${lastSync.toLocaleTimeString()}`}
                 </div>
+              </div>
+            </div>
+
+            {/* Search + filter bar */}
+            <div style={{ display: 'flex', gap: 10, marginBottom: 20 }}>
+              <div style={{ position: 'relative', flex: 1 }}>
+                <span style={{
+                  position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)',
+                  color: 'var(--muted)', display: 'flex',
+                }}>
+                  <SearchIcon />
+                </span>
+                <input
+                  className="form-input"
+                  style={{ paddingLeft: 32 }}
+                  placeholder="Search by name or ID..."
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                />
+              </div>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {['all', 'online', 'offline'].map(f => (
+                  <button
+                    key={f}
+                    className={`nav-tab ${filter === f ? 'active' : ''}`}
+                    onClick={() => setFilter(f)}
+                    style={{ padding: '6px 12px' }}
+                  >
+                    {f.charAt(0).toUpperCase() + f.slice(1)}
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -110,16 +164,16 @@ export default function App() {
                   <div className="loading-spinner" />
                   <p>Loading robots...</p>
                 </div>
-              ) : robots.length === 0 ? (
+              ) : filteredRobots.length === 0 ? (
                 <div className="empty-state">
                   <div className="empty-icon">◻</div>
-                  <p>No robots registered yet.</p>
-                  <p style={{ marginTop: 8, fontSize: 11 }}>
-                    Register a robot via POST /robots/register
-                  </p>
+                  <p>{search || filter !== 'all' ? 'No robots match your filter.' : 'No robots registered yet.'}</p>
+                  {!search && filter === 'all' && (
+                    <p style={{ marginTop: 8, fontSize: 11 }}>Register a robot via POST /robots/register</p>
+                  )}
                 </div>
               ) : (
-                robots.map(r => (
+                filteredRobots.map(r => (
                   <RobotCard
                     key={r.client_id}
                     robot={r}
@@ -130,21 +184,28 @@ export default function App() {
               )}
             </div>
 
-            <div className="refresh-bar">
+            <div className="refresh-bar" style={{ marginTop: 24 }}>
               <div className="refresh-bar-inner" key={lastSync?.getTime()} />
             </div>
           </>
         )}
 
-        {/* Personas tab */}
+        {/* ── Personas tab ── */}
         {tab === 'personas' && (
           <>
             <div className="page-header">
               <div>
                 <div className="page-title">Persona library</div>
-                <div className="page-meta">{personas.length} persona{personas.length !== 1 ? 's' : ''}</div>
+                <div className="page-meta">
+                  {personas.length} persona{personas.length !== 1 ? 's' : ''}
+                  {' · '}OCEAN personality model
+                </div>
               </div>
-              <button className="btn btn-primary" style={{ flex: 'none', width: 'auto', padding: '9px 18px' }} onClick={() => setShowModal(true)}>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 'none', width: 'auto', padding: '9px 18px' }}
+                onClick={() => setShowModal(true)}
+              >
                 + New persona
               </button>
             </div>
@@ -162,11 +223,7 @@ export default function App() {
                 </div>
               ) : (
                 personas.map(p => (
-                  <PersonaCard
-                    key={p.id}
-                    persona={p}
-                    onDeleted={handlePersonaDeleted}
-                  />
+                  <PersonaCard key={p.id} persona={p} onDeleted={handlePersonaDeleted} />
                 ))
               )}
             </div>
@@ -175,12 +232,8 @@ export default function App() {
       </main>
 
       {showModal && (
-        <PersonaModal
-          onClose={() => setShowModal(false)}
-          onCreated={handlePersonaCreated}
-        />
+        <PersonaModal onClose={() => setShowModal(false)} onCreated={handlePersonaCreated} />
       )}
-
       <ToastContainer />
     </div>
   )

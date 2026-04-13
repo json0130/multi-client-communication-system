@@ -1,7 +1,8 @@
-# robot.py — ChatBox robot client (non-Docker, v6)
+# robot.py — ChatBox robot client (v6, Phase 3)
 import sys
 import os
 import re
+import json
 import logging
 from typing import Optional
 import serial.tools.list_ports
@@ -22,17 +23,18 @@ logger = logging.getLogger(__name__)
 
 class SimpleConcurrentClient(BasicClient):
     """
-    ChatBox robot client.
-    Unchanged from v5 except _register_custom_event_handlers (one line).
+    ChatBox robot client (v6).
+    Phase 3 addition: handles persona_update event from server
+    → updates TTS voice config + Arduino emotion map at runtime.
     """
 
     def __init__(self, config_file: str = "client_config.json"):
         super().__init__(config_file)
 
         self.emotion_map = {
-            "GREETING": "greeting", "WAVE": "wave",     "POINT": "point",
-            "CONFUSED": "confused", "SHRUG": "shrug",   "ANGRY": "angry",
-            "SAD": "sad",           "SLEEP": "sleep",   "DEFAULT": "default",
+            "GREETING": "greeting", "WAVE": "wave",   "POINT": "point",
+            "CONFUSED": "confused", "SHRUG": "shrug", "ANGRY": "angry",
+            "SAD": "sad",           "SLEEP": "sleep", "DEFAULT": "default",
             "POSE": "pose",         "IDLE": "idle",
         }
 
@@ -43,63 +45,92 @@ class SimpleConcurrentClient(BasicClient):
 
     def on_emotion_detected(self, emotion_tag: str):
         """Overrides BasicClient hook — sends gesture command to Arduino."""
-        valid_tags = list(self.emotion_map.keys())
+        valid = list(self.emotion_map.keys())
         clean = emotion_tag.strip().upper()
-        if clean not in valid_tags:
-            logger.warning(f"Invalid tag '{clean}' from LLM — defaulting to DEFAULT")
+        if clean not in valid:
+            logger.warning(f"[Arduino] Unknown tag '{clean}' — using DEFAULT")
             clean = "DEFAULT"
         command = self.emotion_map[clean]
         logger.info(f"[Arduino] Sending: {command}")
         if self.arduino_module:
             self.arduino_module.send_command(command)
 
-    # ── Event handlers ────────────────────────────────────────────────────────
+    # ── WebSocket event handlers ──────────────────────────────────────────────
 
     def _register_custom_event_handlers(self):
-        """
-        Register WebSocket event handlers.
-
-        ── ONLY CHANGE FROM v5 ──
-        OLD: self.server_connection.sio.on('chat_response', self.on_chat_response)
-        NEW: self.server_connection.register_handler('chat_response', self.on_chat_response)
-        """
         self.server_connection.register_handler("chat_response",   self.on_chat_response)
         self.server_connection.register_handler("speech_response", self.on_speech_response)
+        self.server_connection.register_handler("persona_update",  self.on_persona_update)
         logger.info("[Client] Event handlers registered")
 
     def on_chat_response(self, data: dict):
-        """Handle chat_response pushed by the central server."""
         response_text = data.get("response", "")
         if not response_text:
             return
 
-        # Extract emotion tag → Arduino
         match = re.search(r"\[(.*?)\]", response_text)
         if match:
             self.on_emotion_detected(match.group(1))
 
-        # Clean text for TTS
         clean_text = re.sub(r"\[.*?\]", "", response_text).strip()
 
-        # Console shows full text (tag visible)
         if "console_output" in self.output_modules:
             self.output_modules["console_output"].process_output(response_text)
 
-        # TTS gets clean text only
         if "edge_tts_output" in self.output_modules:
             self.output_modules["edge_tts_output"].process_output(clean_text)
         elif "pyttsx_tts" in self.output_modules:
             self.output_modules["pyttsx_tts"].process_output(clean_text)
 
     def on_speech_response(self, data: dict):
-        """Handle speech_response (STT result + optional LLM response)."""
         transcription = data.get("transcription", "")
         if transcription:
             logger.info(f"[STT] '{transcription}'")
         if data.get("response"):
             self.on_chat_response(data)
 
-    # ── Module setup (identical to v5) ───────────────────────────────────────
+    def on_persona_update(self, data: dict):
+        """
+        Called when the server assigns a new persona to this robot.
+        Updates:
+          1. TTS voice config (language, gender, rate) — live, no restart
+          2. Prints confirmation to console
+        
+        In-memory config + disk write is handled by client.py _apply_persona_update.
+        This method handles the hardware-level side effects.
+        """
+        persona_name = data.get("persona_name", "Unknown")
+        logger.info(f"[Persona] ── Switching to: '{persona_name}' ──")
+
+        # 1. Update TTS voice if voice_config provided
+        voice_config = data.get("voice_config", {})
+        if voice_config:
+            tts = self.output_modules.get("edge_tts_output")
+            if tts and hasattr(tts, "update_voice_config"):
+                tts.update_voice_config(voice_config)
+                logger.info(f"[Persona] TTS voice updated: {voice_config}")
+            else:
+                logger.warning("[Persona] Edge TTS not found — voice config not applied")
+
+        # 2. Log capabilities for awareness
+        capabilities = data.get("capabilities", {})
+        if capabilities:
+            active = [k for k, v in capabilities.items() if v]
+            if active:
+                logger.info(f"[Persona] Active capabilities: {', '.join(active)}")
+
+        # 3. Announce the switch via TTS
+        announcement = f"Persona updated to {persona_name}."
+        tts = self.output_modules.get("edge_tts_output")
+        if tts:
+            tts.process_output(announcement)
+
+        if "console_output" in self.output_modules:
+            self.output_modules["console_output"].process_output(
+                f"[PERSONA] Switched to: {persona_name}"
+            )
+
+    # ── Module setup ──────────────────────────────────────────────────────────
 
     def setup_all_modules(self):
 
@@ -167,7 +198,7 @@ class SimpleConcurrentClient(BasicClient):
             else:
                 logger.warning("[Setup] Arduino failed to register")
 
-    # ── Arduino port detection (identical to v5) ──────────────────────────────
+    # ── Arduino helpers ───────────────────────────────────────────────────────
 
     def _detect_arduino_port(self) -> Optional[str]:
         known = ["CP210x", "CH340", "USB Serial", "Arduino"]
@@ -178,14 +209,9 @@ class SimpleConcurrentClient(BasicClient):
                     return port.device
         return None
 
-    def _on_arduino_connected(self):
-        logger.info("[Arduino] Connected")
-
-    def _on_arduino_disconnected(self):
-        logger.warning("[Arduino] Disconnected")
-
-    def _on_arduino_error(self, msg: str):
-        logger.error(f"[Arduino] Error: {msg}")
+    def _on_arduino_connected(self):    logger.info("[Arduino] Connected")
+    def _on_arduino_disconnected(self): logger.warning("[Arduino] Disconnected")
+    def _on_arduino_error(self, msg):   logger.error(f"[Arduino] Error: {msg}")
 
     # ── Startup info ──────────────────────────────────────────────────────────
 
@@ -201,13 +227,11 @@ class SimpleConcurrentClient(BasicClient):
         print(f"  Modules  : {', '.join(self.config.get('modules', []))}")
         print()
         print("  Input modules :")
-        for n in self.input_modules:
-            print(f"    {n}")
+        for n in self.input_modules:   print(f"    {n}")
         print("  Output modules:")
-        for n in self.output_modules:
-            print(f"    {n}")
+        for n in self.output_modules:  print(f"    {n}")
         print()
-        print("  To connect from the server run:")
+        print("  To connect from the server:")
         print(f"    curl -X POST {self.config.get('server_url')}/robots/{self.config.get('client_id')}/connect")
         print("=" * 60 + "\n")
 
