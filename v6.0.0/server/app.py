@@ -30,6 +30,7 @@ from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
 from gateway.delegation_handler import DelegationHandler
 from gateway.http_gateway import create_http_gateway
+from gateway.persona_gateway import create_persona_gateway
 
 # ── Fix OpenMP duplicate lib issue on some Linux setups ───────────────────────
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -51,6 +52,10 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     # Register HTTP routes
     blueprint = create_http_gateway(registry, ws_gateway)
     app.register_blueprint(blueprint)
+
+    # Register persona routes
+    persona_blueprint = create_persona_gateway(ws_gateway)
+    app.register_blueprint(persona_blueprint)
 
     return app, ws_gateway, registry
 

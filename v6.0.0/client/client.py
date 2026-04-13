@@ -1,18 +1,21 @@
 """
-client.py
-=========
-Base client for the ChatBox robot (non-Docker, v6 architecture).
+client.py — Base Client (v6.0.0)
+=================================
+Key change from v5.x:
+  The robot no longer dials OUT to the server.
+  Instead it runs a WebSocket SERVER and waits for the central
+  server to connect to it.
 
-Key change from v5:
-  The robot NO LONGER dials out to the server.
-  It runs a WebSocket SERVER and WAITS for the central server to connect.
-
-All Input/Output module interfaces are unchanged:
+Everything the Input/Output modules touch is unchanged:
   self.client.send_to_server(type, data)
   self.client.process_server_response(data, type)
   self.client.is_speaking          (threading.Event)
   self.client.tts_started_event    (threading.Event)
   self.client.running              (bool)
+
+The only thing that changed in robot.py is one line:
+  OLD: self.server_connection.sio.on('chat_response', handler)
+  NEW: self.server_connection.register_handler('chat_response', handler)
 """
 
 import asyncio
@@ -20,21 +23,21 @@ import websockets
 import json
 import re
 import time
-import base64
 import threading
 import requests
+import base64
 import logging
 from abc import ABC, abstractmethod
 from typing import Dict, Optional, Any
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
 
 
-# ── Abstract base classes (identical to v5) ───────────────────────────────────
+# ── Abstract module base classes (unchanged from v5.x) ────────────────────────
 
 class BaseModule(ABC):
     def __init__(self, name: str, config: Dict[str, Any] = None):
@@ -66,19 +69,17 @@ class OutputModule(BaseModule):
     def process_output(self, data: Any) -> bool: ...
 
 
-# ── ServerConnection — robot listens, central server connects ─────────────────
+# ── ServerConnection — WebSocket SERVER (robot listens, server connects) ──────
 
 class ServerConnection:
     """
-    Runs a WebSocket server on ws_port.
-    The central server dials in when the operator clicks "Connect" in the web UI.
+    Runs an asyncio WebSocket server on ws_port.
+    The central server connects TO this robot when the operator
+    clicks "Connect" in the web management UI.
 
-    Public interface used by robot.py:
-        register_handler(event, callback)   ← replaces sio.on()
-        send(message_dict)                  ← send JSON to server
-        is_connected()                      ← bool
-        register_with_server()              ← HTTP POST to tell server our address
-        start_server()                      ← begin listening
+    Thread safety:
+      The asyncio loop runs in a dedicated background thread.
+      send() is safe to call from any thread.
     """
 
     def __init__(self, ws_port: int, server_url: str, client_config: Dict):
@@ -87,35 +88,33 @@ class ServerConnection:
         self.client_config = client_config
         self.client_id = client_config.get("client_id", "robot_001")
 
-        self._ws = None
-        self._loop = asyncio.new_event_loop()
-        self._connected = threading.Event()
-        self._handlers: Dict[str, callable] = {}
+        self._ws = None                          # active websocket (one server at a time)
+        self._loop = asyncio.new_event_loop()    # dedicated asyncio loop
+        self._connected = threading.Event()      # set when server is connected
+        self._handlers: Dict[str, callable] = {} # event -> callback
         self._lock = threading.Lock()
 
-    # ── Handler registration ──────────────────────────────────────────────────
+    # ── Handler registration ───────────────────────────────────────────────────
 
     def register_handler(self, event: str, callback: callable):
         """
         Register a callback for a named event pushed by the server.
+        Replaces any existing handler for that event.
 
-        Usage (in robot.py):
+        robot.py usage:
             self.server_connection.register_handler('chat_response', self.on_chat_response)
-
-        Replaces the old: self.server_connection.sio.on('chat_response', ...)
         """
         with self._lock:
             self._handlers[event] = callback
-        logger.debug(f"[WS] Handler registered for event: {event}")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start_server(self):
-        """Start WebSocket server in a background daemon thread."""
+        """Start the WebSocket server in a background daemon thread."""
         t = threading.Thread(target=self._run_loop, daemon=True, name="ws-server")
         t.start()
-        logger.info(f"[WS] Robot WebSocket server listening on 0.0.0.0:{self.ws_port}")
-        logger.info(f"[WS] Waiting for central server to connect...")
+        logger.info(f"[WS Server] Listening on 0.0.0.0:{self.ws_port}")
+        logger.info(f"[WS Server] Waiting for central server to connect...")
 
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
@@ -129,11 +128,13 @@ class ServerConnection:
             ping_interval=20,
             ping_timeout=10,
         ):
+            logger.info(f"[WS Server] Ready on port {self.ws_port}")
             await asyncio.Future()  # run forever
 
     async def _handle_connection(self, websocket):
+        """Called by asyncio when the central server connects."""
         addr = websocket.remote_address
-        logger.info(f"[WS] Central server connected from {addr[0]}:{addr[1]}")
+        logger.info(f"[WS Server] Central server connected from {addr}")
         self._ws = websocket
         self._connected.set()
 
@@ -143,40 +144,91 @@ class ServerConnection:
                     data = json.loads(raw)
                     self._dispatch(data)
                 except json.JSONDecodeError as e:
-                    logger.warning(f"[WS] Bad JSON: {e}")
+                    logger.warning(f"[WS Server] Bad JSON from server: {e}")
         except websockets.ConnectionClosed:
-            logger.warning("[WS] Central server disconnected.")
+            logger.warning("[WS Server] Central server disconnected.")
         except Exception as e:
-            logger.error(f"[WS] Connection error: {e}")
+            logger.error(f"[WS Server] Connection error: {e}")
         finally:
             self._ws = None
             self._connected.clear()
-            logger.info("[WS] Waiting for central server to reconnect...")
+            logger.info("[WS Server] Waiting for server to reconnect...")
 
     def _dispatch(self, data: dict):
-        """Route an incoming server message to the right handler."""
+        """Route an incoming server message to the registered handler."""
         event = data.get("event")
         if not event:
+            logger.debug(f"[WS Server] Message with no event: {data}")
+            return
+
+        if event == "persona_update":
+            threading.Thread(
+                target=self._apply_persona_update, args=(data,), daemon=True
+            ).start()
             return
 
         with self._lock:
             handler = self._handlers.get(event)
 
         if handler:
-            # Run in separate thread so asyncio loop is never blocked
-            threading.Thread(target=handler, args=(data,), daemon=True).start()
+            threading.Thread(
+                target=handler, args=(data,), daemon=True
+            ).start()
         else:
-            logger.debug(f"[WS] No handler for event '{event}'")
+            logger.debug(f"[WS Server] No handler registered for event '{event}'")
+
+    def _apply_persona_update(self, data: dict):
+        """
+        Handle persona_update pushed by the central server.
+        1. Updates in-memory config immediately
+        2. Writes updated client_config.json to disk
+        3. Calls any registered persona_update handler (so robot.py can update TTS)
+        """
+        import json as _json
+        persona_name = data.get("persona_name", "Unknown")
+        logger.info(f"[Persona] Applying persona: '{persona_name}'")
+
+        updatable = {
+            "robot_role": "robot_role",
+            "allowed_tags": "allowed_tags",
+            "modules": "modules",
+            "voice_config": "voice_config",
+            "capabilities": "capabilities",
+            "personality": "personality",
+        }
+        changed = {cfg_key: data[ws_key]
+                   for ws_key, cfg_key in updatable.items() if ws_key in data}
+        if not changed:
+            return
+
+        self.client_config.update(changed)
+
+        config_path = self.client_config.get("_config_file", "client_config.json")
+        try:
+            with open(config_path, "r") as f:
+                on_disk = _json.load(f)
+            on_disk.update(changed)
+            with open(config_path, "w") as f:
+                _json.dump(on_disk, f, indent=4)
+            logger.info(f"[Persona] Saved to {config_path}")
+        except Exception as e:
+            logger.error(f"[Persona] Failed to write config: {e}")
+
+        with self._lock:
+            handler = self._handlers.get("persona_update")
+        if handler:
+            handler(data)
 
     # ── Sending ───────────────────────────────────────────────────────────────
 
     def send(self, message: dict) -> bool:
         """
         Send a JSON message to the central server.
-        Thread-safe — call from any module thread.
+        Thread-safe — callable from any module thread.
+        Returns True on success.
         """
         if self._ws is None or not self._connected.is_set():
-            logger.warning("[WS] Cannot send — server not connected.")
+            logger.warning("[WS Server] Cannot send — server not connected yet.")
             return False
         try:
             future = asyncio.run_coroutine_threadsafe(
@@ -186,54 +238,62 @@ class ServerConnection:
             future.result(timeout=5)
             return True
         except Exception as e:
-            logger.error(f"[WS] Send error: {e}")
+            logger.error(f"[WS Server] Send error: {e}")
             return False
+
+    # ── Status ────────────────────────────────────────────────────────────────
 
     def is_connected(self) -> bool:
         return self._connected.is_set()
 
-    # ── Registration ──────────────────────────────────────────────────────────
+    def wait_for_server(self, timeout: float = None) -> bool:
+        """Block until the central server connects (or timeout). Returns True if connected."""
+        return self._connected.wait(timeout=timeout)
 
-    def register_with_server(self) -> bool:
+    # ── Registration with central server ─────────────────────────────────────
+
+    def register_with_server(self, ip_address: str = None) -> bool:
         """
-        HTTP POST /robots/register on the central server.
-        Tells it: "I am at this IP and port — come connect to me."
+        HTTP POST to the central server's /robots/register endpoint.
+        Tells the server: "I exist at this IP/port, come connect to me."
         """
         url = f"{self.server_url}/robots/register"
         payload = {
-            "client_id":   self.client_id,
-            "robot_name":  self.client_config.get("robot_name", "Robot"),
-            "robot_role":  self.client_config.get("robot_role", "You are a helpful robot."),
+            "client_id": self.client_id,
+            "robot_name": self.client_config.get("robot_name", "Robot"),
+            "robot_role": self.client_config.get("robot_role", "You are a helpful robot."),
             "allowed_tags": self.client_config.get("allowed_tags", ["[DEFAULT]"]),
-            "modules":     self.client_config.get("modules", ["gpt"]),
-            "ip_address":  self.client_config.get("ip_address"),
-            "ws_port":     self.ws_port,
+            "modules": self.client_config.get("modules", ["gpt"]),
+            "ip_address": ip_address or self.client_config.get("ip_address"),
+            "ws_port": self.ws_port,
         }
         try:
             resp = requests.post(url, json=payload, timeout=10)
             if resp.status_code == 200:
-                logger.info(f"[Registration] OK — {resp.json().get('message', '')}")
+                logger.info(f"[Registration] Registered with server: {resp.json().get('message', 'OK')}")
                 return True
             else:
-                logger.warning(f"[Registration] Server returned {resp.status_code}")
+                logger.warning(f"[Registration] Server returned {resp.status_code} — {resp.text}")
                 return False
         except requests.ConnectionError:
             logger.warning(
-                f"[Registration] Could not reach {self.server_url}. "
-                "Robot is still listening for connections."
+                f"[Registration] Could not reach server at {self.server_url}. "
+                "Will retry on next start. Robot is still listening for connections."
             )
             return False
         except Exception as e:
-            logger.warning(f"[Registration] Error: {e}")
+            logger.warning(f"[Registration] Unexpected error: {e}")
             return False
 
 
-# ── BasicClient ───────────────────────────────────────────────────────────────
+# ── BasicClient — identical public interface to v5.x ─────────────────────────
 
 class BasicClient:
     """
-    Main client. Manages Input/Output modules and server communication.
-    Public interface unchanged from v5 — all existing modules work as-is.
+    Main client class. Manages modules and server communication.
+
+    Public interface unchanged from v5.x so all Input/Output modules
+    work without modification.
     """
 
     def __init__(self, config_file: str = "client_config.json"):
@@ -241,41 +301,45 @@ class BasicClient:
         if not self.config:
             raise RuntimeError(f"Failed to load config from {config_file}")
 
-        ws_port    = self.config.get("ws_port", 8765)
+        ws_port = self.config.get("ws_port", 8765)
         server_url = self.config.get("server_url", "http://localhost:5000")
 
         self.server_connection = ServerConnection(ws_port, server_url, self.config)
 
-        # Default handlers — subclasses override by calling register_handler()
-        self.server_connection.register_handler("chat_response",   self._default_chat_handler)
-        self.server_connection.register_handler("speech_response", self._default_speech_handler)
-        self.server_connection.register_handler("emotion_update",  self._default_emotion_handler)
+        # Register default handlers — subclasses can override by calling
+        # self.server_connection.register_handler() with their own callbacks
+        self.server_connection.register_handler("chat_response",    self._default_chat_handler)
+        self.server_connection.register_handler("speech_response",  self._default_speech_handler)
+        self.server_connection.register_handler("emotion_update",   self._default_emotion_handler)
 
         self.input_modules:  Dict[str, InputModule]  = {}
         self.output_modules: Dict[str, OutputModule] = {}
-        self.arduino_module = None
 
         self.running = False
 
-        # Shared events used by edge_tts_output and voice_input (unchanged)
+        # Events used by edge_tts_output and voice_input (interface unchanged)
         self.is_speaking       = threading.Event()
         self.tts_started_event = threading.Event()
 
-        logger.info(f"[Client] {self.config.get('robot_name', 'Robot')}")
-        logger.info(f"         ID     : {self.config.get('client_id')}")
-        logger.info(f"         Server : {server_url}")
-        logger.info(f"         WS port: {ws_port}")
+        logger.info(f"[Client] {self.config.get('robot_name', 'Robot')} initialising")
+        logger.info(f"         ID      : {self.config.get('client_id')}")
+        logger.info(f"         Server  : {server_url}")
+        logger.info(f"         WS port : {ws_port}")
+        logger.info(f"         Modules : {', '.join(self.config.get('modules', []))}")
 
-    # ── Default event handlers ────────────────────────────────────────────────
+    # ── Default server event handlers ─────────────────────────────────────────
 
     def _default_chat_handler(self, data: dict):
+        """Called when server pushes a chat_response event."""
         self.process_server_response(data, "chat")
 
     def _default_speech_handler(self, data: dict):
+        """Called when server pushes a speech_response event."""
         self.process_server_response(data, "speech")
 
     def _default_emotion_handler(self, data: dict):
-        pass  # override in subclass if needed
+        """Called when server pushes an emotion_update event. Override if needed."""
+        pass
 
     # ── Module registration ───────────────────────────────────────────────────
 
@@ -305,65 +369,79 @@ class BasicClient:
             logger.error(f"[Modules] Output '{module.name}' error: {e}")
             return False
 
-    # ── Sending (interface unchanged from v5) ─────────────────────────────────
+    # ── Sending data to server (interface unchanged) ──────────────────────────
 
     def send_to_server(self, data_type: str, data: Any) -> Optional[dict]:
         """
-        Send data to the central server.
-        Called by Input modules exactly as before — return value is now always None
-        because responses arrive asynchronously via registered event handlers.
+        Send data to the central server over the persistent WebSocket.
 
+        Called by Input modules:
             self.client.send_to_server('chat',   message_string)
             self.client.send_to_server('speech', wav_bytes)
-            self.client.send_to_server('frame',  base64_string or dict)
+            self.client.send_to_server('frame',  base64_string_or_dict)
+
+        Returns None — responses arrive asynchronously via registered handlers.
+        Modules that called process_server_response(response) will get None
+        passed in, which returns early gracefully.
         """
         if data_type == "chat":
-            self.server_connection.send({"type": "chat", "message": data})
+            self.server_connection.send({
+                "type": "chat",
+                "message": data,
+            })
 
         elif data_type == "speech":
             audio_b64 = base64.b64encode(data).decode("utf-8")
-            self.server_connection.send({"type": "speech", "audio": audio_b64})
+            self.server_connection.send({
+                "type": "speech",
+                "audio": audio_b64,
+            })
 
         elif data_type == "frame":
-            # RealSense sends a dict with 'color' key; regular cameras send a string
+            # frame_data may be a base64 string or a dict with 'color' key (RealSense)
             if isinstance(data, dict):
                 frame_b64 = data.get("color", data.get("frame", ""))
             else:
                 frame_b64 = data
-            self.server_connection.send({"type": "image_frame", "frame": frame_b64})
+            self.server_connection.send({
+                "type": "image_frame",
+                "frame": frame_b64,
+            })
 
         else:
             logger.warning(f"[Client] Unknown data_type: {data_type}")
 
-        return None  # responses come via WS event handlers
+        # Responses come via WS event handlers, not as return values
+        return None
 
-    # ── Processing responses (interface unchanged from v5) ────────────────────
+    # ── Processing server responses (interface unchanged) ─────────────────────
 
     def process_server_response(self, response_data: Optional[dict], response_type: str = "chat"):
         """
-        Route a server response to all output modules.
-        Called by default event handlers or directly by voice_input after STT.
-        Handles None gracefully (voice_input passes the return value of send_to_server).
+        Process a response dict from the server and route to output modules.
+        Called either by Input modules (with None) or by WS event handlers (with data).
         """
         if not response_data:
             return
 
         response_text = response_data.get("response", "")
         if not response_text:
-            transcription = response_data.get("transcription", "")
+            # speech_response may only have transcription (no LLM response)
+            transcription = response_data.get("transcription")
             if transcription:
                 logger.info(f"[STT] Transcribed: '{transcription}'")
             return
 
-        logger.info(f"[Server] {response_text[:100]}")
+        logger.info(f"[Server] {response_text[:80]}{'...' if len(response_text) > 80 else ''}")
 
-        # Extract emotion tag and dispatch to hardware hook
+        # Extract and dispatch emotion tag
         match = re.search(r"\[(.*?)\]", response_text)
         if match:
             self.on_emotion_detected(match.group(1))
 
         self.tts_started_event.clear()
 
+        # Route to all output modules
         for name, module in self.output_modules.items():
             try:
                 module.process_output({
@@ -380,27 +458,39 @@ class BasicClient:
                 logger.info(f"[STT] Transcribed: '{transcription}'")
 
     def on_emotion_detected(self, emotion_tag: str):
-        """Hook — override in subclasses to drive hardware."""
+        """
+        Hook called when an emotion tag is found in a server response.
+        Override in subclasses to send commands to hardware (e.g. Arduino).
+        """
         pass
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start(self) -> bool:
+        """
+        Start the client:
+          1. Register with server via HTTP (tell it our IP + WS port)
+          2. Start the WebSocket server (listen for incoming connection)
+          3. Start all registered modules
+        """
         try:
-            # Tell server where to find us
+            # 1. Tell the server where to find us
             self.server_connection.register_with_server()
-            # Start listening for the server's incoming connection
+
+            # 2. Start WS server — server will connect when operator clicks "Connect"
             self.server_connection.start_server()
 
             self.running = True
 
+            # 3. Start input modules
             for name, module in self.input_modules.items():
                 try:
                     module.start()
-                    logger.info(f"[Modules] Started input  '{name}'")
+                    logger.info(f"[Modules] Started input '{name}'")
                 except Exception as e:
                     logger.error(f"[Modules] Error starting input '{name}': {e}")
 
+            # 4. Start output modules
             for name, module in self.output_modules.items():
                 try:
                     module.start()
@@ -409,6 +499,7 @@ class BasicClient:
                     logger.error(f"[Modules] Error starting output '{name}': {e}")
 
             return True
+
         except Exception as e:
             logger.error(f"[Client] Start error: {e}")
             return False
@@ -416,7 +507,11 @@ class BasicClient:
     def stop(self):
         logger.info("[Client] Stopping...")
         self.running = False
-        for module in list(self.input_modules.values()) + list(self.output_modules.values()):
+        all_modules = (
+            list(self.input_modules.values()) +
+            list(self.output_modules.values())
+        )
+        for module in all_modules:
             try:
                 module.stop()
             except Exception as e:
@@ -444,6 +539,7 @@ class BasicClient:
         try:
             with open(config_file, "r") as f:
                 config = json.load(f)
+            config["_config_file"] = config_file  # store path for persona updates
             logger.info(f"[Client] Config loaded from {config_file}")
             return config
         except FileNotFoundError:
