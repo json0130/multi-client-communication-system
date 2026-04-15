@@ -146,6 +146,11 @@ class WebSocketGateway:
         self._registry = registry
         self._connections: dict[str, RobotConnection] = {}
         self._lock = threading.Lock()
+        self._demo_orchestrator = None   # set via set_demo_orchestrator()
+
+    def set_demo_orchestrator(self, orchestrator):
+        """Wire up the DemoOrchestrator so ACK packets are forwarded to it."""
+        self._demo_orchestrator = orchestrator
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -278,6 +283,15 @@ class WebSocketGateway:
                         "event": "emotion_update",
                         **result,
                     })
+
+            elif msg_type == "ack":
+                # Demo step acknowledgement — forward to orchestrator
+                step_id = data.get("step_id")
+                if self._demo_orchestrator and step_id:
+                    self._demo_orchestrator.receive_ack(step_id)
+                else:
+                    print(f"[WS Gateway] ACK from {client_id}: step_id='{step_id}' "
+                          "(no orchestrator running)")
 
             else:
                 print(f"[WS Gateway] Unknown message type '{msg_type}' "

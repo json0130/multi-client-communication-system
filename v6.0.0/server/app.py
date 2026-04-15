@@ -12,8 +12,10 @@ What happens at startup:
   3. WebSocketGateway is created (connects TO robots when told to)
   4. DelegationHandler is created
   5. HTTP Blueprint is registered on the Flask app
-  6. Cleanup task starts (removes idle robot instances every 5 min)
-  7. Flask starts listening for web UI requests on SERVER_PORT (default 5000)
+  6. DemoOrchestrator is created and wired to WebSocketGateway
+  7. Demo blueprint registered (POST /demo/start, /demo/stop, etc.)
+  8. Cleanup task starts (removes idle robot instances every 5 min)
+  9. Flask starts listening for web UI requests on SERVER_PORT (default 5000)
 
 Robots are NOT connected automatically at startup.
 Use the web UI or POST /robots/<id>/connect to connect a robot.
@@ -32,6 +34,9 @@ from gateway.websocket_gateway import WebSocketGateway
 from gateway.delegation_handler import DelegationHandler
 from gateway.http_gateway import create_http_gateway
 from gateway.persona_gateway import create_persona_gateway
+from gateway.demo_gateway import create_demo_gateway
+from demo.demo_orchestrator import DemoOrchestrator
+from demo.demo_script import DEMO_STEPS
 
 # ── Fix OpenMP duplicate lib issue on some Linux setups ───────────────────────
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
@@ -43,7 +48,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     Separated from main() so tests can import create_app() directly.
     """
     # ── Core objects (order matters — registry first) ─────────────────────────
-    registry = RobotRegistry()
+    registry   = RobotRegistry()
     ws_gateway = WebSocketGateway(registry)
 
     # ── Flask app ─────────────────────────────────────────────────────────────
@@ -60,6 +65,14 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     # Register persona routes
     persona_blueprint = create_persona_gateway(ws_gateway)
     app.register_blueprint(persona_blueprint)
+
+    # ── Demo orchestrator ─────────────────────────────────────────────────────
+    orchestrator = DemoOrchestrator(ws_gateway)
+    orchestrator.load_script(DEMO_STEPS)
+    ws_gateway.set_demo_orchestrator(orchestrator)
+
+    demo_blueprint = create_demo_gateway(orchestrator)
+    app.register_blueprint(demo_blueprint)
 
     return app, ws_gateway, registry
 
@@ -98,6 +111,16 @@ def main():
     print(f"    POST /robots/<id>/disconnect    close WS to robot")
     print(f"    GET  /robots/<id>/health        module health")
     print(f"    POST /robots/<id>/chat          send a chat message")
+    print()
+    print("  Demo:")
+    print(f"    POST /demo/start                start demo from step 1")
+    print(f"    POST /demo/stop                 stop and reset")
+    print(f"    POST /demo/pause                pause at current step")
+    print(f"    POST /demo/resume               resume")
+    print(f"    POST /demo/next                 skip to next step (recovery)")
+    print(f"    GET  /demo/status               current state + step info")
+    print()
+    print(f"  Demo script: {len(DEMO_STEPS)} steps loaded")
     print()
     print("  Waiting for requests... (Ctrl+C to stop)")
     print("=" * 55)

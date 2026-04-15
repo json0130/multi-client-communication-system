@@ -66,12 +66,30 @@ class EdgeTTSOutputModule(OutputModule):
             text = data.get('text', '') if isinstance(data, dict) else str(data)
             text = self._prepare_text(text)
             if text and len(text.strip()) > 2:
-                self.tts_queue.put(text)
+                self.tts_queue.put((text, None))
                 return True
             return False
         except Exception as e:
             logger.error(f"[TTS] Processing error: {e}")
             return False
+
+    def speak_with_callback(self, text: str, callback=None) -> bool:
+        """
+        Queue text for TTS and fire callback() after playback finishes.
+        Used by BasicClient._on_demo_step() to send ACK after speech.
+        """
+        if not self.enabled:
+            if callback:
+                callback()   # fire immediately so ACK isn't lost
+            return False
+        text = self._prepare_text(text)
+        if text and len(text.strip()) > 2:
+            self.tts_queue.put((text, callback))
+            return True
+        # Nothing to speak — fire callback right away
+        if callback:
+            callback()
+        return False
 
     # ── Runtime voice update (called by robot.py on persona_update) ───────────
 
@@ -109,11 +127,19 @@ class EdgeTTSOutputModule(OutputModule):
     def _tts_worker(self):
         while not self.stop_event.is_set():
             try:
-                text = self.tts_queue.get(timeout=1)
-                if text is None:
+                item = self.tts_queue.get(timeout=1)
+                if item is None:
                     break
+                # Items are always (text, callback) tuples
+                text, callback = item if isinstance(item, tuple) else (item, None)
                 self._speak_text(text)
                 self.tts_queue.task_done()
+                # Fire ACK callback AFTER playback completes
+                if callback:
+                    try:
+                        callback()
+                    except Exception as e:
+                        logger.error(f"[TTS] Callback error: {e}")
             except queue.Empty:
                 continue
             except Exception as e:

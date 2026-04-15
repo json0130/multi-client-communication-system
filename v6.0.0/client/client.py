@@ -311,6 +311,7 @@ class BasicClient:
         self.server_connection.register_handler("chat_response",    self._default_chat_handler)
         self.server_connection.register_handler("speech_response",  self._default_speech_handler)
         self.server_connection.register_handler("emotion_update",   self._default_emotion_handler)
+        self.server_connection.register_handler("demo_step",        self._on_demo_step)
 
         self.input_modules:  Dict[str, InputModule]  = {}
         self.output_modules: Dict[str, OutputModule] = {}
@@ -340,6 +341,57 @@ class BasicClient:
     def _default_emotion_handler(self, data: dict):
         """Called when server pushes an emotion_update event. Override if needed."""
         pass
+
+    def _on_demo_step(self, data: dict):
+        """
+        Handle a demo_step event pushed by the DemoOrchestrator.
+
+        Bypasses the LLM — text goes straight to TTS.
+        After TTS completes, sends ACK back to server if require_ack is True.
+        """
+        step_id  = data.get("step_id", "")
+        text     = data.get("text", "")
+        need_ack = data.get("require_ack", True)
+
+        if not text:
+            if need_ack:
+                self.send_ack(step_id)
+            return
+
+        logger.info(f"[Demo] Step '{step_id}': {text[:60]}{'...' if len(text) > 60 else ''}")
+
+        # Extract emotion tag for hardware (Arduino, etc.)
+        match = re.search(r"\[(.*?)\]", text)
+        if match:
+            self.on_emotion_detected(match.group(1))
+
+        # Build a callback that fires after TTS finishes
+        callback = (lambda sid=step_id: self.send_ack(sid)) if need_ack else None
+
+        # Route to output modules — prefer speak_with_callback for ACK timing
+        ack_scheduled = False
+        for name, module in self.output_modules.items():
+            try:
+                if hasattr(module, "speak_with_callback"):
+                    module.speak_with_callback(text, callback=callback if not ack_scheduled else None)
+                    if callback:
+                        ack_scheduled = True   # only one module fires the ACK
+                elif hasattr(module, "process_output"):
+                    module.process_output({"text": text, "type": "demo"})
+            except Exception as e:
+                logger.error(f"[Demo] Output '{name}' error: {e}")
+
+        # Fallback: if no module supports speak_with_callback, send ACK immediately
+        if need_ack and not ack_scheduled:
+            self.send_ack(step_id)
+
+    def send_ack(self, step_id: str):
+        """Send an ACK packet to the server for the given demo step."""
+        sent = self.server_connection.send({"type": "ack", "step_id": step_id})
+        if sent:
+            logger.info(f"[Demo] ACK sent for step '{step_id}'.")
+        else:
+            logger.warning(f"[Demo] Could not send ACK for '{step_id}' — not connected.")
 
     # ── Module registration ───────────────────────────────────────────────────
 
