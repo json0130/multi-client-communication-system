@@ -691,6 +691,44 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 
 .robot-photo:hover .robot-photo-overlay { opacity: 1; }
 
+/* ── Demo+Chat merged panel ────────────────────────────────── */
+.demox-root           { display: flex; flex-direction: column; gap: 10px; height: calc(100vh - 110px); }
+
+/* Top control bar */
+.demox-topbar         { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
+.demox-state-row      { display: flex; align-items: center; gap: 10px; }
+.demox-controls       { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+
+/* Move-on banner — shown only in qa_window */
+.demox-moveon-banner  { display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: rgba(109,40,217,0.15); border: 1px solid #6d28d9; border-radius: 8px; }
+.demox-moveon-left    { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.demox-moveon-label   { font-size: 0.8rem; font-weight: 700; color: #a78bfa; text-transform: uppercase; letter-spacing: 0.05em; }
+.demox-moveon-quote   { font-size: 0.82rem; color: var(--muted); font-style: italic; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demox-moveon-btn     { background: #6d28d9; color: #ede9fe; border-color: #7c3aed; font-size: 13px; font-weight: 700; padding: 8px 22px; width: auto; white-space: nowrap; }
+.demox-moveon-btn:hover:not(:disabled) { background: #7c3aed; }
+
+/* Body: timeline left + chat right */
+.demox-body           { display: flex; gap: 10px; flex: 1; min-height: 0; }
+
+/* Timeline pane */
+.demox-timeline-pane  { width: 280px; flex-shrink: 0; display: flex; flex-direction: column; gap: 6px; }
+.demox-timeline       { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 2px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 6px; }
+.demox-step           { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 5px; font-size: 0.78rem; color: var(--muted); border: 1px solid transparent; }
+.demox-step:hover                  { background: var(--surface2); }
+.demox-step.current                { background: var(--accent-dim); border-color: var(--accent); }
+.demox-step.completed              { opacity: 0.4; }
+.demox-step-num       { font-size: 0.68rem; color: var(--muted); width: 18px; text-align: right; flex-shrink: 0; }
+.demox-step-info      { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.demox-step-id        { font-weight: 600; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.demox-step-robot     { font-size: 0.68rem; }
+
+/* Chat pane */
+.demox-chat-pane      { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.demox-chat-controls  { display: flex; align-items: center; gap: 8px; }
+.demox-feed           { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
+.demox-input-row      { display: flex; gap: 8px; align-items: center; }
+.demox-input-row .form-input { flex: 1; }
+
 /* ── Demo tab ──────────────────────────────────────────────── */
 .demo-tab           { display: flex; flex-direction: column; gap: 16px; }
 .demo-header        { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px 20px; display: flex; flex-direction: column; gap: 8px; }
