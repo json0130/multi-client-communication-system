@@ -6,6 +6,38 @@ import {
   getRobots, chatRobot,
 } from '../api'
 
+// ── Browser TTS ───────────────────────────────────────────────────────────────
+
+// Per-robot voice characteristics (pitch / rate). Browser picks best voice.
+const ROBOT_VOICE = {
+  pepper_01:  { pitch: 1.15, rate: 0.92 },   // warm guide voice
+  chatbox_01: { pitch: 1.25, rate: 1.05 },   // energetic, slightly faster
+  navel_01:   { pitch: 1.05, rate: 0.88 },   // slower, empathetic
+  silbot_01:  { pitch: 0.80, rate: 0.93 },   // deeper, measured
+}
+
+function browserSpeak(text, robotId, volume = 1) {
+  if (!window.speechSynthesis || !text) return
+  window.speechSynthesis.cancel()          // stop any current speech first
+
+  const utt  = new SpeechSynthesisUtterance(text)
+  const cfg  = ROBOT_VOICE[robotId] || { pitch: 1, rate: 1 }
+  utt.pitch  = cfg.pitch
+  utt.rate   = cfg.rate
+  utt.volume = volume
+
+  // Try to grab a good English voice; fall back to default
+  const voices = window.speechSynthesis.getVoices()
+  if (voices.length) {
+    const en = voices.find(v => v.lang.startsWith('en') && v.localService)
+            || voices.find(v => v.lang.startsWith('en'))
+            || voices[0]
+    if (en) utt.voice = en
+  }
+
+  window.speechSynthesis.speak(utt)
+}
+
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const STATE_COLORS = {
@@ -62,6 +94,11 @@ export default function DemoTab() {
   const [status,   setStatus]   = useState(null)
   const [ctrlLoad, setCtrlLoad] = useState(false)
 
+  // ── TTS state ───────────────────────────────────────────────────────────────
+  const [ttsEnabled, setTtsEnabled] = useState(true)
+  const ttsRef = useRef(true)                          // readable inside effects without re-running them
+  useEffect(() => { ttsRef.current = ttsEnabled }, [ttsEnabled])
+
   // ── Chat state ──────────────────────────────────────────────────────────────
   const [robots,    setRobots]    = useState([])
   const [targetId,  setTargetId]  = useState('')
@@ -106,7 +143,10 @@ export default function DemoTab() {
 
     if ((status.state === 'running' || status.state === 'waiting_ack') && status.text) {
       const clean = status.text.replace(/\[.*?\]/g, '').trim()
-      if (clean) addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
+      if (clean) {
+        addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
+        if (ttsRef.current) browserSpeak(clean, status.robot_id)
+      }
     }
     if (status.state === 'qa_window') {
       addMsg({ role: 'system', text: 'Q&A window open — visitors can ask questions', time: ts() })
@@ -187,6 +227,17 @@ export default function DemoTab() {
             ? <button className="btn btn-sm btn-danger" disabled={ctrlLoad}   onClick={() => run(endQaMode)}>End Q&amp;A</button>
             : <button className="btn btn-sm btn-qa"     disabled={ctrlLoad || isIdle} onClick={() => run(() => startQaMode(''))}>Q&amp;A</button>
           }
+          {/* TTS toggle */}
+          <button
+            className={`btn btn-sm ${ttsEnabled ? 'btn-tts-on' : ''}`}
+            title={ttsEnabled ? 'Mute browser TTS' : 'Unmute browser TTS'}
+            onClick={() => {
+              if (ttsEnabled) window.speechSynthesis?.cancel()
+              setTtsEnabled(v => !v)
+            }}
+          >
+            {ttsEnabled ? '🔊' : '🔇'}
+          </button>
         </div>
       </div>
 

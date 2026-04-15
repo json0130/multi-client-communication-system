@@ -741,6 +741,8 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 .demo-controls      { display: flex; gap: 8px; flex-wrap: wrap; }
 .btn-qa             { background: #4c1d95; color: #ede9fe; border: 1px solid #6d28d9; }
 .btn-qa:hover       { background: #5b21b6; }
+.btn-tts-on         { background: #064e3b; color: #6ee7b7; border-color: #065f46; }
+.btn-tts-on:hover   { background: #065f46; }
 
 .qa-row             { display: flex; gap: 8px; }
 .qa-row .form-input { flex: 1; }

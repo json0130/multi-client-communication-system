@@ -90,26 +90,35 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "introduce_chatbox",
         robot_id    = PEPPER,
-        text        = "[POINT] Let me introduce ChatBox, the robot leading this research!",
+        text        = "[POINT] And the robot leading this research is ChatBox! "
+                      "ChatBox, please say hello to our visitors!",
         timeout_sec = 8,
     ),
 
     DemoStep(
-        step_id     = "chatbox_intro",
+        step_id     = "chatbox_greeting",
         robot_id    = CHATBOX,
-        text        = "[WAVE] Hello everyone! I am ChatBox. "
-                      "My research is about building robots that remember context across long conversations "
-                      "and can retrieve relevant knowledge on demand.",
-        timeout_sec = 22,
+        text        = "[WAVE] Hello everyone! It is wonderful to meet you all. "
+                      "I am ChatBox, and I am really glad you are here today!",
+        timeout_sec = 12,
     ),
 
     DemoStep(
-        step_id     = "chatbox_project_detail",
+        step_id     = "chatbox_prompt",
+        robot_id    = PEPPER,
+        text        = "[DEFAULT] ChatBox, could you tell our visitors what you are working on?",
+        timeout_sec = 7,
+    ),
+
+    DemoStep(
+        step_id     = "chatbox_project",
         robot_id    = CHATBOX,
-        text        = "[DEFAULT] I use a combination of large language models and vector search "
-                      "to answer questions accurately even when the topic changes. "
-                      "My researcher is working on making these responses both factually grounded and natural.",
-        timeout_sec = 25,
+        text        = "[DEFAULT] Of course! My research focuses on retrieval-augmented generation — "
+                      "a technique that lets robots pull in relevant knowledge on demand "
+                      "while keeping track of long, context-rich conversations. "
+                      "I combine large language models with vector search so my answers stay "
+                      "accurate and grounded even as topics shift.",
+        timeout_sec = 28,
     ),
 
     # Q&A window — visitors can speak to ChatBox or any robot
@@ -147,26 +156,35 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "introduce_navel",
         robot_id    = PEPPER,
-        text        = "[POINT] Meet Navel, who is working on exactly this!",
+        text        = "[POINT] And the robot behind this research is Navel! "
+                      "Navel, please say hi to everyone!",
         timeout_sec = 8,
     ),
 
     DemoStep(
-        step_id     = "navel_intro",
+        step_id     = "navel_greeting",
         robot_id    = NAVEL,
-        text        = "[WAVE] Hi! I am Navel. I study how robots can become more empathetic "
-                      "by detecting facial expressions and tone of voice in real time.",
-        timeout_sec = 20,
+        text        = "[WAVE] Hi there! I am so happy to see you all here. "
+                      "I am Navel, and I love meeting new people — it is literally part of my research!",
+        timeout_sec = 12,
     ),
 
     DemoStep(
-        step_id     = "navel_project_detail",
+        step_id     = "navel_prompt",
+        robot_id    = PEPPER,
+        text        = "[DEFAULT] Navel, would you like to share what your research is about?",
+        timeout_sec = 7,
+    ),
+
+    DemoStep(
+        step_id     = "navel_project",
         robot_id    = NAVEL,
-        text        = "[DEFAULT] When I detect that someone looks confused or upset, "
-                      "I adjust my response — speaking more slowly, choosing simpler words, "
-                      "or offering to explain further. My goal is to make human-robot interaction "
-                      "feel more natural and supportive.",
-        timeout_sec = 28,
+        text        = "[DEFAULT] Absolutely! I study emotion-aware interaction. "
+                      "I detect facial expressions and tone of voice in real time, "
+                      "then adapt how I speak — slower when someone looks confused, "
+                      "warmer when someone seems upset, more concise when someone is in a hurry. "
+                      "My goal is to make talking to a robot feel as natural as talking to a person.",
+        timeout_sec = 30,
     ),
 
     # Q&A window
@@ -203,25 +221,35 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "introduce_silbot",
         robot_id    = PEPPER,
-        text        = "[POINT] That is Silbot's area of expertise. Silbot, please say hello!",
+        text        = "[POINT] That is Silbot's area of expertise. "
+                      "Silbot, please come and say hello to our visitors!",
         timeout_sec = 8,
     ),
 
     DemoStep(
-        step_id     = "silbot_intro",
+        step_id     = "silbot_greeting",
         robot_id    = SILBOT,
-        text        = "[WAVE] Hello! I am Silbot. I specialise in navigation that respects "
-                      "personal space and social norms.",
-        timeout_sec = 15,
+        text        = "[WAVE] Hello! Thank you for having me. "
+                      "I am Silbot, and I navigate spaces the way people do — with awareness and courtesy.",
+        timeout_sec = 12,
     ),
 
     DemoStep(
-        step_id     = "silbot_project_detail",
+        step_id     = "silbot_prompt",
+        robot_id    = PEPPER,
+        text        = "[DEFAULT] Silbot, could you explain your navigation research to our visitors?",
+        timeout_sec = 7,
+    ),
+
+    DemoStep(
+        step_id     = "silbot_project",
         robot_id    = SILBOT,
-        text        = "[DEFAULT] Rather than just avoiding obstacles, I predict where people are going "
-                      "and plan paths that do not interrupt conversations or crowd groups. "
-                      "I was trained in simulation and tested in real office corridors here at CARES.",
-        timeout_sec = 28,
+        text        = "[DEFAULT] Of course. Rather than simply avoiding obstacles, "
+                      "I predict where people are moving and plan routes that do not cut through "
+                      "conversations or crowd groups. "
+                      "I was trained in simulation and then tested in real office corridors here at CARES. "
+                      "The goal is for robots to move through shared spaces as a respectful colleague would.",
+        timeout_sec = 30,
     ),
 
     # Q&A window
