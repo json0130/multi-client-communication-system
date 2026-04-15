@@ -5,15 +5,18 @@ Server-side state machine that drives the CARES lab demo.
 
 State flow:
     IDLE ──start()──► RUNNING ──send step──► WAITING_ACK
-                          ▲                       │
-                          └──────ACK received──────┘
-                          └──────manual_next()─────┘
-                                                   ▼ timeout
-                                                 ERROR
+                          ▲                       │ ACK / manual_next
+                          └───────────────────────┘
+                          │
+                          └──(step has qa_window=True)──► QA_WINDOW
+                                 ▲ resume() / manual_next()     │ timeout / qa_end()
+                                 └───────────────────────────────┘
 
-Any state ──pause()──► PAUSED ──resume()──► (previous running state)
-Any state ──stop()───► IDLE
-Last step ACKed      ──────────────────────► COMPLETED
+Any state ──qa_interrupt()──► QA_WINDOW  (ad-hoc Q&A from dashboard)
+Any state ──pause()──────────► PAUSED ──resume()──► (previous state)
+Any state ──stop()───────────► IDLE
+Last step done ──────────────► COMPLETED
+Timeout on WAITING_ACK ──────► ERROR  (recover with manual_next)
 """
 
 from __future__ import annotations
@@ -31,18 +34,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# ── State machine states ───────────────────────────────────────────────────────
+# ── States ─────────────────────────────────────────────────────────────────────
 
 class DemoState(str, Enum):
     IDLE        = "idle"
     RUNNING     = "running"
     WAITING_ACK = "waiting_ack"
+    QA_WINDOW   = "qa_window"    # timed Q&A pause between demo steps
     PAUSED      = "paused"
     COMPLETED   = "completed"
     ERROR       = "error"
 
 
-# ── Demo step definition (used in demo_script.py) ─────────────────────────────
+# ── Step definition ────────────────────────────────────────────────────────────
 
 @dataclass
 class DemoStep:
@@ -50,58 +54,65 @@ class DemoStep:
     One step in the demo sequence.
 
     Args:
-        step_id     : Unique identifier (used for ACK matching).
-        robot_id    : client_id of the robot that should execute this step.
-                      Must match a registered + connected robot.
-        text        : Text to speak (emotion tags like [GREETING] are preserved
-                      so the client can drive Arduino/animation).
-        require_ack : If True the orchestrator waits for an ACK before
-                      advancing. Set False for fire-and-forget steps.
-        timeout_sec : How long to wait for the ACK before entering ERROR state.
-                      Use manual_next() or POST /demo/next to recover.
+        step_id     : Unique identifier — used for ACK matching and logs.
+        robot_id    : client_id of the robot that executes this step.
+        text        : Speech text (emotion tags like [GREETING] preserved).
+        require_ack : Wait for ACK before advancing. False = fire-and-forget.
+        timeout_sec : Seconds to wait for ACK before entering ERROR.
+        qa_window   : After this step's ACK, open a Q&A window automatically.
+        qa_timeout  : Seconds the Q&A window stays open before auto-advancing.
+                      Set to 0 to require manual close (POST /demo/next).
     """
     step_id:     str
     robot_id:    str
     text:        str
     require_ack: bool  = True
     timeout_sec: float = 30.0
+    qa_window:   bool  = False
+    qa_timeout:  float = 60.0
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
 
 class DemoOrchestrator:
     """
-    Drives the demo step-by-step.
-    Thread-safe — all public methods acquire self._lock.
+    Drives the demo step by step. All public methods are thread-safe.
     """
 
-    def __init__(self, ws_gateway: "WebSocketGateway"):
-        self._ws      = ws_gateway
+    def __init__(self, ws_gateway: "WebSocketGateway", transition_delay: float = 1.5):
+        self._ws     = ws_gateway
         self._script: list[DemoStep] = []
-        self._state   = DemoState.IDLE
-        self._idx     = 0
-        self._lock    = threading.Lock()
-        self._ack_event   = threading.Event()
-        self._pause_event = threading.Event()
-        self._pause_event.set()          # unset = paused, set = running
+
+        self._state  = DemoState.IDLE
+        self._idx    = 0
+
+        # Pause between consecutive steps — gives TTS and hardware time to settle.
+        # Set to 0 to disable. Skipped immediately on stop() or manual_next().
+        self._transition_delay = transition_delay
+
+        self._lock           = threading.Lock()
+        self._ack_event      = threading.Event()   # set when ACK arrives or manual_next()
+        self._pause_event    = threading.Event()   # cleared when paused
+        self._pause_event.set()
+        self._qa_end_event   = threading.Event()   # set to close Q&A window early
+        self._advance_event  = threading.Event()   # set by stop/manual_next to skip transition delay
+
         self._runner: Optional[threading.Thread] = None
 
-    # ── Script loading ────────────────────────────────────────────────────────
+    # ── Script ────────────────────────────────────────────────────────────────
 
     def load_script(self, steps: list[DemoStep]):
-        """Load (or reload) the demo script. Call before start()."""
         with self._lock:
             if self._state not in (DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR):
-                logger.warning("[Demo] Cannot reload script while demo is running.")
+                logger.warning("[Demo] Cannot reload while running. Stop first.")
                 return
             self._script = list(steps)
             self._idx    = 0
         logger.info(f"[Demo] Script loaded — {len(steps)} steps.")
 
-    # ── Control ───────────────────────────────────────────────────────────────
+    # ── Controls ──────────────────────────────────────────────────────────────
 
     def start(self):
-        """Start from the beginning (or where load_script last set idx=0)."""
         with self._lock:
             if self._state == DemoState.RUNNING:
                 logger.warning("[Demo] Already running.")
@@ -112,24 +123,25 @@ class DemoOrchestrator:
             self._idx   = 0
             self._state = DemoState.RUNNING
             self._ack_event.clear()
+            self._qa_end_event.clear()
             self._pause_event.set()
-
         self._runner = threading.Thread(target=self._run_loop, daemon=True, name="demo-runner")
         self._runner.start()
         logger.info("[Demo] Started.")
 
     def stop(self):
-        """Stop and reset to IDLE. Safe to call at any time."""
         with self._lock:
             self._state = DemoState.IDLE
             self._idx   = 0
-        self._ack_event.set()      # unblock any waiting thread
-        self._pause_event.set()    # unblock pause
+        self._ack_event.set()
+        self._qa_end_event.set()
+        self._pause_event.set()
+        self._advance_event.set()   # skip any in-progress transition delay
         logger.info("[Demo] Stopped.")
 
     def pause(self):
         with self._lock:
-            if self._state in (DemoState.RUNNING, DemoState.WAITING_ACK):
+            if self._state in (DemoState.RUNNING, DemoState.WAITING_ACK, DemoState.QA_WINDOW):
                 self._state = DemoState.PAUSED
                 self._pause_event.clear()
                 logger.info("[Demo] Paused.")
@@ -137,51 +149,89 @@ class DemoOrchestrator:
     def resume(self):
         with self._lock:
             if self._state == DemoState.PAUSED:
-                self._state = DemoState.WAITING_ACK if not self._ack_event.is_set() else DemoState.RUNNING
+                # Determine correct state to return to
+                self._state = DemoState.RUNNING
                 self._pause_event.set()
                 logger.info("[Demo] Resumed.")
 
     def manual_next(self):
-        """Skip ACK wait and force-advance to the next step. Useful for recovery."""
-        logger.info("[Demo] Manual next — skipping ACK wait.")
+        """Force-advance past current wait (ACK timeout, Q&A window, or transition delay)."""
+        logger.info("[Demo] Manual next.")
         self._ack_event.set()
-        with self._lock:
-            if self._state == DemoState.PAUSED:
-                self._pause_event.set()
+        self._qa_end_event.set()
+        self._pause_event.set()
+        self._advance_event.set()   # skip transition delay if currently waiting
 
-    # ── ACK reception (called by WebSocketGateway on type=="ack") ─────────────
+    def qa_interrupt(self, message: str = ""):
+        """
+        Ad-hoc Q&A mode — pause the demo and send an optional message from Pepper.
+        Close with manual_next() or qa_end().
+        """
+        with self._lock:
+            if self._state in (DemoState.RUNNING, DemoState.WAITING_ACK):
+                self._state = DemoState.QA_WINDOW
+                self._qa_end_event.clear()
+        if message:
+            # Broadcast to Pepper (first robot in script, or default)
+            default_robot = self._script[0].robot_id if self._script else None
+            if default_robot:
+                self._ws.send_to_robot(default_robot, {
+                    "event":       "demo_step",
+                    "step_id":     "_qa_interrupt",
+                    "text":        message,
+                    "require_ack": False,
+                })
+        logger.info("[Demo] Entered ad-hoc Q&A window.")
+
+    def qa_end(self):
+        """End the current Q&A window and advance the demo."""
+        self._qa_end_event.set()
+        logger.info("[Demo] Q&A window closed.")
+
+    # ── ACK reception ─────────────────────────────────────────────────────────
 
     def receive_ack(self, step_id: str):
         with self._lock:
             current = self._script[self._idx] if self._idx < len(self._script) else None
-
         if current and current.step_id == step_id:
-            logger.info(f"[Demo] ACK received for step '{step_id}'.")
+            logger.info(f"[Demo] ACK for '{step_id}'.")
             self._ack_event.set()
         else:
-            logger.debug(f"[Demo] Ignored ACK for '{step_id}' "
-                         f"(current: '{current.step_id if current else None}').")
+            logger.debug(f"[Demo] Ignored ACK '{step_id}' "
+                         f"(expected '{current.step_id if current else None}').")
 
     # ── Status ────────────────────────────────────────────────────────────────
 
     def get_status(self) -> dict:
         with self._lock:
-            step = self._script[self._idx] if self._idx < len(self._script) else None
+            idx    = self._idx
+            total  = len(self._script)
+            step   = self._script[idx] if idx < total else None
             return {
-                "state":    self._state.value,
-                "step_idx": self._idx,
-                "total":    len(self._script),
-                "step_id":  step.step_id  if step else None,
-                "robot_id": step.robot_id if step else None,
-                "text":     step.text     if step else None,
+                "state":       self._state.value,
+                "step_idx":    idx,
+                "total":       total,
+                "step_id":     step.step_id  if step else None,
+                "robot_id":    step.robot_id if step else None,
+                "text":        step.text     if step else None,
+                "qa_window":   step.qa_window if step else False,
+                # Full step list for the dashboard timeline
+                "steps": [
+                    {
+                        "step_id":   s.step_id,
+                        "robot_id":  s.robot_id,
+                        "text":      s.text[:80] + ("..." if len(s.text) > 80 else ""),
+                        "qa_window": s.qa_window,
+                    }
+                    for s in self._script
+                ],
             }
 
     # ── Internal loop ─────────────────────────────────────────────────────────
 
     def _run_loop(self):
         while True:
-            # Check pause (blocks here when paused)
-            self._pause_event.wait()
+            self._pause_event.wait()  # blocks when paused
 
             with self._lock:
                 state = self._state
@@ -197,10 +247,9 @@ class DemoOrchestrator:
                 return
 
             step = self._script[idx]
-            logger.info(f"[Demo] Step {idx + 1}/{len(self._script)}: "
+            logger.info(f"[Demo] Step {idx+1}/{len(self._script)}: "
                         f"'{step.step_id}' → {step.robot_id}")
 
-            # Send the step to the target robot
             self._send_step(step)
 
             if step.require_ack:
@@ -208,29 +257,56 @@ class DemoOrchestrator:
                     self._state = DemoState.WAITING_ACK
                 self._ack_event.clear()
 
-                # Block until ACK, manual_next, stop, or timeout
                 got_ack = self._ack_event.wait(timeout=step.timeout_sec)
 
                 with self._lock:
                     if self._state == DemoState.IDLE:
-                        return   # stop() was called
+                        return
                     if not got_ack:
                         self._state = DemoState.ERROR
-                        logger.error(f"[Demo] Timeout waiting for ACK on '{step.step_id}'. "
-                                     "Use POST /demo/next to continue manually.")
+                        logger.error(f"[Demo] Timeout on '{step.step_id}'. "
+                                     "POST /demo/next to continue.")
                         return
                     self._state = DemoState.RUNNING
 
-            # Advance
+            # Q&A window after this step
+            if step.qa_window:
+                self._open_qa_window(step)
+
             with self._lock:
+                if self._state == DemoState.IDLE:
+                    return
                 self._idx += 1
 
+            # Pause between steps so TTS/hardware settle before the next cue.
+            # Skipped immediately if stop() or manual_next() is called.
+            if self._transition_delay > 0:
+                self._advance_event.clear()
+                self._advance_event.wait(timeout=self._transition_delay)
+
     def _send_step(self, step: DemoStep):
-        """Send a demo_step event directly to the robot (bypasses LLM)."""
         self._ws.send_to_robot(step.robot_id, {
             "event":       "demo_step",
             "step_id":     step.step_id,
             "text":        step.text,
             "require_ack": step.require_ack,
         })
-        logger.info(f"[Demo] Sent step '{step.step_id}' to '{step.robot_id}'")
+        logger.info(f"[Demo] Sent '{step.step_id}' to '{step.robot_id}'")
+
+    def _open_qa_window(self, step: DemoStep):
+        """Block in QA_WINDOW state until timeout or manual close."""
+        with self._lock:
+            self._state = DemoState.QA_WINDOW
+        self._qa_end_event.clear()
+
+        timeout = step.qa_timeout if step.qa_timeout > 0 else None
+        logger.info(f"[Demo] Q&A window open "
+                    f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
+
+        self._qa_end_event.wait(timeout=timeout)
+
+        with self._lock:
+            if self._state == DemoState.IDLE:
+                return
+            self._state = DemoState.RUNNING
+        logger.info("[Demo] Q&A window closed.")
