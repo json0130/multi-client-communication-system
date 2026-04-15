@@ -27,6 +27,8 @@ export const disconnectRobot = (id)         => req('POST', `/robots/${id}/discon
 export const getRobotHealth  = (id)         => req('GET',  `/robots/${id}/health`)
 export const assignPersona   = (id, persona_id) =>
   req('POST', `/robots/${id}/persona`, { persona_id })
+export const chatRobot       = (id, message)    =>
+  req('POST', `/robots/${id}/chat`, { message })
 
 // ── Personas ──────────────────────────────────────────────────────────────────
 export const getPersonas    = ()         => req('GET',  '/personas')

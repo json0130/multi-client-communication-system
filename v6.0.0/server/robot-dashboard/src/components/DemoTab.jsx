@@ -106,14 +106,14 @@ export default function DemoTab() {
       {/* ── Controls ───────────────────────────────────────────────────── */}
       <div className="demo-controls">
         <button
-          className="btn btn-primary"
+          className="btn btn-primary btn-sm"
           disabled={loading || isRunning}
           onClick={() => run(startDemo)}
         >
           Start
         </button>
         <button
-          className="btn btn-danger"
+          className="btn btn-danger btn-sm"
           disabled={loading || isIdle}
           onClick={() => run(stopDemo)}
         >
@@ -121,7 +121,7 @@ export default function DemoTab() {
         </button>
         {status?.state === 'paused' ? (
           <button
-            className="btn"
+            className="btn btn-sm"
             disabled={loading}
             onClick={() => run(resumeDemo)}
           >
@@ -129,7 +129,7 @@ export default function DemoTab() {
           </button>
         ) : (
           <button
-            className="btn"
+            className="btn btn-sm"
             disabled={loading || isIdle}
             onClick={() => run(pauseDemo)}
           >
@@ -137,7 +137,7 @@ export default function DemoTab() {
           </button>
         )}
         <button
-          className="btn"
+          className="btn btn-sm"
           disabled={loading || isIdle}
           onClick={() => run(nextDemoStep)}
           title="Force-advance past current step (use to recover from timeout)"
@@ -145,7 +145,7 @@ export default function DemoTab() {
           Next Step
         </button>
         <button
-          className={`btn ${inQa ? 'btn-danger' : 'btn-qa'}`}
+          className={`btn btn-sm ${inQa ? 'btn-danger' : 'btn-qa'}`}
           disabled={loading || isIdle}
           onClick={handleQa}
         >
