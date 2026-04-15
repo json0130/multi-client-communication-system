@@ -1,0 +1,29 @@
+# ChatBox client requirements (non-Docker)
+# Install with: pip install -r requirements.txt
+
+# Core communication
+websockets>=11.0
+requests>=2.28
+
+# Audio input
+pyaudio>=0.2.13
+
+# Speech / TTS
+gtts>=2.3
+gTTS>=2.3
+
+# Arduino serial
+pyserial>=3.5
+
+# Utilities
+numpy>=1.24
+
+# Optional: RealSense camera (only needed if emotion module is enabled)
+# pyrealsense2>=2.50
+
+# Optional: pyttsx3 TTS fallback
+# pyttsx3>=2.90
+
+# System packages also needed (install via apt):
+#   sudo apt install ffmpeg espeak alsa-utils portaudio19-dev
+#   sudo apt install libportaudio2 libportaudiocpp0

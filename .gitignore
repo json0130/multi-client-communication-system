@@ -1,2 +1,21 @@
 *.env
 *.pth
+
+# Python cache
+__pycache__/
+*.pyc
+
+# RAG / FAISS indexes
+v5.0.0/ServerController/rag_indexes/
+
+# Environment
+robot/
+.env
+
+# OS
+.DS_Store
+
+v6.0.0/ServerController/rag_indexes/
+v6.0.0/tools/
+
+v6.0.0/server/robot-dashboard/node_modules/

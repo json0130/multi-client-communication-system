@@ -18,14 +18,6 @@ os.environ['KMP_DUPLICATE_LIB_OK'] = 'TRUE'  # Fix OpenMP initialization error
 class ServerController:
     """
     Main multi-client server controller using modular architecture.
-    
-    This is the main entry point that orchestrates:
-    - Client registration and management
-    - HTTP request routing
-    - WebSocket real-time communication
-    - Server instance lifecycle management
-    
-    Clients connect by sending client_init.json with their requirements.
     """
     
     def __init__(self, port=5000, supabase_url=None, supabase_key=None):
@@ -52,7 +44,7 @@ class ServerController:
             engineio_logger=False,
             ping_timeout=30,
             ping_interval=15,
-            max_http_buffer_size=1000000,  # Optimized buffer size
+            max_http_buffer_size=1000000,
             transports=['websocket', 'polling'],
             allow_upgrades=True,
             cookie=False
@@ -73,11 +65,15 @@ class ServerController:
             self.socketio,
             self.database
         )
+        
+        # 3. Initialize WebSocket Manager with callbacks
         self.websocket_manager = WebSocketManager(
             self.socketio,
             self.client_manager,
             self.request_router,
-            self.database
+            self.database,
+            on_connect_callback=self.handle_robot_connect,       
+            on_disconnect_callback=self.handle_robot_disconnect  
         )
         
         # Setup HTTP routes
@@ -88,16 +84,40 @@ class ServerController:
         
         print("🏗️ Server Controller initialized")
 
+    def handle_robot_connect(self, client_id):
+        """Triggered securely by WebSocketManager when a robot authenticates"""
+        try:
+            # Safely get the raw supabase client from the wrapper
+            db_client = getattr(self.supabase_client, 'client', None) or getattr(self.supabase_client, 'supabase', None)
+            if db_client:
+                db_client.table('robots').update({'is_active': True}).eq('client_id', client_id).execute()
+                print(f"🟢 PRESENCE SYNC: {client_id} marked ACTIVE in DB")
+            else:
+                print("⚠️ PRESENCE SYNC: Failed to find underlying Supabase client.")
+        except Exception as e:
+            print(f"⚠️ Failed to mark active in DB: {e}")
+
+    def handle_robot_disconnect(self, client_id):
+        """Triggered securely by WebSocketManager when a robot drops connection"""
+        try:
+            # Safely get the raw supabase client from the wrapper
+            db_client = getattr(self.supabase_client, 'client', None) or getattr(self.supabase_client, 'supabase', None)
+            if db_client:
+                db_client.table('robots').update({'is_active': False}).eq('client_id', client_id).execute()
+                print(f"🔴 PRESENCE SYNC: {client_id} marked INACTIVE in DB")
+            else:
+                print("⚠️ PRESENCE SYNC: Failed to find underlying Supabase client.")
+        except Exception as e:
+            print(f"⚠️ Failed to mark inactive in DB: {e}")
+
     def setup_monitor_websocket_handlers(self):
         """Direct setup of monitor WebSocket handlers"""
-        # Performance optimizations
         self.socketio.server.eio.ping_interval = 15
         self.socketio.server.eio.ping_timeout = 30
         
         try:
-            # Monitor namespace handlers
             @self.socketio.on('connect', namespace='/monitor')
-            def handle_monitor_connect():
+            def handle_monitor_connect(auth=None): # Added auth=None to prevent TypeErrors
                 return True
 
             @self.socketio.on('disconnect', namespace='/monitor')
@@ -166,29 +186,22 @@ class ServerController:
     def _enhance_frame_broadcasting(self):
         """Enhance frame processing to broadcast to monitors with throttling"""
         try:
-            # Store original method
             if not hasattr(self, '_original_handle_image_frame'):
                 self._original_handle_image_frame = self.request_router.handle_image_frame_processing
             
-            # Performance throttling variables
             self.last_broadcast_times = {}
             self.broadcast_throttle_time = 0.2  # 5 broadcasts per second max
             self.last_emotions = {}
             
             def enhanced_handle_image_frame(client_id, frame_data):
-                # Process frame normally
                 result = self._original_handle_image_frame(client_id, frame_data)
                 
-                # Smart broadcasting with throttling
                 if 'error' not in result and 'emotion' in result:
                     try:
                         current_time = time.time()
-                        
-                        # Check throttling
                         last_broadcast = self.last_broadcast_times.get(client_id, 0)
                         time_since_last = current_time - last_broadcast
                         
-                        # Check emotion changes
                         current_emotion = result.get('emotion', 'neutral')
                         current_confidence = result.get('confidence', 0)
                         last_emotion_data = self.last_emotions.get(client_id, {'emotion': None, 'confidence': 0})
@@ -198,7 +211,6 @@ class ServerController:
                             abs(current_confidence - last_emotion_data['confidence']) > 10
                         )
                         
-                        # Broadcast conditions
                         should_broadcast = (
                             time_since_last >= self.broadcast_throttle_time or
                             (emotion_changed and time_since_last >= 0.1)
@@ -218,7 +230,6 @@ class ServerController:
                             
                             self.socketio.emit('client_frame_update', update_data, room=client_id, namespace='/monitor')
                             
-                            # Update tracking
                             self.last_broadcast_times[client_id] = current_time
                             self.last_emotions[client_id] = {
                                 'emotion': current_emotion,
@@ -226,11 +237,10 @@ class ServerController:
                             }
                             
                     except Exception:
-                        pass  # Silent fail for broadcasts
+                        pass
                 
                 return result
             
-            # Replace the method
             self.request_router.handle_image_frame_processing = enhanced_handle_image_frame
             
         except Exception as e:
@@ -241,9 +251,7 @@ class ServerController:
         
         @self.app.route('/', methods=['GET'])
         def controller_info():
-            """Controller status and active clients"""
             clients_status = self.client_manager.get_all_clients_status()
-            
             return jsonify({
                 "message": "Multi-Client Emotion Server Controller",
                 "status": "running",
@@ -274,12 +282,20 @@ class ServerController:
         def register_client():
             try:
                 config = request.json
-                # First register with Supabase
                 result = self.supabase_client.register_robot(config)
-                print(f"--- DEBUG: register_client result: {result} ---")
                 
                 if result:
-                    # Now also register with ClientManager
+                    db_data = {}
+                    if hasattr(result, 'data') and result.data:
+                        db_data = result.data[0]
+                    elif isinstance(result, list) and len(result) > 0:
+                        db_data = result[0]
+                    elif isinstance(result, dict):
+                        db_data = result
+                        
+                    if 'allowed_tags' in db_data:
+                        config['allowed_tags'] = db_data['allowed_tags']
+
                     success, message, client_info = self.client_manager.process_client_init(config)
                     
                     if success:
@@ -314,9 +330,6 @@ class ServerController:
 
         @self.app.route('/client/<client_id>/command', methods=['POST'])
         def send_command_to_client(client_id):
-            """
-            Receives a command (e.g., dialogue) and forwards it to a specific client.
-            """
             if not request.is_json:
                 return jsonify({"error": "Invalid request: JSON required"}), 400
 
@@ -326,35 +339,26 @@ class ServerController:
             if not command:
                 return jsonify({"error": "The 'command' field is required"}), 400
 
-            # Use the ClientManager to see if the target robot is connected
             if not self.client_manager.get_client_info(client_id):
                 return jsonify({"error": f"Client '{client_id}' is not registered or active."}), 404
 
             print(f" M-DEBUG -> Relaying command to robot {client_id}: '{command}'")
-
-            # Emit a WebSocket event specifically to the target client's room
-            # self.socketio.emit('execute_command', {'command': command}, room=client_id)
-
             return jsonify({"status": "success", "message": f"Command sent to {client_id}"}), 200
         
         @self.app.route('/client/<client_id>/chat', methods=['POST'])
         def client_chat(client_id):
-            """Handle chat request for specific client"""
             return self.request_router.route_client_request(client_id, 'chat', request)
         
         @self.app.route('/client/<client_id>/speech', methods=['POST'])
         def client_speech(client_id):
-            """Handle speech-to-text request for specific client"""
             return self.request_router.route_client_request(client_id, 'speech', request)
         
         @self.app.route('/client/<client_id>/emotion', methods=['GET'])
         def client_emotion(client_id):
-            """Get current emotion state for specific client"""
             return self.request_router.route_client_request(client_id, 'emotion', request)
 
         @self.app.route('/client/<client_id>/monitor', methods=['GET'])
         def client_monitor(client_id):
-            """Serve individual client monitor page"""
             try:
                 server = self.client_manager.get_client_server(client_id)
                 if not server:
@@ -376,19 +380,15 @@ class ServerController:
 
         @self.app.route('/client/<client_id>/live_stream', methods=['GET'])
         def client_live_stream(client_id):
-            """Serve individual client live stream"""
             return self.request_router.route_client_request(client_id, 'live_stream', request)
         
         @self.app.route('/client/<client_id>/health', methods=['GET'])
         def client_health(client_id):
-            """Get health status for specific client"""
             return self.request_router.route_client_request(client_id, 'health', request)
         
         @self.app.route('/clients', methods=['GET'])
         def list_clients():
-            """List all registered clients and their status"""
             clients_status = self.client_manager.get_all_clients_status()
-            
             return jsonify({
                 "total_clients": len(clients_status),
                 "active_servers": len(self.client_manager.client_servers),
@@ -398,28 +398,18 @@ class ServerController:
         
         @self.app.route('/client/<client_id>/remove', methods=['DELETE'])
         def remove_client(client_id):
-            """Remove a client and cleanup its resources"""
             try:
                 if self.client_manager.remove_client(client_id):
-                    return jsonify({
-                        "message": f"Client '{client_id}' removed successfully"
-                    }), 200
+                    return jsonify({"message": f"Client '{client_id}' removed successfully"}), 200
                 else:
-                    return jsonify({
-                        "error": f"Client '{client_id}' not found"
-                    }), 404
-                    
+                    return jsonify({"error": f"Client '{client_id}' not found"}), 404
             except Exception as e:
-                return jsonify({
-                    "error": f"Failed to remove client: {e}"
-                }), 500
+                return jsonify({"error": f"Failed to remove client: {e}"}), 500
                 
         @self.app.route('/user/<int:user_id>/infer_topics', methods=['POST'])
         def user_infer_topics(user_id):
-            """Run GPT topic/condition extraction and update the users table."""
             return self.request_router.route_user_request(user_id, 'infer_topics', request)
 
-        
         @self.app.after_request
         def after_request(response):
             response.headers.add('Access-Control-Allow-Origin', '*')
@@ -428,21 +418,11 @@ class ServerController:
             return response
     
     def start(self):
-        """Start the multi-client server controller"""
         try:
             print("🚀 Starting Multi-Client Server Controller...")
-            print("=" * 50)
-            print(f"🌐 Server: http://0.0.0.0:{self.port}")
-            print(f"🔌 WebSocket: ws://0.0.0.0:{self.port}/socket.io/")
-            print(f"📦 Modules: {', '.join(self.client_manager.valid_modules)}")
-            print("=" * 50)
-            
-            # Start background cleanup task
             self.client_manager.start_cleanup_task()
-            
             print("✅ Server ready!")
             
-            # Start the Flask-SocketIO server
             self.socketio.run(
                 self.app,
                 host='0.0.0.0',
@@ -462,7 +442,6 @@ class ServerController:
             self._shutdown()
     
     def _shutdown(self):
-        """Cleanup resources on shutdown"""
         try:
             self.client_manager.stop_cleanup_task()
             self.client_manager.cleanup_all_clients()
@@ -470,12 +449,7 @@ class ServerController:
             print(f"❌ Cleanup error: {e}")
 
 def main():
-    """Main function to start the server controller"""
     print("🎯 Multi-Client Emotion Server Controller")
-    print("   Production optimized version")
-    print()
-    
-    # Load from environment variables
     supabase_url = os.getenv('SUPABASE_URL')
     supabase_key = os.getenv('SUPABASE_KEY')
     
@@ -484,7 +458,6 @@ def main():
         supabase_url=supabase_url,
         supabase_key=supabase_key
     )
-    
     controller.start()
 
 if __name__ == "__main__":

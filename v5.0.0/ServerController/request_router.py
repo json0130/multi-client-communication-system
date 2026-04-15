@@ -10,7 +10,7 @@ from flask import jsonify, Response
 
 from client_manager import ClientManager
 from database import Database
-from Modules.gpt_client import GPTClient
+from Modules.llm_processor import OllamaClient
 
 class RequestRouter:
     """
@@ -82,20 +82,29 @@ class RequestRouter:
             'task_message': None
         }
         
-        # Check for delegation command
-        match = re.search(r"```json\s*(\{.*?\})\s*```", llm_response_text, re.DOTALL)
+        ticks = "`" * 3
+        pattern = ticks + r"(?:json)?\s*(.*?)\s*" + ticks
+        match = re.search(pattern, llm_response_text, re.DOTALL)
         
+        # 2. ONLY proceed if a match was actually found
         if match and self.socketio:
             try:
-                command_data = json.loads(match.group(1))
+                # Now it's safe to grab the text inside the backticks
+                json_str = match.group(1).strip()
+
+                # 3. Failsafe to clean up double curly braces {{ }} if the LLM hallucinates them
+                if json_str.startswith('{{') and json_str.endswith('}}'):
+                    json_str = '{' + json_str[2:-2] + '}'
+
+                command_data = json.loads(json_str)
                 target_id = command_data.get("target_robot_id")
                 task_message = command_data.get("task")
 
                 if target_id and task_message:
-                    # Extract user-facing response (without JSON block)
+                    # Extract user-facing response (completely strips out the JSON block)
                     user_facing_response = llm_response_text.replace(match.group(0), "").strip()
                     
-                    # Construct delegation speech (for the ORIGINAL robot to speak)
+                    # Construct delegation speech (for the ORIGINAL robot to speak out loud)
                     delegation_speech = f"{user_facing_response} {task_message}"
                     
                     result.update({
@@ -106,8 +115,9 @@ class RequestRouter:
                         'task_message': task_message
                     })
                     
-            except json.JSONDecodeError:
-                print(f"⚠️ Invalid JSON in response. Treating as normal message.")
+            except json.JSONDecodeError as e:
+                # If it still fails, it will print exactly why here instead of crashing
+                print(f"⚠️ Invalid JSON in response: {e}. Treating as normal message.")
         
         return result
     
@@ -132,10 +142,12 @@ class RequestRouter:
 
         # 2. Send silent command to TARGET robot
         print(f"📤 Relaying silent command to {target_id}: '{task_message}'")
-        self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
+        # self.socketio.emit('execute_command', {'command': task_message}, room=target_id)
 
         # 3. Background task for target's response
         def execute_and_respond(target_server_instance, task, socket_io_instance):
+            import time
+            time.sleep(10)  # Brief pause to ensure command is registered
             try:
                 print(f"🚀 Executing background task for '{target_server_instance.client_id}'...")
                 delegated_result = target_server_instance.process_chat_message(task, is_delegated_command=True)
@@ -385,12 +397,13 @@ class RequestRouter:
         if not messages:
             return jsonify({"error": "No chat logs for user"}), 404
 
-        # 2) GPT inference
-        gpt = GPTClient()
-        if not gpt.setup_openai():
-            return jsonify({"error": "OPENAI_API_KEY not configured"}), 500
+        # 2) Local LLM inference
+        llm = OllamaClient()
+        # We don't need API keys anymore, just check if Ollama is awake!
+        if not llm.setup_client(): 
+            return jsonify({"error": "Local Ollama model is not available"}), 500
 
-        interests, conditions = gpt.infer_topics_and_conditions(messages)
+        interests, conditions = llm.infer_topics_and_conditions(messages)
 
         # 3) update Supabase
         self.db.update_user(user_id, interests=interests, health_conditions=conditions)

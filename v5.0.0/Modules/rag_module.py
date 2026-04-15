@@ -7,12 +7,6 @@ Local files (./rag_indexes):
 
 Supabase table 'chat_logs' stores: id (PK), user_id, message, response, created_at
 Embeddings are *not* stored in Supabase.
-
-Usage:
-    rag = RagModule(user_id, supabase_client)
-    ctx_texts = rag.search(query, top_k=8)
-    row_id = db.insert_chat_log(user_id, message, response)
-    rag.add(message)   # after insert (row_id not needed locally)
 """
 
 from __future__ import annotations
@@ -25,10 +19,10 @@ import numpy as np
 from openai import OpenAI
 from supabase import Client as SupabaseClient
 
-EMBED_MODEL = "text-embedding-ada-002"
+# 🚀 CHANGED: Using local Ollama embedding model instead of paid OpenAI
+EMBED_MODEL = "nomic-embed-text" 
 INDEX_DIR = Path("./rag_indexes")
 INDEX_DIR.mkdir(exist_ok=True)
-
 
 class RagModule:
     def __init__(self, user_id: int, supabase: SupabaseClient):
@@ -39,7 +33,12 @@ class RagModule:
         self._embedded_texts: List[str] = []   # parallel list of message strings
         self._lock = threading.RLock()
 
-        self._client = OpenAI()  # needs OPENAI_API_KEY
+        # 🚀 CHANGED: Pointing the client to local Ollama instead of OpenAI
+        self._client = OpenAI(
+            base_url="http://127.0.0.1:11434/v1",
+            api_key="ollama" 
+        )
+        
         self.faiss_path = INDEX_DIR / f"user_{user_id}.faiss"
         self.texts_path = INDEX_DIR / f"user_{user_id}_texts.json"
 
@@ -65,7 +64,6 @@ class RagModule:
         """
         Add a new user message to the local index.
         Call AFTER inserting chat log row in Supabase.
-        (We don't need the row_id locally.)
         """
         with self._lock:
             vec = np.array([self._embed(_normalize(message))], dtype="float32")
@@ -97,7 +95,7 @@ class RagModule:
             except Exception as e:
                 print(f"[RAG] Failed to load existing index → rebuilding. ({e})")
 
-        # Rebuild from Supabase chat logs (all past messages)
+        # Rebuild from Supabase chat logs
         print(f"[RAG] Building index for user {self.user_id} from Supabase…")
         data = (
             self.supabase.supabase.table("chat_logs")
@@ -107,8 +105,6 @@ class RagModule:
             .execute()
             .data
         ) or []
-
-        
 
         if not data:
             print(f"[RAG] No chat logs for user {self.user_id}. Starting empty.")
@@ -144,7 +140,6 @@ class RagModule:
                 self.texts_path.write_text(json.dumps(self._embedded_texts))
         except Exception as e:
             print(f"[RAG] Save error: {e}")
-
 
 def _normalize(s: str) -> str:
     return (s or "").strip()

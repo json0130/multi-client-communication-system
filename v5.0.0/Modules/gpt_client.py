@@ -6,28 +6,22 @@ from collections import deque
 from dataclasses import dataclass
 from typing import Deque
 
-import requests
-
 @dataclass
 class Message:
     role: str
     content: str
 
 class GPTClient:
-    """OpenAI/OpenRouter GPT client for emotion-aware chat responses"""
+    """OpenAI GPT client for emotion-aware chat responses"""
     
     def __init__(self):
         self.client = None
         self.available = False
         self.conversation_history: Deque[Message] = deque(maxlen=20)
 
-        # OpenRouter specific settings
-        self.is_openrouter = self.config.get('provider', '').lower() == 'openrouter'
-        self.openrouter_url = "https://openrouter.ai/api/v1/chat/completions"
-        self.model = self.config.get('model', 'openai/gpt-oss-20b:free')    # default fallback model
         
     def setup_openai(self):
-        """Setup OpenAI/OpenRouter client"""
+        """Setup OpenAI client"""
         try:
             # Try to get API key from environment variables
             api_key = os.getenv('OPENAI_API_KEY')
@@ -36,17 +30,10 @@ class GPTClient:
                 print("Please set your OpenAI API key: export OPENAI_API_KEY='your-key-here'")
                 return False
 
-            if self.is_openrouter:
-                # For OpenRouter we don't need the OpenAI client
-                self.available = True
-                print("OpenRouter selected, using custom endpoint")
-                return True
-            else:
-                self.client = OpenAI()
-                self.available = True
-                print("OpenAI selected, client initialized")
-                return True
-            
+            self.client = OpenAI(api_key=api_key)
+            self.available = True
+            print("OpenAI client initialized")
+            return True
         except Exception as e:
             print(f"OpenAI setup failed: {e}")
             self.available = False
@@ -65,47 +52,20 @@ class GPTClient:
             # Convert history to message format
             messages = [{"role": "system", "content": system_prompt}]
             # Add conversation history
-            for msg in self.conversation_history:
-                messages.append({"role": msg.role, "content": msg.content})
+            # for msg in self.conversation_history:
+            #     messages.append({"role": msg.role, "content": msg.content})
             
-            if self.is_openrouter:
-                # Use OpenRouter API
-                headers = {
-                    "Authorization": f"Bearer {self.config.get('api_key')}",
-                    "HTTP-Referer": "https://github.com/your-repo",  # Replace with your repo
-                    "Content-Type": "application/json"
-                }
-                
-                payload = {
-                    "model": self.model,
-                    "messages": messages,
-                    "temperature": self.config.get('temperature', 0.7),
-                    "max_tokens": self.config.get('max_tokens', 1000)
-                }
-                
-                response = requests.post(
-                    self.openrouter_url,
-                    headers=headers,
-                    json=payload
-                )
-                
-                if response.status_code == 200:
-                    assistant_response = response.json()['choices'][0]['message']['content']
-                else:
-                    raise Exception(f"OpenRouter API error: {response.text}")
-            
-            else:
-                # Use original OpenAI API
-                response = self.client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    messages=messages,
-                    timeout=10
-                )
+            # This is now a clean, generic function. It just passes the prompts along.
+            response = self.client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=messages,
+                timeout=10
+            )
 
-                assistant_response = response.choices[0].message.content
-                
+            assistant_response = response.choices[0].message.content
             # Store assistant's response in history
             self.conversation_history.append(Message("assistant", assistant_response))
+            
             return assistant_response
 
         except Exception as e:
@@ -138,6 +98,7 @@ class GPTClient:
 
             # Convert history to message format
             messages = [{"role": "system", "content": system_content}]
+            #messages = [{"role": "system", "content": system_content}, {"role": "user", "content": user_content}]
             # Add conversation history
             for msg in self.conversation_history:
                 messages.append({"role": msg.role, "content": msg.content})
