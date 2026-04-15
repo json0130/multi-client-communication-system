@@ -35,6 +35,7 @@ from gateway.delegation_handler import DelegationHandler
 from gateway.http_gateway import create_http_gateway
 from gateway.persona_gateway import create_persona_gateway
 from gateway.demo_gateway import create_demo_gateway
+from gateway.project_gateway import create_project_gateway
 from demo.demo_orchestrator import DemoOrchestrator
 from demo.demo_script import DEMO_STEPS
 
@@ -73,6 +74,9 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     demo_blueprint = create_demo_gateway(orchestrator)
     app.register_blueprint(demo_blueprint)
+
+    project_blueprint = create_project_gateway()
+    app.register_blueprint(project_blueprint)
 
     return app, ws_gateway, registry
 
