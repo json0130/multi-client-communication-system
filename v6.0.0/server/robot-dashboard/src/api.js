@@ -34,3 +34,22 @@ export const getPersona     = (id)       => req('GET',  `/personas/${id}`)
 export const createPersona  = (data)     => req('POST', '/personas', data)
 export const updatePersona  = (id, data) => req('PUT',  `/personas/${id}`, data)
 export const deletePersona  = (id)       => req('DELETE', `/personas/${id}`)
+
+// ── Demo ──────────────────────────────────────────────────────────────────────
+export const getDemoStatus = ()              => req('GET',  '/demo/status')
+export const startDemo     = ()              => req('POST', '/demo/start')
+export const stopDemo      = ()              => req('POST', '/demo/stop')
+export const pauseDemo     = ()              => req('POST', '/demo/pause')
+export const resumeDemo    = ()              => req('POST', '/demo/resume')
+export const nextDemoStep  = ()              => req('POST', '/demo/next')
+export const startQaMode   = (message = '')  => req('POST', '/demo/qa',     { message })
+export const endQaMode     = ()              => req('POST', '/demo/qa_end')
+
+// ── Projects (RDAC) ───────────────────────────────────────────────────────────
+export const getProjects          = ()              => req('GET',    '/projects')
+export const createProject        = (data)          => req('POST',   '/projects', data)
+export const updateProject        = (id, data)      => req('PUT',    `/projects/${id}`, data)
+export const deleteProject        = (id)            => req('DELETE', `/projects/${id}`)
+export const getProjectsForRobot  = (robot_id)      => req('GET',    `/projects/for/${robot_id}`)
+export const grantProjectAccess   = (id, robot_id)  => req('POST',   `/projects/${id}/access`, { robot_id })
+export const revokeProjectAccess  = (id, robot_id)  => req('DELETE', `/projects/${id}/access/${robot_id}`)
