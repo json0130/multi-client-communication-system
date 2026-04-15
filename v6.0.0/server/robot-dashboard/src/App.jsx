@@ -4,6 +4,7 @@ import RobotCard from './components/RobotCard'
 import RobotModal from './components/RobotModal'
 import PersonaCard from './components/PersonaCard'
 import PersonaModal from './components/PersonaModal'
+import DemoTab from './components/DemoTab'
 import { ToastContainer } from './components/Toast'
 
 const REFRESH_INTERVAL = 5000
@@ -103,6 +104,9 @@ export default function App() {
           </button>
           <button className={`nav-tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
             Personas {personas.length > 0 && `(${personas.length})`}
+          </button>
+          <button className={`nav-tab ${tab === 'demo' ? 'active' : ''}`} onClick={() => setTab('demo')}>
+            Demo
           </button>
         </nav>
         <div className="header-right">
@@ -235,6 +239,9 @@ export default function App() {
             </div>
           </>
         )}
+        {/* ── Demo tab ── */}
+        {tab === 'demo' && <DemoTab />}
+
       </main>
 
       {showRobotModal && (
