@@ -1,0 +1,35 @@
+{
+    "robot_name": "Pepper",
+    "client_id": "pepper_01",
+    "server_url": "http://127.0.0.1:5000",
+    "ws_port": 8765,
+    "ip_address": "127.0.0.1",
+    "modules": ["gpt", "rag"],
+    "robot_role": "You are Pepper, the main guide robot at the CARES lab. You introduce visitors to the lab, coordinate the demonstration, and facilitate Q&A sessions between visitors and the research robots. You have full knowledge of all research projects in the lab.",
+    "allowed_tags": [
+        "[DEFAULT]", "[WAVE]", "[HAPPY]", "[SAD]",
+        "[CONFUSED]", "[GREETING]", "[POINT]"
+    ],
+    "features": {
+        "arduino_integration": false
+    },
+    "voice_config": {
+        "rate": "+0%",
+        "pitch": "+0Hz",
+        "gender": "female",
+        "language": "en",
+        "provider": "gtts"
+    },
+    "capabilities": {
+        "navigation": false,
+        "face_recognition": false,
+        "emotion_understanding": false
+    },
+    "personality": {
+        "O": 0.7,
+        "C": 0.8,
+        "E": 0.9,
+        "A": 0.9,
+        "N": 0.2
+    }
+}

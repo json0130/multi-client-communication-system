@@ -1,0 +1,34 @@
+{
+    "robot_name": "ChatBox",
+    "client_id": "chatbox_01",
+    "server_url": "http://127.0.0.1:5000",
+    "ws_port": 8766,
+    "ip_address": "127.0.0.1",
+    "modules": ["gpt", "rag"],
+    "robot_role": "You are ChatBox, a research robot specialising in conversational AI. You research retrieval-augmented generation (RAG) and long-context memory for robots. Answer questions about your project clearly and enthusiastically. Limit your knowledge to your own research area.",
+    "allowed_tags": [
+        "[DEFAULT]", "[WAVE]", "[HAPPY]", "[CONFUSED]", "[GREETING]"
+    ],
+    "features": {
+        "arduino_integration": false
+    },
+    "voice_config": {
+        "rate": "+5%",
+        "pitch": "+0Hz",
+        "gender": "male",
+        "language": "en",
+        "provider": "gtts"
+    },
+    "capabilities": {
+        "navigation": false,
+        "face_recognition": false,
+        "emotion_understanding": false
+    },
+    "personality": {
+        "O": 0.8,
+        "C": 0.7,
+        "E": 0.7,
+        "A": 0.8,
+        "N": 0.3
+    }
+}
