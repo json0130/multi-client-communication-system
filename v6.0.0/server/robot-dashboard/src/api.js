@@ -20,10 +20,11 @@ async function req(method, path, body = null) {
 }
 
 // ── Robots ────────────────────────────────────────────────────────────────────
-export const getRobots    = ()         => req('GET',  '/robots')
-export const connectRobot = (id)       => req('POST', `/robots/${id}/connect`)
-export const disconnectRobot = (id)    => req('POST', `/robots/${id}/disconnect`)
-export const getRobotHealth  = (id)    => req('GET',  `/robots/${id}/health`)
+export const getRobots       = ()           => req('GET',  '/robots')
+export const registerRobot   = (data)       => req('POST', '/robots/register', data)
+export const connectRobot    = (id)         => req('POST', `/robots/${id}/connect`)
+export const disconnectRobot = (id)         => req('POST', `/robots/${id}/disconnect`)
+export const getRobotHealth  = (id)         => req('GET',  `/robots/${id}/health`)
 export const assignPersona   = (id, persona_id) =>
   req('POST', `/robots/${id}/persona`, { persona_id })
 

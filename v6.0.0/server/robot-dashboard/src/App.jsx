@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { getRobots, getPersonas } from './api'
 import RobotCard from './components/RobotCard'
+import RobotModal from './components/RobotModal'
 import PersonaCard from './components/PersonaCard'
 import PersonaModal from './components/PersonaModal'
 import { ToastContainer } from './components/Toast'
@@ -27,14 +28,15 @@ function SearchIcon() {
 }
 
 export default function App() {
-  const [tab, setTab]           = useState('robots')
-  const [robots, setRobots]     = useState([])
-  const [personas, setPersonas] = useState([])
-  const [loading, setLoading]   = useState(true)
-  const [showModal, setShowModal] = useState(false)
-  const [lastSync, setLastSync] = useState(null)
-  const [search, setSearch]     = useState('')
-  const [filter, setFilter]     = useState('all') // all | online | offline
+  const [tab, setTab]               = useState('robots')
+  const [robots, setRobots]         = useState([])
+  const [personas, setPersonas]     = useState([])
+  const [loading, setLoading]       = useState(true)
+  const [showPersonaModal, setShowPersonaModal] = useState(false)
+  const [showRobotModal,   setShowRobotModal]   = useState(false)
+  const [lastSync, setLastSync]     = useState(null)
+  const [search, setSearch]         = useState('')
+  const [filter, setFilter]         = useState('all')
 
   const fetchAll = useCallback(async () => {
     try {
@@ -42,8 +44,8 @@ export default function App() {
       setRobots(rbResp.robots || [])
       setPersonas(psResp.personas || [])
       setLastSync(new Date())
-    } catch (e) {
-      console.error('Fetch error:', e)
+    } catch {
+      // silent background refresh — errors suppressed
     } finally {
       setLoading(false)
     }
@@ -51,12 +53,12 @@ export default function App() {
 
   useEffect(() => { fetchAll() }, [fetchAll])
 
+  // Silent background auto-refresh
   useEffect(() => {
     const id = setInterval(fetchAll, REFRESH_INTERVAL)
     return () => clearInterval(id)
   }, [fetchAll])
 
-  // Filtered + searched robots
   const filteredRobots = useMemo(() => {
     return robots.filter(r => {
       const matchesSearch = !search ||
@@ -75,11 +77,16 @@ export default function App() {
 
   function handlePersonaCreated(persona) {
     setPersonas(prev => [...prev, persona])
-    setShowModal(false)
+    setShowPersonaModal(false)
   }
 
   function handlePersonaDeleted(id) {
     setPersonas(prev => prev.filter(p => p.id !== id))
+  }
+
+  function handleRobotCreated() {
+    setShowRobotModal(false)
+    fetchAll()
   }
 
   return (
@@ -99,10 +106,6 @@ export default function App() {
           </button>
         </nav>
         <div className="header-right">
-          <div className="live-dot">
-            <span />
-            Auto-refresh 5s
-          </div>
           <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={fetchAll}>
             Refresh
           </button>
@@ -125,6 +128,13 @@ export default function App() {
                   {lastSync && ` · synced ${lastSync.toLocaleTimeString()}`}
                 </div>
               </div>
+              <button
+                className="btn btn-primary"
+                style={{ flex: 'none', width: 'auto', padding: '9px 18px' }}
+                onClick={() => setShowRobotModal(true)}
+              >
+                + Add robot
+              </button>
             </div>
 
             {/* Search + filter bar */}
@@ -169,7 +179,7 @@ export default function App() {
                   <div className="empty-icon">◻</div>
                   <p>{search || filter !== 'all' ? 'No robots match your filter.' : 'No robots registered yet.'}</p>
                   {!search && filter === 'all' && (
-                    <p style={{ marginTop: 8, fontSize: 11 }}>Register a robot via POST /robots/register</p>
+                    <p style={{ marginTop: 8, fontSize: 11 }}>Use "+ Add robot" to register one.</p>
                   )}
                 </div>
               ) : (
@@ -182,10 +192,6 @@ export default function App() {
                   />
                 ))
               )}
-            </div>
-
-            <div className="refresh-bar" style={{ marginTop: 24 }}>
-              <div className="refresh-bar-inner" key={lastSync?.getTime()} />
             </div>
           </>
         )}
@@ -204,7 +210,7 @@ export default function App() {
               <button
                 className="btn btn-primary"
                 style={{ flex: 'none', width: 'auto', padding: '9px 18px' }}
-                onClick={() => setShowModal(true)}
+                onClick={() => setShowPersonaModal(true)}
               >
                 + New persona
               </button>
@@ -231,8 +237,11 @@ export default function App() {
         )}
       </main>
 
-      {showModal && (
-        <PersonaModal onClose={() => setShowModal(false)} onCreated={handlePersonaCreated} />
+      {showRobotModal && (
+        <RobotModal onClose={() => setShowRobotModal(false)} onCreated={handleRobotCreated} />
+      )}
+      {showPersonaModal && (
+        <PersonaModal onClose={() => setShowPersonaModal(false)} onCreated={handlePersonaCreated} />
       )}
       <ToastContainer />
     </div>

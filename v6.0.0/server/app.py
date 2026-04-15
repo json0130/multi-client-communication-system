@@ -22,6 +22,7 @@ Use the web UI or POST /robots/<id>/connect to connect a robot.
 import os
 import signal
 import sys
+import logging
 
 from flask import Flask
 
@@ -48,6 +49,9 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
     app.config["JSON_SORT_KEYS"] = False
+
+    # Suppress Werkzeug HTTP access logs (auto-refresh polling is noisy)
+    logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
     # Register HTTP routes
     blueprint = create_http_gateway(registry, ws_gateway)

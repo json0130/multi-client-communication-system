@@ -194,24 +194,7 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   opacity: 0.3;
 }
 
-/* ── Refresh bar ───────────────────────────────────────────── */
-.refresh-bar {
-  height: 2px;
-  background: var(--border);
-  border-radius: 1px;
-  margin-top: 24px;
-  overflow: hidden;
-}
-
-.refresh-bar-inner {
-  height: 100%;
-  background: var(--accent);
-  width: 100%;
-  transform-origin: left;
-  animation: countdown 5s linear forwards;
-}
-
-@keyframes countdown { from { transform: scaleX(1); } to { transform: scaleX(0); } }
+/* ── Live dot (kept for potential reuse, hidden in header) ─── */
 
 /* ── Card shared ───────────────────────────────────────────── */
 .card-header {
@@ -337,7 +320,19 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 .assign-row {
   display: flex;
   gap: 8px;
-  align-items: center;
+  align-items: stretch;
+}
+
+.assign-row .form-select {
+  flex: 1;
+  min-width: 0;
+}
+
+.assign-btn {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  padding: 8px 14px !important;
+  white-space: nowrap;
 }
 
 /* ── Card actions ──────────────────────────────────────────── */
@@ -664,6 +659,36 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   from { opacity: 0; transform: translateX(20px); }
   to   { opacity: 1; transform: translateX(0); }
 }
+
+/* ── Robot photo ───────────────────────────────────────────── */
+.robot-photo {
+  position: relative;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--surface2);
+  transition: border-color 0.15s;
+}
+
+.robot-photo:hover { border-color: var(--accent); }
+
+.robot-photo-overlay {
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transition: opacity 0.15s;
+  font-size: 18px;
+}
+
+.robot-photo:hover .robot-photo-overlay { opacity: 1; }
 
 /* ── Scrollbar ─────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; }

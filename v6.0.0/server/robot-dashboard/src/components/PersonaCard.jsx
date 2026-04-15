@@ -1,7 +1,6 @@
 import { deletePersona } from '../api'
 import { useToast } from './Toast'
-
-const OCEAN_LABELS = { O: 'Open', C: 'Cons', E: 'Extra', A: 'Agree', N: 'Neuro' }
+import { OceanChart } from './OceanRadar'
 
 export default function PersonaCard({ persona, onDeleted }) {
   const toast = useToast()
@@ -17,8 +16,8 @@ export default function PersonaCard({ persona, onDeleted }) {
     }
   }
 
-  const p = persona.personality || {}
-  const caps = persona.capabilities || {}
+  const p        = persona.personality || {}
+  const caps     = persona.capabilities || {}
   const activeCaps = Object.entries(caps).filter(([, v]) => v).map(([k]) => k)
 
   return (
@@ -43,9 +42,7 @@ export default function PersonaCard({ persona, onDeleted }) {
           <div className="card-label">Capabilities</div>
           <div className="module-list">
             {activeCaps.map(c => (
-              <span key={c} className="module-badge active">
-                {c.replace(/_/g, ' ')}
-              </span>
+              <span key={c} className="module-badge active">{c.replace(/_/g, ' ')}</span>
             ))}
           </div>
         </div>
@@ -61,30 +58,12 @@ export default function PersonaCard({ persona, onDeleted }) {
         </div>
       </div>
 
-      {/* OCEAN mini bars */}
+      {/* OCEAN radar chart */}
       {Object.keys(p).length > 0 && (
         <div className="card-section">
           <div className="card-label">Personality (OCEAN)</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-            {Object.entries(OCEAN_LABELS).map(([key, label]) => (
-              <div key={key} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', width: 32 }}>
-                  {label}
-                </span>
-                <div style={{ flex: 1, height: 4, background: 'var(--surface2)', borderRadius: 2 }}>
-                  <div style={{
-                    width: `${(p[key] || 0) * 100}%`,
-                    height: '100%',
-                    background: 'var(--accent)',
-                    borderRadius: 2,
-                    opacity: 0.7,
-                  }} />
-                </div>
-                <span style={{ fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', width: 24 }}>
-                  {(p[key] || 0).toFixed(1)}
-                </span>
-              </div>
-            ))}
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 8 }}>
+            <OceanChart values={p} size={130} />
           </div>
         </div>
       )}
