@@ -12,6 +12,7 @@
     "features": {
         "arduino_integration": false
     },
+    "audio_cmd": ["aplay"],
     "voice_config": {
         "rate": "+0%",
         "pitch": "-5Hz",

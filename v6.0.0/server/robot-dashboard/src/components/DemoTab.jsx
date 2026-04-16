@@ -137,11 +137,18 @@ export default function DemoTab() {
 
   useEffect(() => {
     if (!status) return
-    const key = `${status.step_idx}:${status.state}`
+
+    // Use a step-level key for speech states so that running→waiting_ack
+    // transitions on the same step don't add the same message twice.
+    const isSpeech = status.state === 'running' || status.state === 'waiting_ack'
+    const key = isSpeech
+      ? `step:${status.step_idx}`
+      : `${status.step_idx}:${status.state}`
+
     if (key === lastStepKey.current) return
     lastStepKey.current = key
 
-    if ((status.state === 'running' || status.state === 'waiting_ack') && status.text) {
+    if (isSpeech && status.text) {
       const clean = status.text.replace(/\[.*?\]/g, '').trim()
       if (clean) {
         addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
@@ -185,7 +192,10 @@ export default function DemoTab() {
       const res = await chatRobot(targetId, text)
       const name = robots.find(r => r.client_id === targetId)?.robot_name || targetId
       const reply = (res.clean_text || res.response || '').trim()
-      if (reply) addMsg({ role: 'robot', robot: name, text: reply, time: ts() })
+      if (reply) {
+        addMsg({ role: 'robot', robot: name, text: reply, time: ts() })
+        if (ttsRef.current) browserSpeak(reply, targetId)
+      }
     } catch (e) {
       addMsg({ role: 'system', text: `Error: ${e.message}`, time: ts() })
     } finally {

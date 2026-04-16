@@ -148,9 +148,66 @@ class WebSocketGateway:
         self._lock = threading.Lock()
         self._demo_orchestrator = None   # set via set_demo_orchestrator()
 
+    # Phrases from a ROBOT RESPONSE that signal it is wrapping up the Q&A.
+    _QA_CLOSING_PHRASES = [
+        # Research robot wrapping up their explanation
+        "let me know if you have any other questions",
+        "any other questions",
+        "feel free to ask",
+        "hope that answers",
+        "hope that helps",
+        "is there anything else",
+        "anything else i can help",
+        "don't hesitate to ask",
+        "please don't hesitate",
+        "happy to answer more",
+        "if you'd like to know more",
+        # Pepper acknowledging a "move on" request from the visitor
+        "let us move on",
+        "let's move on",
+        "moving on to",
+        "moving on now",
+        "let's proceed",
+        "shall proceed",
+        "proceed to the next",
+        "sure thing",
+        "great, moving",
+    ]
+
+    # Phrases in the USER'S INPUT that signal clear intent to advance the demo.
+    _QA_ADVANCE_PHRASES = [
+        "move on",
+        "next project",
+        "next robot",
+        "next step",
+        "proceed",
+        "can we continue",
+        "shall we continue",
+        "ready to continue",
+        "ready to move",
+        "let's go",
+        "let's continue",
+        "let us continue",
+    ]
+
     def set_demo_orchestrator(self, orchestrator):
         """Wire up the DemoOrchestrator so ACK packets are forwarded to it."""
         self._demo_orchestrator = orchestrator
+
+    def check_qa_auto_close(self, clean_text: str):
+        """
+        Called after any robot sends a chat response during the demo.
+        If the demo is in QA_WINDOW and the response contains a closing phrase,
+        automatically end the Q&A window so the demo can advance.
+        """
+        if not self._demo_orchestrator or not clean_text:
+            return
+        if self._demo_orchestrator.get_status()["state"] != "qa_window":
+            return
+        text_lower = clean_text.lower()
+        if any(phrase in text_lower for phrase in self._QA_CLOSING_PHRASES):
+            print(f"[WS Gateway] Auto-closing Q&A — closing phrase detected.")
+            self._demo_orchestrator.qa_end()
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -248,6 +305,7 @@ class WebSocketGateway:
                         "emotion_tag": result.emotion_tag,
                         "clean_text": result.clean_text,
                     })
+                    self.check_qa_auto_close(result.clean_text)
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler

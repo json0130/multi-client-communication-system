@@ -6,6 +6,7 @@ import queue
 import logging
 import os
 import tempfile
+import time
 from typing import Dict, Any
 from client import OutputModule
 from gtts import gTTS
@@ -130,20 +131,23 @@ class EdgeTTSOutputModule(OutputModule):
                 item = self.tts_queue.get(timeout=1)
                 if item is None:
                     break
-                # Items are always (text, callback) tuples
-                text, callback = item if isinstance(item, tuple) else (item, None)
+            except queue.Empty:
+                continue
+
+            # Items are always (text, callback) tuples
+            text, callback = item if isinstance(item, tuple) else (item, None)
+            try:
                 self._speak_text(text)
+            except Exception as e:
+                logger.error(f"[TTS] Playback error: {e}")
+            finally:
                 self.tts_queue.task_done()
-                # Fire ACK callback AFTER playback completes
+                # Fire ACK callback AFTER playback — always, even on error
                 if callback:
                     try:
                         callback()
                     except Exception as e:
                         logger.error(f"[TTS] Callback error: {e}")
-            except queue.Empty:
-                continue
-            except Exception as e:
-                logger.error(f"[TTS] Worker error: {e}")
 
     def _speak_text(self, text: str):
         # Snapshot voice settings for this utterance
@@ -152,6 +156,16 @@ class EdgeTTSOutputModule(OutputModule):
 
         tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
         tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+
+        # Mark speaking state NOW — before any network/audio work —
+        # so _on_demo_step's tts_done event fires only after this whole
+        # method returns (including any timing sleep).
+        if self.client:
+            if not hasattr(self.client, 'is_speaking'):
+                self.client.is_speaking = threading.Event()
+            self.client.is_speaking.set()
+            if hasattr(self.client, 'tts_started_event'):
+                self.client.tts_started_event.set()
 
         try:
             tts = gTTS(text=text, lang=language)
@@ -163,21 +177,30 @@ class EdgeTTSOutputModule(OutputModule):
                 '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', '-y', tmp_wav,
             ], capture_output=True, check=True)
 
-            # Signal microphone mute
-            if self.client:
-                if not hasattr(self.client, 'is_speaking'):
-                    self.client.is_speaking = threading.Event()
-                self.client.is_speaking.set()
-                if hasattr(self.client, 'tts_started_event'):
-                    self.client.tts_started_event.set()
+            logger.info(f"[TTS] Speaking: {text[:60]}{'...' if len(text) > 60 else ''}")
 
-            subprocess.run(self._audio_cmd + [tmp_wav], capture_output=True)
+            result = subprocess.run(self._audio_cmd + [tmp_wav], capture_output=True)
+            if result.returncode != 0:
+                logger.warning(f"[TTS] Audio device failed (rc={result.returncode}), trying default aplay...")
+                result = subprocess.run(['aplay', tmp_wav], capture_output=True)
+                if result.returncode != 0:
+                    # Both audio paths failed — sleep so ACK timing is still correct
+                    words = len(text.split())
+                    est_sec = max(1.0, words / 2.5)
+                    logger.warning(f"[TTS] No audio output — sleeping {est_sec:.1f}s to preserve timing")
+                    time.sleep(est_sec)
 
         except Exception as e:
-            logger.error(f"[TTS] Playback error: {e}")
+            logger.error(f"[TTS] Generation/playback error: {e}")
+            # Preserve expected speech duration so ACK doesn't fire instantly on failure
+            words = len(text.split())
+            est_sec = max(1.0, words / 2.5)
+            logger.warning(f"[TTS] Sleeping {est_sec:.1f}s as timing fallback")
+            time.sleep(est_sec)
         finally:
             if self.client and hasattr(self.client, 'is_speaking'):
                 self.client.is_speaking.clear()
+            logger.debug("[TTS] is_speaking cleared")
             for f in [tmp_mp3, tmp_wav]:
                 if os.path.exists(f):
                     os.unlink(f)

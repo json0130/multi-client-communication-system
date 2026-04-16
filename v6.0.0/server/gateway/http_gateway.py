@@ -226,6 +226,9 @@ def create_http_gateway(
             "clean_text": result.clean_text,
         })
 
+        # Auto-close Q&A window if the response is a closing statement
+        ws_gateway.check_qa_auto_close(result.clean_text)
+
         # Handle delegation
         if result.is_delegation and result.delegation_target:
             from gateway.delegation_handler import DelegationHandler

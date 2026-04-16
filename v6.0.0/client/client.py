@@ -347,7 +347,9 @@ class BasicClient:
         Handle a demo_step event pushed by the DemoOrchestrator.
 
         Bypasses the LLM — text goes straight to TTS.
-        After TTS completes, sends ACK back to server if require_ack is True.
+        This method BLOCKS in the handler thread until TTS completes,
+        then sends ACK. This guarantees the server only advances after
+        the robot has actually finished speaking.
         """
         step_id  = data.get("step_id", "")
         text     = data.get("text", "")
@@ -360,30 +362,47 @@ class BasicClient:
 
         logger.info(f"[Demo] Step '{step_id}': {text[:60]}{'...' if len(text) > 60 else ''}")
 
-        # Extract emotion tag for hardware (Arduino, etc.)
+        # Extract emotion tag for hardware
         match = re.search(r"\[(.*?)\]", text)
         if match:
             self.on_emotion_detected(match.group(1))
 
-        # Build a callback that fires after TTS finishes
-        callback = (lambda sid=step_id: self.send_ack(sid)) if need_ack else None
+        # Per-step completion event — set inside _tts_worker.finally after playback
+        tts_done = threading.Event()
 
-        # Route to output modules — prefer speak_with_callback for ACK timing
-        ack_scheduled = False
+        def _on_tts_done():
+            logger.info(f"[Demo] TTS completed for '{step_id}'")
+            tts_done.set()
+
+        # Route to the FIRST TTS output module only — break after the first speak
+        # to prevent any second module from speaking the same text again.
+        spoken = False
         for name, module in self.output_modules.items():
             try:
                 if hasattr(module, "speak_with_callback"):
-                    module.speak_with_callback(text, callback=callback if not ack_scheduled else None)
-                    if callback:
-                        ack_scheduled = True   # only one module fires the ACK
-                elif hasattr(module, "process_output"):
-                    module.process_output({"text": text, "type": "demo"})
+                    module.speak_with_callback(
+                        text,
+                        callback=_on_tts_done if need_ack else None,
+                    )
+                    spoken = True
+                    break   # one robot, one voice — stop after first TTS module
             except Exception as e:
-                logger.error(f"[Demo] Output '{name}' error: {e}")
+                logger.error(f"[Demo] TTS module '{name}' error: {e}")
 
-        # Fallback: if no module supports speak_with_callback, send ACK immediately
-        if need_ack and not ack_scheduled:
+        if not need_ack:
+            return
+
+        if not spoken:
+            logger.warning(f"[Demo] No TTS module for step '{step_id}' — ACK now")
             self.send_ack(step_id)
+            return
+
+        # Block this handler thread until _on_tts_done fires (or hard timeout)
+        completed = tts_done.wait(timeout=120)
+        if not completed:
+            logger.warning(f"[Demo] TTS wait timed out for '{step_id}' — ACK anyway")
+
+        self.send_ack(step_id)
 
     def send_ack(self, step_id: str):
         """Send an ACK packet to the server for the given demo step."""

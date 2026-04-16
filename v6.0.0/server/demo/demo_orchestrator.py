@@ -63,13 +63,15 @@ class DemoStep:
         qa_timeout  : Seconds the Q&A window stays open before auto-advancing.
                       Set to 0 to require manual close (POST /demo/next).
     """
-    step_id:     str
-    robot_id:    str
-    text:        str
-    require_ack: bool  = True
-    timeout_sec: float = 30.0
-    qa_window:   bool  = False
-    qa_timeout:  float = 60.0
+    step_id:       str
+    robot_id:      str
+    text:          str
+    require_ack:   bool  = True
+    timeout_sec:   float = 30.0
+    qa_window:     bool  = False
+    qa_timeout:    float = 60.0
+    check_in_sec:  float = 0.0   # seconds of inactivity before Pepper checks in; 0 = disabled
+    check_in_text: str   = ""    # text Pepper speaks at check-in
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -96,6 +98,7 @@ class DemoOrchestrator:
         self._pause_event.set()
         self._qa_end_event   = threading.Event()   # set to close Q&A window early
         self._advance_event  = threading.Event()   # set by stop/manual_next to skip transition delay
+        self._skip_next_qa   = False               # set by manual_next to skip upcoming qa_window
 
         self._runner: Optional[threading.Thread] = None
 
@@ -120,8 +123,9 @@ class DemoOrchestrator:
             if not self._script:
                 logger.error("[Demo] No script loaded.")
                 return
-            self._idx   = 0
-            self._state = DemoState.RUNNING
+            self._idx          = 0
+            self._state        = DemoState.RUNNING
+            self._skip_next_qa = False
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -131,8 +135,9 @@ class DemoOrchestrator:
 
     def stop(self):
         with self._lock:
-            self._state = DemoState.IDLE
-            self._idx   = 0
+            self._state        = DemoState.IDLE
+            self._idx          = 0
+            self._skip_next_qa = False
         self._ack_event.set()
         self._qa_end_event.set()
         self._pause_event.set()
@@ -156,6 +161,13 @@ class DemoOrchestrator:
 
     def manual_next(self):
         """Force-advance past current wait (ACK timeout, Q&A window, or transition delay)."""
+        with self._lock:
+            # Only pre-arm the skip flag when we are NOT already inside a Q&A window.
+            # If we ARE inside one, _qa_end_event.set() below is enough to close it;
+            # setting the flag here would incorrectly skip the *next* scripted Q&A step.
+            if self._state not in (DemoState.QA_WINDOW, DemoState.IDLE,
+                                   DemoState.COMPLETED, DemoState.ERROR):
+                self._skip_next_qa = True
         logger.info("[Demo] Manual next.")
         self._ack_event.set()
         self._qa_end_event.set()
@@ -164,15 +176,32 @@ class DemoOrchestrator:
 
     def qa_interrupt(self, message: str = ""):
         """
-        Ad-hoc Q&A mode — pause the demo and send an optional message from Pepper.
-        Close with manual_next() or qa_end().
+        Ad-hoc Q&A — works at ANY point during the demo (running, waiting_ack,
+        paused, or even during the scripted Q&A window).
+
+        The run loop unblocks from whatever wait it is in (ACK wait, transition
+        delay, pause) and enters QA_WINDOW.  Call qa_end() or manual_next() to
+        close and resume exactly where the demo left off (same step index).
         """
         with self._lock:
-            if self._state in (DemoState.RUNNING, DemoState.WAITING_ACK):
-                self._state = DemoState.QA_WINDOW
-                self._qa_end_event.clear()
+            if self._state == DemoState.QA_WINDOW:
+                logger.info("[Demo] Already in Q&A window.")
+                return
+            if self._state not in (
+                DemoState.RUNNING, DemoState.WAITING_ACK, DemoState.PAUSED
+            ):
+                logger.warning(f"[Demo] qa_interrupt ignored in state {self._state}")
+                return
+            self._state = DemoState.QA_WINDOW
+            self._qa_end_event.clear()
+
+        # Unblock every possible blocking call in _run_loop so it wakes up
+        # immediately and detects the QA_WINDOW state.
+        self._ack_event.set()       # unblocks _ack_event.wait()
+        self._advance_event.set()   # unblocks transition-delay wait
+        self._pause_event.set()     # unblocks pause if currently paused
+
         if message:
-            # Broadcast to Pepper (first robot in script, or default)
             default_robot = self._script[0].robot_id if self._script else None
             if default_robot:
                 self._ws.send_to_robot(default_robot, {
@@ -181,7 +210,7 @@ class DemoOrchestrator:
                     "text":        message,
                     "require_ack": False,
                 })
-        logger.info("[Demo] Entered ad-hoc Q&A window.")
+        logger.info("[Demo] Entered ad-hoc Q&A window (interrupt).")
 
     def qa_end(self):
         """End the current Q&A window and advance the demo."""
@@ -229,9 +258,39 @@ class DemoOrchestrator:
 
     # ── Internal loop ─────────────────────────────────────────────────────────
 
+    def _wait_if_interrupted_qa(self) -> bool:
+        """
+        If a qa_interrupt() was called while the loop was in a blocking wait,
+        the state is now QA_WINDOW.  Block here until the operator closes it
+        (qa_end / manual_next), then restore RUNNING so the loop continues
+        from the same step index without skipping anything.
+
+        Returns False if the demo was stopped (should exit the loop).
+        """
+        with self._lock:
+            if self._state != DemoState.QA_WINDOW:
+                return self._state not in (
+                    DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR
+                )
+
+        logger.info("[Demo] Ad-hoc Q&A — waiting for operator to close...")
+        self._qa_end_event.wait()          # blocks until qa_end() / manual_next()
+
+        with self._lock:
+            if self._state in (DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR):
+                return False
+            self._state = DemoState.RUNNING
+
+        logger.info("[Demo] Ad-hoc Q&A closed — resuming demo.")
+        return True
+
     def _run_loop(self):
         while True:
             self._pause_event.wait()  # blocks when paused
+
+            # A qa_interrupt() during the transition delay lands here.
+            if not self._wait_if_interrupted_qa():
+                return
 
             with self._lock:
                 state = self._state
@@ -262,14 +321,21 @@ class DemoOrchestrator:
                 with self._lock:
                     if self._state == DemoState.IDLE:
                         return
-                    if not got_ack:
+                    if self._state == DemoState.QA_WINDOW:
+                        pass   # handled by _wait_if_interrupted_qa below
+                    elif not got_ack:
                         self._state = DemoState.ERROR
                         logger.error(f"[Demo] Timeout on '{step.step_id}'. "
                                      "POST /demo/next to continue.")
                         return
-                    self._state = DemoState.RUNNING
+                    else:
+                        self._state = DemoState.RUNNING
 
-            # Q&A window after this step
+            # A qa_interrupt() during the ACK wait lands here.
+            if not self._wait_if_interrupted_qa():
+                return
+
+            # Q&A window configured on this step (scripted pause)
             if step.qa_window:
                 self._open_qa_window(step)
 
@@ -279,7 +345,7 @@ class DemoOrchestrator:
                 self._idx += 1
 
             # Pause between steps so TTS/hardware settle before the next cue.
-            # Skipped immediately if stop() or manual_next() is called.
+            # Skipped immediately if stop() or manual_next() or qa_interrupt() fires.
             if self._transition_delay > 0:
                 self._advance_event.clear()
                 self._advance_event.wait(timeout=self._transition_delay)
@@ -296,14 +362,55 @@ class DemoOrchestrator:
     def _open_qa_window(self, step: DemoStep):
         """Block in QA_WINDOW state until timeout or manual close."""
         with self._lock:
+            # If manual_next() already fired before we entered the window, skip it entirely.
+            if self._skip_next_qa:
+                self._skip_next_qa = False
+                logger.info("[Demo] Q&A window skipped — manual advance already pending.")
+                return
             self._state = DemoState.QA_WINDOW
         self._qa_end_event.clear()
 
-        timeout = step.qa_timeout if step.qa_timeout > 0 else None
-        logger.info(f"[Demo] Q&A window open "
-                    f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
+        base_timeout = step.qa_timeout    if step.qa_timeout   > 0 else None
+        check_in     = step.check_in_sec  if step.check_in_sec > 0 else None
+        robot_id     = step.robot_id
 
-        self._qa_end_event.wait(timeout=timeout)
+        logger.info(
+            f"[Demo] Q&A window open "
+            f"({'auto-closes in ' + str(base_timeout) + 's' if base_timeout else 'manual close only'})"
+            f"{', check-in every ' + str(check_in) + 's' if check_in else ''}."
+        )
+
+        if check_in is None:
+            # No check-in configured — simple wait (original behaviour).
+            self._qa_end_event.wait(timeout=base_timeout)
+        else:
+            # Wait in check_in_sec slices; send a check-in message to Pepper on each timeout.
+            deadline = (time.time() + base_timeout) if base_timeout else None
+            while not self._qa_end_event.is_set():
+                if deadline:
+                    remaining = deadline - time.time()
+                    if remaining <= 0:
+                        break
+                    wait_sec = min(check_in, remaining)
+                else:
+                    wait_sec = check_in
+
+                fired = self._qa_end_event.wait(timeout=wait_sec)
+                if fired:
+                    break
+
+                # Timed out — send check-in to Pepper if window still open
+                if not self._qa_end_event.is_set() and step.check_in_text:
+                    self._ws.send_to_robot(robot_id, {
+                        "event":       "demo_step",
+                        "step_id":     "_qa_checkin",
+                        "text":        step.check_in_text,
+                        "require_ack": False,
+                    })
+                    logger.info(f"[Demo] Q&A check-in sent to '{robot_id}'.")
+
+                if deadline and time.time() >= deadline:
+                    break
 
         with self._lock:
             if self._state == DemoState.IDLE:
