@@ -18,11 +18,14 @@ Requires: pip install websocket-client
 
 from __future__ import annotations
 import json
+import logging
 import threading
 import time
 from typing import Optional, Callable, TYPE_CHECKING
 
 import websocket   # websocket-client library
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from robot.robot_registry import RobotRegistry
@@ -194,10 +197,36 @@ class WebSocketGateway:
         """Wire up the DemoOrchestrator so ACK packets are forwarded to it."""
         self._demo_orchestrator = orchestrator
 
+    def generate_demo_step(self, robot_id: str, instruction: str) -> str:
+        """
+        Generate speech text for a demo step server-side using the robot's
+        LLM instance via generate_demo_speech() (demo-appropriate prompt,
+        no delegation logic, correct length handling).
+        Returns raw response (includes emotion tag) on success,
+        or the original instruction as fallback.
+        """
+        instance = self._registry.get(robot_id)
+        if not instance:
+            logger.warning(f"[WS Gateway] generate_demo_step: no instance for '{robot_id}' "
+                           f"— connected ids: {list(self._connections.keys())}")
+            return instruction
+
+        logger.info(f"[WS Gateway] Generating demo speech for '{robot_id}'...")
+        try:
+            result = instance.generate_demo_speech(instruction)
+            generated = result.response or instruction
+            logger.info(f"[WS Gateway] Generated ({robot_id}): {generated[:100]}"
+                        f"{'...' if len(generated) > 100 else ''}")
+            return generated
+        except Exception as e:
+            logger.error(f"[WS Gateway] generate_demo_step failed for '{robot_id}': {e}",
+                         exc_info=True)
+            return instruction
+
     def check_qa_auto_close(self, clean_text: str):
         """
-        Called after any robot sends a chat response during the demo.
-        If the demo is in QA_WINDOW and the response contains a closing phrase,
+        Called after a robot sends a chat response during the demo.
+        If the demo is in QA_WINDOW and the response contains a closing/advance phrase,
         automatically end the Q&A window so the demo can advance.
         """
         if not self._demo_orchestrator or not clean_text:
@@ -206,8 +235,69 @@ class WebSocketGateway:
             return
         text_lower = clean_text.lower()
         if any(phrase in text_lower for phrase in self._QA_CLOSING_PHRASES):
-            print(f"[WS Gateway] Auto-closing Q&A — closing phrase detected.")
+            print(f"[WS Gateway] Auto-closing Q&A — closing phrase in robot response.")
             self._demo_orchestrator.qa_end()
+
+    def check_qa_advance_from_user(self, user_text: str):
+        """
+        Called with the raw user input message during the demo.
+        If the demo is in QA_WINDOW and the user is clearly asking to advance,
+        end the Q&A window immediately (before the robot even responds).
+        """
+        if not self._demo_orchestrator or not user_text:
+            return
+        if self._demo_orchestrator.get_status()["state"] != "qa_window":
+            return
+        text_lower = user_text.lower()
+        if any(phrase in text_lower for phrase in self._QA_ADVANCE_PHRASES):
+            print(f"[WS Gateway] Auto-closing Q&A — advance intent from user: '{user_text[:50]}'")
+            self._demo_orchestrator.qa_end()
+
+    def _check_qa_pepper_wrap_up(self, responding_robot_id: str, robot_clean_text: str):
+        """
+        After a research robot responds during QA_WINDOW, ask Pepper's LLM
+        whether this is a natural wrap-up point. Pepper generates a brief
+        transition sentence if YES, stays silent if NO.
+        Run in a daemon thread — must not block the message handler.
+        """
+        if not self._demo_orchestrator or not robot_clean_text:
+            return
+        status = self._demo_orchestrator.get_status()
+        if status["state"] != "qa_window":
+            return
+
+        # pepper_id is the robot_id on the current Q&A step
+        pepper_id = status.get("robot_id")
+        if not pepper_id or responding_robot_id == pepper_id:
+            return   # don't recurse on Pepper's own responses
+
+        pepper_instance = self._registry.get(pepper_id)
+        if not pepper_instance or not hasattr(pepper_instance, "process_chat"):
+            return
+
+        prompt = (
+            f"[Demo moderator context — Q&A step: {status.get('step_id')}] "
+            f"A research robot just responded: \"{robot_clean_text[:200]}\". "
+            f"As the demo moderator, decide: is this a natural wrap-up point where visitors "
+            f"seem satisfied and we could transition to the next part of the demo? "
+            f"If YES — write a single warm 1-sentence transition (e.g. 'Wonderful! "
+            f"Shall we move on to the next part?'). "
+            f"If NO — respond with exactly: NO"
+        )
+        try:
+            result = pepper_instance.process_chat(prompt)
+            reply = (result.clean_text or "").strip()
+            if reply and reply.upper() != "NO" and len(reply) > 5:
+                self.send_to_robot(pepper_id, {
+                    "event":       "demo_step",
+                    "step_id":     "_qa_wrap_up",
+                    "text":        result.response,
+                    "require_ack": False,
+                })
+                # If the wrap-up itself contains a closing phrase, advance the demo
+                self.check_qa_auto_close(reply)
+        except Exception as e:
+            print(f"[WS Gateway] Pepper wrap-up eval failed: {e}")
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -298,6 +388,7 @@ class WebSocketGateway:
             if msg_type == "chat":
                 message = data.get("message", "")
                 if message:
+                    self.check_qa_advance_from_user(message)
                     result = instance.process_chat(message)
                     self.send_to_robot(client_id, {
                         "event": "chat_response",
@@ -306,6 +397,12 @@ class WebSocketGateway:
                         "clean_text": result.clean_text,
                     })
                     self.check_qa_auto_close(result.clean_text)
+                    # Ask Pepper if it's a natural wrap-up point (non-blocking)
+                    threading.Thread(
+                        target=self._check_qa_pepper_wrap_up,
+                        args=(client_id, result.clean_text or ""),
+                        daemon=True,
+                    ).start()
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler
@@ -332,6 +429,16 @@ class WebSocketGateway:
                             handler = DelegationHandler(self._registry, self)
                             handler.handle(client_id, result.chat.response)
                     self.send_to_robot(client_id, response_data)
+                    # Check advance intent from visitor's transcription
+                    if result.transcription:
+                        self.check_qa_advance_from_user(result.transcription)
+                    # Ask Pepper if it's a natural wrap-up point (non-blocking)
+                    if result.chat:
+                        threading.Thread(
+                            target=self._check_qa_pepper_wrap_up,
+                            args=(client_id, result.chat.clean_text or ""),
+                            daemon=True,
+                        ).start()
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")

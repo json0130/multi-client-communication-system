@@ -139,6 +139,60 @@ class RobotInstance:
             delegation_target=target_id,
         )
 
+    # ── Demo speech generation ────────────────────────────────────────────────
+
+    def generate_demo_speech(self, instruction: str) -> "ChatResult":
+        """
+        Generate speech for a demo step from an instruction/prompt.
+        Unlike process_chat(), this uses a demo-appropriate system prompt:
+          - No delegation logic
+          - No rigid 1-2 sentence cap (length is set by the instruction itself)
+          - Conversation history is maintained so context builds across steps
+        Falls back to a ChatResult wrapping the raw instruction on error.
+        """
+        self.last_active = time.time()
+        self._refresh_role_from_db()
+
+        if not self.llm or not self.llm.is_available():
+            return ChatResult(
+                response=instruction,
+                emotion_tag="",
+                clean_text=instruction,
+                user_emotion=self._current_user_emotion(),
+                is_delegation=False,
+            )
+
+        tags_str    = ", ".join(self._allowed_tags) if self._allowed_tags else "[DEFAULT]"
+        example_tag = self._allowed_tags[0] if self._allowed_tags else "[DEFAULT]"
+
+        system_prompt = (
+            f"You are {self.client_id}. Your role: {self._robot_role}\n\n"
+            f"DEMO SPEECH RULES:\n"
+            f"1. The VERY FIRST character of your response MUST be '['.\n"
+            f"2. Use EXACTLY ONE emotion tag chosen from: {tags_str}\n"
+            f"3. Speak naturally as yourself — the instruction you receive tells you\n"
+            f"   what to say, the emotional tone, and how long to speak.\n"
+            f"4. Do NOT include any extra commentary, JSON, or meta-text.\n\n"
+            f"CORRECT:   {example_tag} Welcome to the CARES lab! I am Pepper, your guide today.\n"
+            f"INCORRECT: Welcome! {example_tag} I am Pepper.   <- tag must be first"
+        )
+
+        llm_resp = self.llm.generate_with_history(system_prompt, self._history, instruction)
+
+        # Maintain history so each step builds on prior context
+        self._history.append({"role": "user",      "content": instruction})
+        self._history.append({"role": "assistant",  "content": llm_resp.text})
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
+
+        return ChatResult(
+            response=llm_resp.text,
+            emotion_tag=llm_resp.emotion_tag,
+            clean_text=llm_resp.clean_text,
+            user_emotion=self._current_user_emotion(),
+            is_delegation=False,
+        )
+
     # ── Speech ────────────────────────────────────────────────────────────────
 
     def process_speech(self, audio_b64: str) -> SpeechResult:

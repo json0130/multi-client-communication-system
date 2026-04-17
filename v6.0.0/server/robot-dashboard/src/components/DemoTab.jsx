@@ -146,15 +146,21 @@ export default function DemoTab() {
       : `${status.step_idx}:${status.state}`
 
     if (key === lastStepKey.current) return
-    lastStepKey.current = key
 
-    if (isSpeech && status.text) {
+    if (isSpeech) {
+      // While the server is still generating, status.text is null — don't mark
+      // the key as seen yet so the next poll can retry with the real text.
+      if (!status.text) return
       const clean = status.text.replace(/\[.*?\]/g, '').trim()
-      if (clean) {
-        addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
-        if (ttsRef.current) browserSpeak(clean, status.robot_id)
-      }
+      if (!clean) return
+      lastStepKey.current = key   // mark seen only once we have real speech text
+      addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
+      if (ttsRef.current) browserSpeak(clean, status.robot_id)
+      return
     }
+
+    // Non-speech states — always mark as seen immediately
+    lastStepKey.current = key
     if (status.state === 'qa_window') {
       addMsg({ role: 'system', text: 'Q&A window open — visitors can ask questions', time: ts() })
     }

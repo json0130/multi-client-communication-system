@@ -19,14 +19,18 @@ Q&A windows:
   • After each robot speaks, Pepper invites questions.
   • The orchestrator enters a timed Q&A window (qa_window=True on a step).
   • Visitors can speak to any connected robot — normal LLM/RAG pipeline handles it.
-  • The window auto-closes after `qa_timeout` seconds, or press "Next Step" on dashboard.
+  • The window auto-closes after `qa_timeout` seconds, or press "Move On" on dashboard.
   • At ANY time during the demo use POST /demo/qa to open an ad-hoc Q&A window.
+
+Each step uses generate=True so the robot's LLM generates natural speech from the
+instruction in `text`, building real conversation history across the demo instead of
+speaking hardcoded lines. The `text` field is a concise prompt/instruction.
 
 Edit instructions:
   • Change PEPPER/CHATBOX/NAVEL/SILBOT to match your client_config.json `client_id`.
-  • Edit step `text` fields to customise speech.
-  • Adjust `timeout_sec` to match expected TTS duration + buffer.
-  • Set `qa_timeout` on Q&A steps (how long to accept visitor questions).
+  • Edit step `text` fields to customise the instruction given to the robot's LLM.
+  • Adjust `timeout_sec` — keep generous values (60–90s) for generate steps.
+  • Set `qa_timeout` on Q&A steps (how long to accept visitor questions; 0 = manual).
   • Comment out steps to skip them.
   • Restart the server after any change.
 """
@@ -51,27 +55,31 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "greeting",
         robot_id    = PEPPER,
-        text        = "[GREETING] Welcome to the CARES lab! "
-                      "I am Pepper, your guide for today's demonstration.",
-        timeout_sec = 30,
+        text        = "You are opening the CARES lab demonstration for a group of visitors. "
+                      "Welcome them warmly, introduce yourself as Pepper the lab guide, and let them know "
+                      "you are excited to show them around today. Keep it to 2 sentences. Start with [GREETING].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
         step_id     = "lab_intro",
         robot_id    = PEPPER,
-        text        = "[WAVE] CARES stands for the Centre for Automation and Robotic Engineering Science. "
-                      "We research intelligent robots that can communicate, collaborate, and assist people "
-                      "in real-world environments.",
-        timeout_sec = 40,
+        text        = "Briefly explain what CARES stands for (Centre for Automation and Robotic Engineering Science) "
+                      "and what the lab researches — intelligent robots that can communicate, collaborate, and assist "
+                      "people in real-world environments. Keep it to 2-3 sentences. Start with [WAVE].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
         step_id     = "overview",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Today you will meet three of our research robots, "
-                      "each working on a different project. "
-                      "After each introduction, there will be time to ask questions directly.",
-        timeout_sec = 35,
+        text        = "Set expectations for the demo: visitors will meet three research robots today, "
+                      "each working on a different project. After each robot speaks, there will be time "
+                      "to ask questions. Keep it to 2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -81,60 +89,65 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "intro_project_a",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Our first project focuses on conversational AI — "
-                      "specifically how robots can hold long, contextually aware conversations "
-                      "using retrieval-augmented generation.",
-        timeout_sec = 40,
+        text        = "Introduce the first research project: conversational AI and retrieval-augmented generation. "
+                      "Explain that this project focuses on how robots can hold long, contextually aware conversations "
+                      "by combining language models with a knowledge base. Keep it to 2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
         step_id     = "introduce_chatbox",
         robot_id    = PEPPER,
-        text        = "[POINT] And the robot leading this research is ChatBox! "
-                      "ChatBox, please say hello to our visitors!",
-        timeout_sec = 25,
+        text        = "Hand off to ChatBox, the robot leading the conversational AI research. "
+                      "Point towards ChatBox and invite them to say hello to the visitors. "
+                      "1-2 sentences. Use [POINT].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "chatbox_greeting",
         robot_id    = CHATBOX,
-        text        = "[WAVE] Hello everyone! It is wonderful to meet you all. "
-                      "I am ChatBox, and I am really glad you are here today!",
-        timeout_sec = 30,
+        text        = "Greet the visitors warmly for the first time. You are ChatBox. "
+                      "Introduce yourself and express genuine excitement about meeting the visitors. "
+                      "2 sentences. Start with [WAVE].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "chatbox_prompt",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] ChatBox, could you tell our visitors what you are working on?",
-        timeout_sec = 25,
+        text        = "Ask ChatBox to explain their research project to the visitors. "
+                      "1 sentence. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 40,
     ),
 
     DemoStep(
         step_id     = "chatbox_project",
         robot_id    = CHATBOX,
-        text        = "[DEFAULT] Of course! My research focuses on retrieval-augmented generation — "
-                      "a technique that lets robots pull in relevant knowledge on demand "
-                      "while keeping track of long, context-rich conversations. "
-                      "I combine large language models with vector search so my answers stay "
-                      "accurate and grounded even as topics shift.",
-        timeout_sec = 60,
+        text        = "Explain your research on retrieval-augmented generation (RAG) to a non-expert audience. "
+                      "Cover: what RAG is, how combining language models with a searchable knowledge base helps robots "
+                      "give accurate answers, and how you maintain context across a long conversation. "
+                      "Make it engaging and accessible. 3-4 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 90,
     ),
 
     # Q&A window — visitors can speak to ChatBox or any robot
     DemoStep(
-        step_id       = "qa_invite_a",
-        robot_id      = PEPPER,
-        text          = "[DEFAULT] Does anyone have questions about ChatBox's project? "
-                        "You can speak directly to ChatBox or to me. "
-                        "Take your time — I will wait until we are ready to move on.",
-        timeout_sec   = 35,
-        qa_window     = True,
-        qa_timeout    = 0,      # manual advance only — operator clicks Move On
-        check_in_sec  = 45.0,
-        check_in_text = "[DEFAULT] We have been chatting for a while — "
-                        "shall we move on to the next project, "
-                        "or would you like more time with ChatBox?",
+        step_id     = "qa_invite_a",
+        robot_id    = PEPPER,
+        text        = "Open a Q&A session after ChatBox's presentation. "
+                      "Invite visitors to ask questions — they can speak directly to ChatBox or to you. "
+                      "Let them know you will wait until everyone is ready to move on. "
+                      "2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
+        qa_window   = True,
+        qa_timeout  = 0,    # manual advance only — operator clicks Move On
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -144,66 +157,77 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "transition_to_b",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Excellent! Now let us move on to our second project.",
-        timeout_sec = 20,
+        text        = "Transition from the ChatBox Q&A to the second project. "
+                      "Give a brief, warm sign-off to ChatBox and announce you are moving on. "
+                      "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "intro_project_b",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] This project explores emotion-aware interaction — "
-                      "how robots can recognise a person's emotional state and adapt their "
-                      "communication style accordingly.",
-        timeout_sec = 35,
+        text        = "Introduce the second research project: emotion-aware interaction. "
+                      "Explain that this project studies how robots can recognise a person's emotional state "
+                      "and adapt their communication style accordingly. 2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
         step_id     = "introduce_navel",
         robot_id    = PEPPER,
-        text        = "[POINT] And the robot behind this research is Navel! "
-                      "Navel, please say hi to everyone!",
-        timeout_sec = 25,
+        text        = "Hand off to Navel, the robot leading emotion-aware interaction research. "
+                      "Point towards Navel and invite them to say hi to everyone. "
+                      "1-2 sentences. Use [POINT].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "navel_greeting",
         robot_id    = NAVEL,
-        text        = "[WAVE] Hi there! I am so happy to see you all here. "
-                      "I am Navel, and I love meeting new people — it is literally part of my research!",
-        timeout_sec = 30,
+        text        = "Greet the visitors warmly for the first time. You are Navel. "
+                      "Introduce yourself and mention that meeting new people is literally part of your research. "
+                      "2 sentences. Start with [WAVE].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "navel_prompt",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Navel, would you like to share what your research is about?",
-        timeout_sec = 25,
+        text        = "Ask Navel to share what their research is about with the visitors. "
+                      "1 sentence. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 40,
     ),
 
     DemoStep(
         step_id     = "navel_project",
         robot_id    = NAVEL,
-        text        = "[DEFAULT] Absolutely! I study emotion-aware interaction. "
-                      "I detect facial expressions and tone of voice in real time, "
-                      "then adapt how I speak — slower when someone looks confused, "
-                      "warmer when someone seems upset, more concise when someone is in a hurry. "
-                      "My goal is to make talking to a robot feel as natural as talking to a person.",
-        timeout_sec = 60,
+        text        = "Explain your emotion-aware interaction research to a non-expert audience. "
+                      "Cover: that you detect facial expressions and tone of voice in real time, "
+                      "how you adapt your speaking style based on what you detect "
+                      "(e.g. slower when someone looks confused, warmer when someone seems upset), "
+                      "and your goal of making conversation with a robot feel natural. "
+                      "3-4 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 90,
     ),
 
     # Q&A window
     DemoStep(
-        step_id       = "qa_invite_b",
-        robot_id      = PEPPER,
-        text          = "[DEFAULT] Please feel free to ask Navel about emotion recognition, "
-                        "or ask me anything about the lab. "
-                        "I will wait here until we are all ready to continue.",
-        timeout_sec   = 30,
-        qa_window     = True,
-        qa_timeout    = 0,      # manual advance only — operator clicks Move On
-        check_in_sec  = 45.0,
-        check_in_text = "[DEFAULT] Just checking in — are we ready to continue, "
-                        "or would you like a bit more time with Navel?",
+        step_id     = "qa_invite_b",
+        robot_id    = PEPPER,
+        text        = "Open a Q&A session after Navel's presentation on emotion-aware interaction. "
+                      "Invite visitors to ask questions — they can speak to Navel or to you. "
+                      "Let them know you will wait until everyone is ready to continue. "
+                      "2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
+        qa_window   = True,
+        qa_timeout  = 0,    # manual advance only — operator clicks Move On
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -213,64 +237,79 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "transition_to_c",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Wonderful. And now for our third project.",
-        timeout_sec = 20,
+        text        = "Transition from the Navel Q&A to the third and final project. "
+                      "Brief warm sign-off to Navel and announce the move to the next project. "
+                      "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "intro_project_c",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] This research asks: how can a robot move through a crowded space "
-                      "safely, politely, and predictably — the way a person would?",
-        timeout_sec = 35,
+        text        = "Introduce the third research project: human-aware navigation. "
+                      "Frame it as the question: how can a robot move through a crowded space "
+                      "safely, politely, and predictably — the way a person would? "
+                      "2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
         step_id     = "introduce_silbot",
         robot_id    = PEPPER,
-        text        = "[POINT] That is Silbot's area of expertise. "
-                      "Silbot, please come and say hello to our visitors!",
-        timeout_sec = 25,
+        text        = "Hand off to Silbot, the robot specialising in human-aware navigation. "
+                      "Point towards Silbot and invite them to come say hello to the visitors. "
+                      "1-2 sentences. Use [POINT].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "silbot_greeting",
         robot_id    = SILBOT,
-        text        = "[WAVE] Hello! Thank you for having me. "
-                      "I am Silbot, and I navigate spaces the way people do — with awareness and courtesy.",
-        timeout_sec = 30,
+        text        = "Greet the visitors warmly for the first time. You are Silbot. "
+                      "Introduce yourself and briefly mention that you navigate spaces with awareness and courtesy. "
+                      "2 sentences. Start with [WAVE].",
+        generate    = True,
+        timeout_sec = 50,
     ),
 
     DemoStep(
         step_id     = "silbot_prompt",
         robot_id    = PEPPER,
-        text        = "[DEFAULT] Silbot, could you explain your navigation research to our visitors?",
-        timeout_sec = 25,
+        text        = "Ask Silbot to explain their navigation research to the visitors. "
+                      "1 sentence. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 40,
     ),
 
     DemoStep(
         step_id     = "silbot_project",
         robot_id    = SILBOT,
-        text        = "[DEFAULT] Of course. Rather than simply avoiding obstacles, "
-                      "I predict where people are moving and plan routes that do not cut through "
-                      "conversations or crowd groups. "
-                      "I was trained in simulation and then tested in real office corridors here at CARES. "
-                      "The goal is for robots to move through shared spaces as a respectful colleague would.",
-        timeout_sec = 60,
+        text        = "Explain your human-aware navigation research to a non-expert audience. "
+                      "Cover: that rather than just avoiding obstacles, you predict where people are moving, "
+                      "plan routes that do not cut through conversations or crowd groups, "
+                      "that you were trained in simulation and tested in real office corridors at CARES, "
+                      "and your goal of moving through shared spaces the way a respectful colleague would. "
+                      "3-4 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 90,
     ),
 
     # Q&A window
     DemoStep(
-        step_id       = "qa_invite_c",
-        robot_id      = PEPPER,
-        text          = "[DEFAULT] Any questions for Silbot about navigation and social robotics? "
-                        "Feel free to take your time — I will let you know when we are ready to wrap up.",
-        timeout_sec   = 30,
-        qa_window     = True,
-        qa_timeout    = 0,      # manual advance only — operator clicks Move On
-        check_in_sec  = 45.0,
-        check_in_text = "[DEFAULT] Are we ready to move on to the closing remarks, "
-                        "or shall we give Silbot a little more time?",
+        step_id     = "qa_invite_c",
+        robot_id    = PEPPER,
+        text        = "Open a Q&A session after Silbot's presentation on human-aware navigation. "
+                      "Invite visitors to ask questions about navigation and social robotics — "
+                      "they can speak to Silbot or to you. "
+                      "Let them know you will be here until everyone is ready to wrap up. "
+                      "2 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
+        qa_window   = True,
+        qa_timeout  = 0,    # manual advance only — operator clicks Move On
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -280,24 +319,25 @@ DEMO_STEPS = [
     DemoStep(
         step_id     = "wrap_up",
         robot_id    = PEPPER,
-        text        = "[HAPPY] Thank you, ChatBox, Navel, and Silbot! "
-                      "As you have seen, each robot brings a unique capability to the lab. "
-                      "Together we are building robots that can truly work alongside people.",
-        timeout_sec = 40,
+        text        = "Close the main part of the demo. Thank ChatBox, Navel, and Silbot by name. "
+                      "Summarise that each robot brings a unique capability and together you are all "
+                      "working towards robots that can truly work alongside people. "
+                      "2-3 sentences. Use [HAPPY].",
+        generate    = True,
+        timeout_sec = 60,
     ),
 
     DemoStep(
-        step_id       = "open_floor",
-        robot_id      = PEPPER,
-        text          = "[DEFAULT] We now open the floor to general questions. "
-                        "You are welcome to approach any of our robots or speak to me. "
-                        "Thank you for joining us today at CARES!",
-        timeout_sec   = 35,
-        qa_window     = True,
-        qa_timeout    = 0,      # manual close — operator ends open floor via dashboard
-        check_in_sec  = 60.0,
-        check_in_text = "[DEFAULT] Please feel free to keep chatting — "
-                        "I am here whenever you are ready to finish.",
+        step_id     = "open_floor",
+        robot_id    = PEPPER,
+        text        = "Open a general Q&A — the demo is complete but the floor is open. "
+                      "Invite visitors to approach any of the robots or speak to you with any remaining questions. "
+                      "Thank them warmly for joining the CARES lab demonstration today. "
+                      "2-3 sentences. Use [DEFAULT].",
+        generate    = True,
+        timeout_sec = 60,
+        qa_window   = True,
+        qa_timeout  = 0,    # manual close — operator ends open floor via dashboard
     ),
 
 ]

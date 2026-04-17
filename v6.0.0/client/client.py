@@ -346,10 +346,9 @@ class BasicClient:
         """
         Handle a demo_step event pushed by the DemoOrchestrator.
 
-        Bypasses the LLM — text goes straight to TTS.
-        This method BLOCKS in the handler thread until TTS completes,
-        then sends ACK. This guarantees the server only advances after
-        the robot has actually finished speaking.
+        The server has already generated the speech text (if needed) before
+        sending — this handler only does TTS playback and sends ACK when done.
+        Blocks until TTS completes, then sends ACK.
         """
         step_id  = data.get("step_id", "")
         text     = data.get("text", "")

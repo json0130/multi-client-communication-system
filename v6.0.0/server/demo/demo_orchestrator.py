@@ -63,15 +63,14 @@ class DemoStep:
         qa_timeout  : Seconds the Q&A window stays open before auto-advancing.
                       Set to 0 to require manual close (POST /demo/next).
     """
-    step_id:       str
-    robot_id:      str
-    text:          str
-    require_ack:   bool  = True
-    timeout_sec:   float = 30.0
-    qa_window:     bool  = False
-    qa_timeout:    float = 60.0
-    check_in_sec:  float = 0.0   # seconds of inactivity before Pepper checks in; 0 = disabled
-    check_in_text: str   = ""    # text Pepper speaks at check-in
+    step_id:     str
+    robot_id:    str
+    text:        str
+    require_ack: bool  = True
+    timeout_sec: float = 30.0
+    qa_window:   bool  = False
+    qa_timeout:  float = 60.0
+    generate:    bool  = False   # if True, client generates speech via LLM instead of verbatim
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────
@@ -102,6 +101,10 @@ class DemoOrchestrator:
 
         self._runner: Optional[threading.Thread] = None
 
+        # Holds the LLM-generated text for the current step (replaces raw instruction
+        # for display in get_status and as what's actually sent to the robot).
+        self._current_step_text: Optional[str] = None
+
     # ── Script ────────────────────────────────────────────────────────────────
 
     def load_script(self, steps: list[DemoStep]):
@@ -123,9 +126,10 @@ class DemoOrchestrator:
             if not self._script:
                 logger.error("[Demo] No script loaded.")
                 return
-            self._idx          = 0
-            self._state        = DemoState.RUNNING
-            self._skip_next_qa = False
+            self._idx                = 0
+            self._state              = DemoState.RUNNING
+            self._skip_next_qa       = False
+            self._current_step_text  = None
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -135,9 +139,10 @@ class DemoOrchestrator:
 
     def stop(self):
         with self._lock:
-            self._state        = DemoState.IDLE
-            self._idx          = 0
-            self._skip_next_qa = False
+            self._state             = DemoState.IDLE
+            self._idx               = 0
+            self._skip_next_qa      = False
+            self._current_step_text = None
         self._ack_event.set()
         self._qa_end_event.set()
         self._pause_event.set()
@@ -236,13 +241,17 @@ class DemoOrchestrator:
             idx    = self._idx
             total  = len(self._script)
             step   = self._script[idx] if idx < total else None
+            # Show the LLM-generated text when available; fall back to raw instruction
+            # Return None while generation is in progress so the dashboard waits
+            # rather than displaying the raw instruction prompt.
+            display_text = self._current_step_text
             return {
                 "state":       self._state.value,
                 "step_idx":    idx,
                 "total":       total,
                 "step_id":     step.step_id  if step else None,
                 "robot_id":    step.robot_id if step else None,
-                "text":        step.text     if step else None,
+                "text":        display_text,
                 "qa_window":   step.qa_window if step else False,
                 # Full step list for the dashboard timeline
                 "steps": [
@@ -343,6 +352,7 @@ class DemoOrchestrator:
                 if self._state == DemoState.IDLE:
                     return
                 self._idx += 1
+                self._current_step_text = None
 
             # Pause between steps so TTS/hardware settle before the next cue.
             # Skipped immediately if stop() or manual_next() or qa_interrupt() fires.
@@ -351,10 +361,22 @@ class DemoOrchestrator:
                 self._advance_event.wait(timeout=self._transition_delay)
 
     def _send_step(self, step: DemoStep):
+        text = step.text
+        if step.generate:
+            logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
+            generated = self._ws.generate_demo_step(step.robot_id, step.text)
+            if generated and generated != step.text:
+                text = generated
+                logger.info(f"[Demo] Generated text ready for '{step.step_id}'")
+            else:
+                logger.warning(f"[Demo] Generation returned fallback for '{step.step_id}' "
+                               f"— speaking instruction as-is")
+        with self._lock:
+            self._current_step_text = text
         self._ws.send_to_robot(step.robot_id, {
             "event":       "demo_step",
             "step_id":     step.step_id,
-            "text":        step.text,
+            "text":        text,
             "require_ack": step.require_ack,
         })
         logger.info(f"[Demo] Sent '{step.step_id}' to '{step.robot_id}'")
@@ -370,47 +392,11 @@ class DemoOrchestrator:
             self._state = DemoState.QA_WINDOW
         self._qa_end_event.clear()
 
-        base_timeout = step.qa_timeout    if step.qa_timeout   > 0 else None
-        check_in     = step.check_in_sec  if step.check_in_sec > 0 else None
-        robot_id     = step.robot_id
+        timeout = step.qa_timeout if step.qa_timeout > 0 else None
+        logger.info(f"[Demo] Q&A window open "
+                    f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
 
-        logger.info(
-            f"[Demo] Q&A window open "
-            f"({'auto-closes in ' + str(base_timeout) + 's' if base_timeout else 'manual close only'})"
-            f"{', check-in every ' + str(check_in) + 's' if check_in else ''}."
-        )
-
-        if check_in is None:
-            # No check-in configured — simple wait (original behaviour).
-            self._qa_end_event.wait(timeout=base_timeout)
-        else:
-            # Wait in check_in_sec slices; send a check-in message to Pepper on each timeout.
-            deadline = (time.time() + base_timeout) if base_timeout else None
-            while not self._qa_end_event.is_set():
-                if deadline:
-                    remaining = deadline - time.time()
-                    if remaining <= 0:
-                        break
-                    wait_sec = min(check_in, remaining)
-                else:
-                    wait_sec = check_in
-
-                fired = self._qa_end_event.wait(timeout=wait_sec)
-                if fired:
-                    break
-
-                # Timed out — send check-in to Pepper if window still open
-                if not self._qa_end_event.is_set() and step.check_in_text:
-                    self._ws.send_to_robot(robot_id, {
-                        "event":       "demo_step",
-                        "step_id":     "_qa_checkin",
-                        "text":        step.check_in_text,
-                        "require_ack": False,
-                    })
-                    logger.info(f"[Demo] Q&A check-in sent to '{robot_id}'.")
-
-                if deadline and time.time() >= deadline:
-                    break
+        self._qa_end_event.wait(timeout=timeout)
 
         with self._lock:
             if self._state == DemoState.IDLE:
