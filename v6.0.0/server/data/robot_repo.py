@@ -151,6 +151,32 @@ def set_active(client_id: str, active: bool) -> bool:
         return False
 
 
+def update_robot(client_id: str, **fields) -> bool:
+    """
+    Update arbitrary fields on an existing robot record.
+    Allowed fields: robot_name, ip_address, ws_port, modules.
+    Returns True on success.
+    """
+    if not fields:
+        return True
+    try:
+        get_client().table("robots").update(fields).eq("client_id", client_id).execute()
+        return True
+    except Exception as e:
+        print(f"[robot_repo] update_robot error: {e}")
+        return False
+
+
+def delete_robot(client_id: str) -> bool:
+    """Permanently delete a robot from the database. Returns True on success."""
+    try:
+        get_client().table("robots").delete().eq("client_id", client_id).execute()
+        return True
+    except Exception as e:
+        print(f"[robot_repo] delete_robot error: {e}")
+        return False
+
+
 def update_role_and_tags(
     client_id: str,
     robot_role: Optional[str] = None,

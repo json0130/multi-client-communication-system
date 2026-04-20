@@ -346,9 +346,10 @@ class BasicClient:
         """
         Handle a demo_step event pushed by the DemoOrchestrator.
 
-        The server has already generated the speech text (if needed) before
-        sending — this handler only does TTS playback and sends ACK when done.
-        Blocks until TTS completes, then sends ACK.
+        When generate=False (default): text goes straight to TTS (verbatim).
+        When generate=True: text is treated as a prompt — the LLM generates
+        the actual speech, building up natural conversation history across steps.
+        This method BLOCKS until TTS completes, then sends ACK.
         """
         step_id  = data.get("step_id", "")
         text     = data.get("text", "")

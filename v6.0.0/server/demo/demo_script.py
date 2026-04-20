@@ -40,8 +40,8 @@ from demo.demo_orchestrator import DemoStep
 # ── Robot IDs — must match client_id in each robot's client_config.json ───────
 
 PEPPER  = "pepper_01"    # Main guide robot — full DB access
-CHATBOX = "chatbox_01"   # Project A robot
-NAVEL   = "navel_01"     # Project B robot
+CHATBOX = "chatbox_jetson_001"   # Project A robot
+NAVEL   = "navel_001"     # Project B robot
 SILBOT  = "silbot_01"    # Project C robot
 
 # ── Demo script ────────────────────────────────────────────────────────────────

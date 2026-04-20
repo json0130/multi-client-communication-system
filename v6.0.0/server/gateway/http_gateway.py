@@ -131,6 +131,32 @@ def create_http_gateway(
             "message": f"Robot '{robot.robot_name}' registered successfully.",
         })
 
+    @bp.route("/robots/<client_id>", methods=["PUT", "DELETE"])
+    def manage_robot(client_id: str):
+        """
+        PUT    — update name, IP, port, or modules.
+        DELETE — disconnect then permanently delete from the database.
+        """
+        if request.method == "DELETE":
+            ws_gateway.disconnect_robot(client_id)
+            ok = robot_repo.delete_robot(client_id)
+            if not ok:
+                return jsonify({"error": "Delete failed"}), 500
+            return jsonify({"success": True, "message": f"'{client_id}' deleted."})
+
+        # PUT
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "JSON body required"}), 400
+        allowed = {"robot_name", "ip_address", "ws_port", "modules"}
+        fields = {k: v for k, v in data.items() if k in allowed}
+        if not fields:
+            return jsonify({"error": "No valid fields provided"}), 400
+        ok = robot_repo.update_robot(client_id, **fields)
+        if not ok:
+            return jsonify({"error": "Update failed"}), 500
+        return jsonify({"success": True, "message": f"'{client_id}' updated."})
+
     @bp.route("/robots/<client_id>/role", methods=["PUT"])
     def update_role(client_id: str):
         """

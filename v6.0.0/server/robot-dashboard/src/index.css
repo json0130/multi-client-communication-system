@@ -342,6 +342,79 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   gap: 8px;
 }
 
+/* ── Robot card edit form ──────────────────────────────────── */
+.card-edit-form {
+  padding: 4px 0 8px;
+}
+
+.edit-field-label {
+  display: block;
+  font-size: 10px;
+  font-family: var(--mono);
+  color: var(--muted);
+  margin-bottom: 4px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.edit-modules {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  margin-top: 4px;
+}
+
+.edit-module-check {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--text);
+  cursor: pointer;
+  user-select: none;
+}
+
+.edit-module-check input[type="checkbox"] {
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+/* ── Icon button (edit pencil) ────────────────────────────── */
+.btn-icon {
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 3px 7px;
+  line-height: 1;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-icon:hover:not(:disabled) {
+  color: var(--text);
+  border-color: var(--accent);
+}
+.btn-icon:disabled { opacity: 0.4; cursor: default; }
+
+/* ── Delete button ────────────────────────────────────────── */
+.btn-delete {
+  margin-left: auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 5px 10px;
+  transition: color 0.15s, border-color 0.15s;
+}
+.btn-delete:hover:not(:disabled) {
+  color: var(--danger);
+  border-color: rgba(239, 68, 68, 0.4);
+}
+
 /* ── Persona card ──────────────────────────────────────────── */
 .persona-card {
   background: var(--surface);
