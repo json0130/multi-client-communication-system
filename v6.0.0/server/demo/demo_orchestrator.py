@@ -118,11 +118,22 @@ class DemoOrchestrator:
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
-    def start(self):
+    def start(self, robot_ids: list = None):
+        """
+        Start the demo.  If *robot_ids* is provided (non-empty list), a script is
+        built dynamically: first entry is the guide/host, the rest are project
+        robots in the requested order.  If omitted, the pre-loaded script is used.
+        """
         with self._lock:
             if self._state == DemoState.RUNNING:
                 logger.warning("[Demo] Already running.")
                 return
+            if robot_ids:
+                from demo.demo_script import build_script  # local import avoids circular dependency
+                guide    = robot_ids[0]
+                projects = robot_ids[1:]
+                self._script = build_script(guide, projects)
+                logger.info(f"[Demo] Dynamic script built — guide={guide}, projects={projects}")
             if not self._script:
                 logger.error("[Demo] No script loaded.")
                 return

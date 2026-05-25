@@ -41,7 +41,7 @@ export const deletePersona  = (id)       => req('DELETE', `/personas/${id}`)
 
 // ── Demo ──────────────────────────────────────────────────────────────────────
 export const getDemoStatus = ()              => req('GET',  '/demo/status')
-export const startDemo     = ()              => req('POST', '/demo/start')
+export const startDemo     = (robotIds = []) => req('POST', '/demo/start', robotIds.length ? { robot_ids: robotIds } : null)
 export const stopDemo      = ()              => req('POST', '/demo/stop')
 export const pauseDemo     = ()              => req('POST', '/demo/pause')
 export const resumeDemo    = ()              => req('POST', '/demo/resume')

@@ -24,7 +24,9 @@ def create_demo_gateway(orchestrator) -> Blueprint:
 
     @bp.route("/demo/start", methods=["POST"])
     def start():
-        orchestrator.start()
+        data      = request.get_json(silent=True) or {}
+        robot_ids = data.get("robot_ids") or []
+        orchestrator.start(robot_ids=robot_ids if robot_ids else None)
         return jsonify({"message": "Demo started.", **orchestrator.get_status()})
 
     @bp.route("/demo/stop", methods=["POST"])

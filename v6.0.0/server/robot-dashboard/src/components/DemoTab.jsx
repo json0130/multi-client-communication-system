@@ -56,6 +56,188 @@ function ts() {
 
 // ── Sub-components ────────────────────────────────────────────────────────────
 
+function RobotSelectorModal({ onClose, onStart }) {
+  const [allRobots,   setAllRobots]   = useState([])
+  const [loading,     setLoading]     = useState(true)
+  const [selectedIds, setSelectedIds] = useState([])  // ordered list
+
+  useEffect(() => {
+    getRobots()
+      .then(data => {
+        const online = (data.robots || []).filter(r => r.ws_connected)
+        setAllRobots(data.robots || [])
+        setSelectedIds(online.map(r => r.client_id))
+      })
+      .catch(() => {})
+      .finally(() => setLoading(false))
+  }, [])
+
+  const robotMap = Object.fromEntries(allRobots.map(r => [r.client_id, r]))
+
+  const toggle = (id) => {
+    setSelectedIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    )
+  }
+
+  const moveUp = (i) => {
+    if (i === 0) return
+    setSelectedIds(prev => {
+      const next = [...prev]
+      ;[next[i - 1], next[i]] = [next[i], next[i - 1]]
+      return next
+    })
+  }
+
+  const moveDown = (i) => {
+    setSelectedIds(prev => {
+      if (i === prev.length - 1) return prev
+      const next = [...prev]
+      ;[next[i], next[i + 1]] = [next[i + 1], next[i]]
+      return next
+    })
+  }
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div className="modal" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
+
+        <div className="modal-title">
+          <span>Configure Demo Robots</span>
+          <button className="modal-close" onClick={onClose}>✕</button>
+        </div>
+
+        {loading ? (
+          <div className="muted" style={{ padding: '24px', textAlign: 'center' }}>Loading robots…</div>
+        ) : (
+          <>
+            {/* ── Available robots ── */}
+            <div style={{ marginBottom: 20 }}>
+              <div className="demo-section-title" style={{ marginBottom: 10 }}>Available Robots</div>
+              {allRobots.length === 0 && (
+                <div className="muted" style={{ fontSize: '0.82rem' }}>No robots registered.</div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {allRobots.map(r => {
+                  const isOnline  = r.ws_connected
+                  const isChecked = selectedIds.includes(r.client_id)
+                  return (
+                    <label
+                      key={r.client_id}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 10, cursor: isOnline ? 'pointer' : 'default',
+                        opacity: isOnline ? 1 : 0.4,
+                        padding: '6px 10px', borderRadius: 6,
+                        background: isChecked ? 'rgba(59,130,246,0.12)' : 'transparent',
+                        border: `1px solid ${isChecked ? 'rgba(59,130,246,0.4)' : 'transparent'}`,
+                        transition: 'background 0.15s, border 0.15s',
+                      }}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isChecked}
+                        disabled={!isOnline}
+                        onChange={() => toggle(r.client_id)}
+                        style={{ accentColor: '#3b82f6', width: 15, height: 15 }}
+                      />
+                      <span style={{ flex: 1, fontSize: '0.87rem', fontWeight: 500 }}>
+                        {r.robot_name}
+                        <span className="muted" style={{ marginLeft: 6, fontWeight: 400, fontSize: '0.78rem' }}>
+                          ({r.client_id})
+                        </span>
+                      </span>
+                      <span style={{
+                        fontSize: '0.72rem', padding: '2px 7px', borderRadius: 999,
+                        background: isOnline ? 'rgba(16,185,129,0.15)' : 'rgba(107,114,128,0.15)',
+                        color: isOnline ? '#34d399' : '#9ca3af',
+                      }}>
+                        {isOnline ? 'online' : 'offline'}
+                      </span>
+                    </label>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* ── Demo order ── */}
+            <div style={{ marginBottom: 24 }}>
+              <div className="demo-section-title" style={{ marginBottom: 6 }}>
+                Demo Order
+                <span className="muted" style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.75rem' }}>
+                  first = guide / host
+                </span>
+              </div>
+              {selectedIds.length === 0 ? (
+                <div className="muted" style={{ fontSize: '0.82rem', padding: '8px 0' }}>
+                  Select at least one robot above.
+                </div>
+              ) : (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {selectedIds.map((id, i) => {
+                    const r = robotMap[id]
+                    return (
+                      <div
+                        key={id}
+                        style={{
+                          display: 'flex', alignItems: 'center', gap: 8,
+                          padding: '7px 10px', borderRadius: 6,
+                          background: 'var(--surface2, rgba(255,255,255,0.04))',
+                          border: '1px solid var(--border, rgba(255,255,255,0.08))',
+                        }}
+                      >
+                        <span style={{
+                          fontSize: '0.7rem', fontWeight: 600, padding: '2px 7px',
+                          borderRadius: 999, minWidth: 44, textAlign: 'center',
+                          background: i === 0 ? 'rgba(245,158,11,0.2)' : 'rgba(99,102,241,0.15)',
+                          color: i === 0 ? '#fbbf24' : '#a5b4fc',
+                        }}>
+                          {i === 0 ? 'HOST' : `#${i}`}
+                        </span>
+                        <span style={{ flex: 1, fontSize: '0.85rem' }}>
+                          {r?.robot_name || id}
+                          <span className="muted" style={{ marginLeft: 6, fontSize: '0.76rem' }}>({id})</span>
+                        </span>
+                        <div style={{ display: 'flex', gap: 3 }}>
+                          <button
+                            className="btn btn-sm"
+                            style={{ padding: '2px 7px', fontSize: '0.75rem' }}
+                            disabled={i === 0}
+                            onClick={() => moveUp(i)}
+                            title="Move up"
+                          >↑</button>
+                          <button
+                            className="btn btn-sm"
+                            style={{ padding: '2px 7px', fontSize: '0.75rem' }}
+                            disabled={i === selectedIds.length - 1}
+                            onClick={() => moveDown(i)}
+                            title="Move down"
+                          >↓</button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* ── Actions ── */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+              <button className="btn btn-sm" onClick={onClose}>Cancel</button>
+              <button
+                className="btn btn-primary btn-sm"
+                disabled={selectedIds.length === 0}
+                onClick={() => onStart(selectedIds)}
+              >
+                Start Demo →
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function StatePill({ state }) {
   const c = STATE_COLORS[state] || STATE_COLORS.idle
   return (
@@ -91,8 +273,9 @@ function ChatMessage({ msg }) {
 
 export default function DemoTab() {
   // ── Demo state ──────────────────────────────────────────────────────────────
-  const [status,   setStatus]   = useState(null)
-  const [ctrlLoad, setCtrlLoad] = useState(false)
+  const [status,       setStatus]       = useState(null)
+  const [ctrlLoad,     setCtrlLoad]     = useState(false)
+  const [showSelector, setShowSelector] = useState(false)
 
   // ── TTS state ───────────────────────────────────────────────────────────────
   const [ttsEnabled, setTtsEnabled] = useState(true)
@@ -232,7 +415,7 @@ export default function DemoTab() {
 
         {/* Compact controls */}
         <div className="demox-controls">
-          <button className="btn btn-primary btn-sm" disabled={ctrlLoad || isRunning}  onClick={() => run(startDemo)}>Start</button>
+          <button className="btn btn-primary btn-sm" disabled={ctrlLoad || isRunning}  onClick={() => setShowSelector(true)}>Start</button>
           <button className="btn btn-danger  btn-sm" disabled={ctrlLoad || isIdle}     onClick={() => run(stopDemo)}>Stop</button>
           {status?.state === 'paused'
             ? <button className="btn btn-sm" disabled={ctrlLoad}              onClick={() => run(resumeDemo)}>Resume</button>
@@ -374,6 +557,17 @@ export default function DemoTab() {
 
         </div>
       </div>
+
+      {/* ═══════════════════ ROBOT SELECTOR MODAL ═════════════════════════ */}
+      {showSelector && (
+        <RobotSelectorModal
+          onClose={() => setShowSelector(false)}
+          onStart={robotIds => {
+            setShowSelector(false)
+            run(() => startDemo(robotIds))
+          }}
+        />
+      )}
     </div>
   )
 }
