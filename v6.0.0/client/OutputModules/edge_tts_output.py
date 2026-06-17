@@ -7,7 +7,8 @@ import logging
 import os
 import tempfile
 import time
-from typing import Dict, Any
+import concurrent.futures
+from typing import Dict, Any, Optional
 from client import OutputModule
 from gtts import gTTS
 
@@ -37,6 +38,11 @@ class EdgeTTSOutputModule(OutputModule):
         self.tts_queue  = queue.Queue()
         self.tts_thread = None
         self.stop_event = threading.Event()
+
+        self._interrupt_event = threading.Event()
+        self._aplay_proc: Optional[subprocess.Popen] = None
+        self._aplay_lock  = threading.Lock()
+        self._sim_speed   = self.config.get('sim_speed', 1.0)
 
     # ── BaseModule interface ───────────────────────────────────────────────────
 
@@ -91,6 +97,32 @@ class EdgeTTSOutputModule(OutputModule):
         if callback:
             callback()
         return False
+
+    def interrupt(self):
+        """Drain the queue and stop after current sentence finishes — no mid-word cutoff."""
+        self._interrupt_event.set()
+        # Don't kill aplay — let the current sentence finish naturally, matching Navel behaviour.
+        while True:
+            try:
+                self.tts_queue.get_nowait()
+                self.tts_queue.task_done()
+            except queue.Empty:
+                break
+
+    def clear_non_callback_items(self):
+        """Remove pending chat_sentence items (no callback) from queue.
+        Items with callbacks (demo steps) are kept. Does not stop current playback."""
+        keep = []
+        while True:
+            try:
+                item = self.tts_queue.get_nowait()
+                self.tts_queue.task_done()
+                if isinstance(item, tuple) and item[1] is not None:
+                    keep.append(item)
+            except queue.Empty:
+                break
+        for item in keep:
+            self.tts_queue.put(item)
 
     # ── Runtime voice update (called by robot.py on persona_update) ───────────
 
@@ -150,16 +182,14 @@ class EdgeTTSOutputModule(OutputModule):
                         logger.error(f"[TTS] Callback error: {e}")
 
     def _speak_text(self, text: str):
-        # Snapshot voice settings for this utterance
+        self._interrupt_event.clear()
         with self._voice_lock:
             language = self._language
 
-        tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
-        tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text.strip()) if s.strip()]
+        if not sentences:
+            return
 
-        # Mark speaking state NOW — before any network/audio work —
-        # so _on_demo_step's tts_done event fires only after this whole
-        # method returns (including any timing sleep).
         if self.client:
             if not hasattr(self.client, 'is_speaking'):
                 self.client.is_speaking = threading.Event()
@@ -167,40 +197,106 @@ class EdgeTTSOutputModule(OutputModule):
             if hasattr(self.client, 'tts_started_event'):
                 self.client.tts_started_event.set()
 
+        audio_paths = []
         try:
-            tts = gTTS(text=text, lang=language)
-            tts.save(tmp_mp3)
+            # Generate all sentence audio files in parallel — cuts gTTS overhead from N×2s to ~2s
+            max_workers = min(len(sentences), 4)
+            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
+                futures = [pool.submit(self._generate_audio, s, language) for s in sentences]
+            audio_paths = [f.result() for f in futures]
 
-            subprocess.run([
-                'ffmpeg', '-i', tmp_mp3,
-                '-filter:a', f'atempo={self.talking_speed}',
-                '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', '-y', tmp_wav,
-            ], capture_output=True, check=True)
-
-            logger.info(f"[TTS] Speaking: {text[:60]}{'...' if len(text) > 60 else ''}")
-
-            result = subprocess.run(self._audio_cmd + [tmp_wav], capture_output=True)
-            if result.returncode != 0:
-                logger.warning(f"[TTS] Audio device failed (rc={result.returncode}), trying default aplay...")
-                result = subprocess.run(['aplay', tmp_wav], capture_output=True)
-                if result.returncode != 0:
-                    # Both audio paths failed — sleep so ACK timing is still correct
-                    words = len(text.split())
-                    est_sec = max(1.0, words / 2.5)
-                    logger.warning(f"[TTS] No audio output — sleeping {est_sec:.1f}s to preserve timing")
-                    time.sleep(est_sec)
-
-        except Exception as e:
-            logger.error(f"[TTS] Generation/playback error: {e}")
-            # Preserve expected speech duration so ACK doesn't fire instantly on failure
-            words = len(text.split())
-            est_sec = max(1.0, words / 2.5)
-            logger.warning(f"[TTS] Sleeping {est_sec:.1f}s as timing fallback")
-            time.sleep(est_sec)
+            for i, (sentence, (mp3, wav)) in enumerate(zip(sentences, audio_paths)):
+                if self._interrupt_event.is_set():
+                    break
+                self._play_audio(sentence, mp3, wav)
+                audio_paths[i] = (None, None)  # consumed by _play_audio
+                if not self._interrupt_event.is_set() and i < len(sentences) - 1:
+                    if self.client and hasattr(self.client, 'is_speaking'):
+                        self.client.is_speaking.clear()
+                    time.sleep(0.2)
+                    if self.client and hasattr(self.client, 'is_speaking'):
+                        self.client.is_speaking.set()
         finally:
             if self.client and hasattr(self.client, 'is_speaking'):
                 self.client.is_speaking.clear()
             logger.debug("[TTS] is_speaking cleared")
+            for mp3, wav in audio_paths:
+                for f in [mp3, wav]:
+                    if f and os.path.exists(f):
+                        try:
+                            os.unlink(f)
+                        except Exception:
+                            pass
+
+    def _generate_audio(self, text: str, language: str) -> tuple:
+        """Generate mp3+wav for one sentence. Returns (mp3, wav) paths or (None, None) on failure."""
+        if self._interrupt_event.is_set():
+            return None, None
+        tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
+        tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
+        try:
+            tts = gTTS(text=text, lang=language)
+            tts.save(tmp_mp3)
+            result = subprocess.run([
+                'ffmpeg', '-i', tmp_mp3,
+                '-filter:a', f'atempo={self.talking_speed}',
+                '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', '-y', tmp_wav,
+            ], capture_output=True)
+            if result.returncode == 0:
+                return tmp_mp3, tmp_wav
             for f in [tmp_mp3, tmp_wav]:
                 if os.path.exists(f):
-                    os.unlink(f)
+                    try:
+                        os.unlink(f)
+                    except Exception:
+                        pass
+            return None, None
+        except Exception as e:
+            logger.error(f"[TTS] Audio generation error: {e}")
+            for f in [tmp_mp3, tmp_wav]:
+                if os.path.exists(f):
+                    try:
+                        os.unlink(f)
+                    except Exception:
+                        pass
+            return None, None
+
+    def _play_audio(self, text: str, mp3: Optional[str], wav: Optional[str]):
+        """Play pre-generated audio, or simulate duration if unavailable."""
+        try:
+            if wav and os.path.exists(wav):
+                logger.info(f"[TTS] Sentence: {text[:60]}{'...' if len(text) > 60 else ''}")
+                with self._aplay_lock:
+                    if self._interrupt_event.is_set():
+                        return
+                    self._aplay_proc = subprocess.Popen(
+                        self._audio_cmd + [wav],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    )
+                self._aplay_proc.wait()
+
+                if self._aplay_proc.returncode != 0 and not self._interrupt_event.is_set():
+                    with self._aplay_lock:
+                        self._aplay_proc = subprocess.Popen(
+                            ['aplay', wav],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        )
+                    self._aplay_proc.wait()
+                    if self._aplay_proc.returncode != 0:
+                        self._sim_sleep(text)
+            else:
+                self._sim_sleep(text)
+        finally:
+            for f in [mp3, wav]:
+                if f and os.path.exists(f):
+                    try:
+                        os.unlink(f)
+                    except Exception:
+                        pass
+
+    def _sim_sleep(self, text: str):
+        """Sleep to simulate playback duration. Set sim_speed=0 in config to skip (test mode)."""
+        if self._sim_speed <= 0:
+            return
+        duration = max(0.5, len(text.split()) / 2.5) * self._sim_speed
+        self._interrupt_event.wait(timeout=duration)

@@ -288,6 +288,7 @@ export default function DemoTab() {
   const [messages,  setMessages]  = useState([])
   const [chatInput, setChatInput] = useState('')
   const [sending,   setSending]   = useState(false)
+  const [thinking,  setThinking]  = useState(null)  // { robot, time }
 
   const feedRef      = useRef(null)
   const inputRef     = useRef(null)
@@ -337,7 +338,8 @@ export default function DemoTab() {
       const clean = status.text.replace(/\[.*?\]/g, '').trim()
       if (!clean) return
       lastStepKey.current = key   // mark seen only once we have real speech text
-      addMsg({ role: 'robot', robot: status.robot_id || 'Robot', text: clean, time: ts(), demo: true })
+      const demoRobotName = robots.find(r => r.client_id === status.robot_id)?.robot_name || status.robot_id || 'Robot'
+      addMsg({ role: 'robot', robot: demoRobotName, text: clean, time: ts(), demo: true })
       if (ttsRef.current) browserSpeak(clean, status.robot_id)
       return
     }
@@ -377,17 +379,27 @@ export default function DemoTab() {
     setChatInput('')
     setSending(true)
     addMsg({ role: 'user', text, time: ts() })
+    const name = robots.find(r => r.client_id === targetId)?.robot_name || targetId
+    setThinking({ robot: name, time: ts() })
     try {
       const res = await chatRobot(targetId, text)
-      const name = robots.find(r => r.client_id === targetId)?.robot_name || targetId
-      const reply = (res.clean_text || res.response || '').trim()
-      if (reply) {
-        addMsg({ role: 'robot', robot: name, text: reply, time: ts() })
-        if (ttsRef.current) browserSpeak(reply, targetId)
+      if (res.delegation_result) {
+        // Delegation: hide Pepper's internal handoff message; show only the target's answer.
+        const dr = res.delegation_result
+        addMsg({ role: 'robot', robot: dr.robot_name, text: dr.clean_text, time: ts() })
+        const drId = robots.find(r => r.robot_name === dr.robot_name)?.client_id || ''
+        if (ttsRef.current) browserSpeak(dr.clean_text, drId)
+      } else {
+        const reply = (res.clean_text || res.response || '').trim()
+        if (reply) {
+          addMsg({ role: 'robot', robot: name, text: reply, time: ts() })
+          if (ttsRef.current) browserSpeak(reply, targetId)
+        }
       }
     } catch (e) {
       addMsg({ role: 'system', text: `Error: ${e.message}`, time: ts() })
     } finally {
+      setThinking(null)
       setSending(false)
       inputRef.current?.focus()
     }
@@ -522,12 +534,25 @@ export default function DemoTab() {
 
           {/* Feed */}
           <div className="demox-feed" ref={feedRef}>
-            {messages.length === 0 ? (
+            {messages.length === 0 && !thinking ? (
               <div className="chat-empty">
                 Start the demo or send a message to see the conversation here.
               </div>
             ) : (
               messages.map(m => <ChatMessage key={m.id} msg={m} />)
+            )}
+            {thinking && (
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8, padding: '8px 0', opacity: 0.6 }}>
+                <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent)', fontFamily: 'var(--mono)', minWidth: 70 }}>
+                  {thinking.robot}
+                </div>
+                <div style={{ fontSize: 12, color: 'var(--muted)', fontStyle: 'italic' }}>
+                  thinking…
+                </div>
+                <div style={{ fontSize: 10, color: 'var(--muted)', marginLeft: 'auto' }}>
+                  {thinking.time}
+                </div>
+              </div>
             )}
           </div>
 

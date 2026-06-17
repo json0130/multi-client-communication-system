@@ -309,9 +309,11 @@ class BasicClient:
         # Register default handlers — subclasses can override by calling
         # self.server_connection.register_handler() with their own callbacks
         self.server_connection.register_handler("chat_response",    self._default_chat_handler)
+        self.server_connection.register_handler("chat_sentence",    self._on_chat_sentence)
         self.server_connection.register_handler("speech_response",  self._default_speech_handler)
         self.server_connection.register_handler("emotion_update",   self._default_emotion_handler)
         self.server_connection.register_handler("demo_step",        self._on_demo_step)
+        self.server_connection.register_handler("tts_stop",         self._on_tts_stop)
 
         self.input_modules:  Dict[str, InputModule]  = {}
         self.output_modules: Dict[str, OutputModule] = {}
@@ -367,6 +369,16 @@ class BasicClient:
         if match:
             self.on_emotion_detected(match.group(1))
 
+        # Clear any leftover chat_sentence items so this demo step plays immediately.
+        # Only for require_ack steps — fire-and-forget steps can follow chat items.
+        if need_ack:
+            for module in self.output_modules.values():
+                if hasattr(module, 'clear_non_callback_items'):
+                    try:
+                        module.clear_non_callback_items()
+                    except Exception as e:
+                        logger.warning(f"[Demo] clear_non_callback_items error: {e}")
+
         # Per-step completion event — set inside _tts_worker.finally after playback
         tts_done = threading.Event()
 
@@ -403,6 +415,25 @@ class BasicClient:
             logger.warning(f"[Demo] TTS wait timed out for '{step_id}' — ACK anyway")
 
         self.send_ack(step_id)
+
+    def _on_chat_sentence(self, data: dict):
+        """Handle a streamed sentence — dispatch emotion and feed to TTS immediately."""
+        clean = data.get("text", "").strip()
+        emotion = data.get("emotion_tag", "")
+        if emotion:
+            self.on_emotion_detected(emotion)
+        if clean:
+            for module in self.output_modules.values():
+                try:
+                    module.process_output({"text": clean})
+                except Exception as e:
+                    logger.error(f"[Modules] chat_sentence output error: {e}")
+
+    def _on_tts_stop(self, _data: dict):
+        """Stop in-progress TTS immediately — called by server during QA interrupt."""
+        for module in self.output_modules.values():
+            if hasattr(module, "interrupt"):
+                module.interrupt()
 
     def send_ack(self, step_id: str):
         """Send an ACK packet to the server for the given demo step."""

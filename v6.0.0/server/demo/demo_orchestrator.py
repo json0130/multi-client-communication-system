@@ -80,7 +80,7 @@ class DemoOrchestrator:
     Drives the demo step by step. All public methods are thread-safe.
     """
 
-    def __init__(self, ws_gateway: "WebSocketGateway", transition_delay: float = 1.5):
+    def __init__(self, ws_gateway: "WebSocketGateway", transition_delay: float = 0.5):
         self._ws     = ws_gateway
         self._script: list[DemoStep] = []
 

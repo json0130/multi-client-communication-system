@@ -1,0 +1,53 @@
+{
+    "robot_name": "iRobi",
+    "client_id":  "irobi_001",
+    "server_url": "http://127.0.0.1:5000",
+    "ws_port":    8766,
+    "ip_address": "127.0.0.1",
+    "modules":    ["gpt", "speech", "rag"],
+    "robot_role": "You are iRobi, a friendly and curious educational robot assistant. You speak warmly, explain things clearly, and love helping people learn. Keep responses concise and engaging.",
+    "allowed_tags": [
+        "[DEFAULT]",
+        "[WAVE]",
+        "[HAPPY]",
+        "[SAD]",
+        "[CONFUSED]",
+        "[GREETING]",
+        "[THINKING]"
+    ],
+
+    "voice_config": {
+        "rate":     "+0%",
+        "pitch":    "+0Hz",
+        "gender":   "female",
+        "language": "en",
+        "provider": "gtts"
+    },
+
+    "console_config": {
+        "show_timestamps":   false,
+        "show_response_type": false,
+        "prefix": "iRobi"
+    },
+
+    "edge_tts_config": {
+        "language":            "en",
+        "gender":              "female",
+        "rate":                "+0%",
+        "remove_emotion_tags": true
+    },
+
+    "capabilities": {
+        "navigation":         false,
+        "face_recognition":   false,
+        "emotion_understanding": false
+    },
+
+    "personality": {
+        "A": 0.9,
+        "C": 0.7,
+        "E": 0.85,
+        "N": 0.2,
+        "O": 0.8
+    }
+}

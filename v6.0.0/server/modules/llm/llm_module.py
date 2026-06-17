@@ -85,6 +85,26 @@ class LLMModule(BaseModule):
             )
         return self._provider.generate_with_history(system_prompt, history, user_message)
 
+    def stream_with_history(
+        self,
+        system_prompt: str,
+        history: list[dict],
+        user_message: str,
+    ):
+        """
+        Stream sentences if the provider supports it.
+        Falls back to a single-element iterator (full response) if not.
+        """
+        if not self.is_available():
+            yield "No LLM available."
+            return
+        if hasattr(self._provider, "stream_with_history"):
+            yield from self._provider.stream_with_history(system_prompt, history, user_message)
+        else:
+            resp = self.generate_with_history(system_prompt, history, user_message)
+            if resp.clean_text:
+                yield resp.clean_text
+
     @property
     def provider_name(self) -> str:
         """Convenience for logging."""

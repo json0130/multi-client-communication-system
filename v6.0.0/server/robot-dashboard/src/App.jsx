@@ -73,6 +73,9 @@ export default function App() {
     })
   }, [robots, search, filter])
 
+  const onlineRobots  = filteredRobots.filter(r =>  r.ws_connected)
+  const offlineRobots = filteredRobots.filter(r => !r.ws_connected)
+
   const onlineCount  = robots.filter(r => r.ws_connected).length
   const offlineCount = robots.length - onlineCount
 
@@ -172,31 +175,79 @@ export default function App() {
               </div>
             </div>
 
-            <div className="robot-grid">
-              {loading ? (
-                <div className="loading-state">
-                  <div className="loading-spinner" />
-                  <p>Loading robots...</p>
-                </div>
-              ) : filteredRobots.length === 0 ? (
-                <div className="empty-state">
-                  <div className="empty-icon">◻</div>
-                  <p>{search || filter !== 'all' ? 'No robots match your filter.' : 'No robots registered yet.'}</p>
-                  {!search && filter === 'all' && (
-                    <p style={{ marginTop: 8, fontSize: 11 }}>Use "+ Add robot" to register one.</p>
-                  )}
-                </div>
-              ) : (
-                filteredRobots.map(r => (
-                  <RobotCard
-                    key={r.client_id}
-                    robot={r}
-                    personas={personas}
-                    onRefresh={fetchAll}
-                  />
-                ))
-              )}
-            </div>
+            {loading ? (
+              <div className="loading-state">
+                <div className="loading-spinner" />
+                <p>Loading robots...</p>
+              </div>
+            ) : filteredRobots.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">◻</div>
+                <p>{search || filter !== 'all' ? 'No robots match your filter.' : 'No robots registered yet.'}</p>
+                {!search && filter === 'all' && (
+                  <p style={{ marginTop: 8, fontSize: 11 }}>Use "+ Add robot" to register one.</p>
+                )}
+              </div>
+            ) : (
+              <>
+                {/* ── Online section ── */}
+                {onlineRobots.length > 0 && (
+                  <div style={{ marginBottom: 28 }}>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      marginBottom: 12,
+                    }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: 'var(--online)', display: 'inline-block',
+                        boxShadow: '0 0 6px var(--online)',
+                      }} />
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
+                        color: 'var(--online)', textTransform: 'uppercase',
+                        fontFamily: 'var(--mono)',
+                      }}>
+                        Online — {onlineRobots.length}
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+                    <div className="robot-grid">
+                      {onlineRobots.map(r => (
+                        <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={fetchAll} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Offline section ── */}
+                {offlineRobots.length > 0 && (
+                  <div>
+                    <div style={{
+                      display: 'flex', alignItems: 'center', gap: 8,
+                      marginBottom: 12,
+                    }}>
+                      <span style={{
+                        width: 8, height: 8, borderRadius: '50%',
+                        background: 'var(--muted)', display: 'inline-block',
+                      }} />
+                      <span style={{
+                        fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
+                        color: 'var(--muted)', textTransform: 'uppercase',
+                        fontFamily: 'var(--mono)',
+                      }}>
+                        Offline — {offlineRobots.length}
+                      </span>
+                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+                    </div>
+                    <div className="robot-grid">
+                      {offlineRobots.map(r => (
+                        <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={fetchAll} />
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
           </>
         )}
 

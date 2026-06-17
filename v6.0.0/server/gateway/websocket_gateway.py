@@ -31,6 +31,18 @@ if TYPE_CHECKING:
     from robot.robot_registry import RobotRegistry
 
 
+def _looks_like_question(text: str) -> bool:
+    """Heuristic pre-filter: skip the LLM classifier for obvious questions."""
+    t = text.lower().strip()
+    if "?" in t:
+        return True
+    return t.startswith((
+        "what ", "how ", "why ", "where ", "when ", "who ", "which ",
+        "can ", "could ", "tell me", "explain", "describe",
+        "is there", "are there", "do you", "does it",
+    ))
+
+
 # How long to wait before attempting a reconnect (seconds)
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 10
@@ -191,6 +203,28 @@ class WebSocketGateway:
         "let's go",
         "let's continue",
         "let us continue",
+        "no more questions",
+        "no questions",
+        "that's all",
+        "no thank you",
+        "continue the demo",
+        "continue the demonstration",
+        # Natural dismissals that the LLM classifier tends to misread
+        "carry on",
+        "move along",
+        "all good",
+        "we're good",
+        "i'm good",
+        "im good",
+        "that's fine",
+        "that's okay",
+        "it's okay",
+        "no worries",
+        "never mind",
+        "forget it",
+        "done here",
+        "we're done",
+        "all done",
     ]
 
     def set_demo_orchestrator(self, orchestrator):
@@ -210,6 +244,11 @@ class WebSocketGateway:
             logger.warning(f"[WS Gateway] generate_demo_step: no instance for '{robot_id}' "
                            f"— connected ids: {list(self._connections.keys())}")
             return instruction
+
+        # Replace client_ids with robot names so the LLM speaks proper names
+        for peer in self._registry.get_all():
+            if peer.client_id and peer.robot_name and peer.client_id != peer.robot_name:
+                instruction = instruction.replace(peer.client_id, peer.robot_name)
 
         logger.info(f"[WS Gateway] Generating demo speech for '{robot_id}'...")
         try:
@@ -294,8 +333,6 @@ class WebSocketGateway:
                     "text":        result.response,
                     "require_ack": False,
                 })
-                # If the wrap-up itself contains a closing phrase, advance the demo
-                self.check_qa_auto_close(reply)
         except Exception as e:
             print(f"[WS Gateway] Pepper wrap-up eval failed: {e}")
 
@@ -347,6 +384,25 @@ class WebSocketGateway:
 
     def send_to_robot(self, client_id: str, data: dict):
         """Send a JSON payload to a specific robot."""
+        event = data.get("event", data.get("type", "?"))
+        # Build a readable summary for the terminal
+        extra = ""
+        if event == "chat_sentence":
+            extra = f" | \"{data.get('text', '')[:60]}\""
+            if data.get("emotion_tag"):
+                extra += f" [{data['emotion_tag']}]"
+        elif event == "chat_response":
+            extra = f" | \"{data.get('clean_text', data.get('response', ''))[:60]}\""
+        elif event == "demo_step":
+            step_id = data.get("step_id", "")
+            text_preview = data.get("text", "")[:50]
+            extra = f" | step={step_id} \"{text_preview}\""
+        elif event == "tts_stop":
+            extra = " | (interrupt TTS)"
+        elif event == "speech_response":
+            extra = f" | transcription=\"{data.get('transcription', '')[:40]}\""
+        print(f"[→ {client_id}] {event}{extra}")
+
         with self._lock:
             conn = self._connections.get(client_id)
         if conn:
@@ -388,21 +444,58 @@ class WebSocketGateway:
             if msg_type == "chat":
                 message = data.get("message", "")
                 if message:
+                    # Stop any in-progress TTS immediately — user talking = robot listens
+                    if not any(p in message.lower() for p in self._QA_ADVANCE_PHRASES):
+                        self.send_to_robot(client_id, {"event": "tts_stop"})
+                        # Also pause the demo if it was running
+                        if self._demo_orchestrator:
+                            status = self._demo_orchestrator.get_status()
+                            if status["state"] in ("running", "waiting_ack"):
+                                self._demo_orchestrator.qa_interrupt()
+
                     self.check_qa_advance_from_user(message)
-                    result = instance.process_chat(message)
-                    self.send_to_robot(client_id, {
-                        "event": "chat_response",
-                        "response": result.response,
-                        "emotion_tag": result.emotion_tag,
-                        "clean_text": result.clean_text,
-                    })
-                    self.check_qa_auto_close(result.clean_text)
-                    # Ask Pepper if it's a natural wrap-up point (non-blocking)
-                    threading.Thread(
-                        target=self._check_qa_pepper_wrap_up,
-                        args=(client_id, result.clean_text or ""),
-                        daemon=True,
-                    ).start()
+
+                    # Q&A intent classification — skip classifier for obvious questions
+                    if self._demo_orchestrator:
+                        if self._demo_orchestrator.get_status()["state"] == "qa_window":
+                            if not any(p in message.lower() for p in self._QA_ADVANCE_PHRASES):
+                                if _looks_like_question(message):
+                                    print(f"[QA Router] '{message[:60]}' → question detected → full chat")
+                                else:
+                                    print(f"[QA Router] '{message[:60]}' → calling LLM classifier...")
+                                    intent = instance.classify_qa_intent(message)
+                                    if intent == "done":
+                                        print(f"[QA Router] Classifier → 'done' → advancing demo")
+                                        self._demo_orchestrator.qa_end()
+                                        self.send_to_robot(client_id, {
+                                            "event": "demo_step",
+                                            "step_id": "_qa_classifier_done",
+                                            "text": "[DEFAULT] Great! Let's continue with the demonstration then!",
+                                            "require_ack": False,
+                                        })
+                                        return
+                                    else:
+                                        print(f"[QA Router] Classifier → 'continue' → full chat")
+
+                    def _on_sentence(clean_text, emotion_tag):
+                        if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
+                            return
+                        self.send_to_robot(client_id, {
+                            "event": "chat_sentence",
+                            "text": clean_text,
+                            "emotion_tag": emotion_tag,
+                        })
+
+                    result = instance.process_chat_stream(message, _on_sentence)
+                    # Send "more questions?" if still in QA window after response
+                    if self._demo_orchestrator:
+                        if self._demo_orchestrator.get_status()["state"] == "qa_window":
+                            self.send_to_robot(client_id, {
+                                "event": "demo_step",
+                                "step_id": "_qa_more_questions",
+                                "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
+                                "require_ack": False,
+                            })
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler
@@ -413,6 +506,16 @@ class WebSocketGateway:
                 audio_b64 = data.get("audio", "")
                 if audio_b64:
                     result = instance.process_speech(audio_b64)
+                    # Auto QA interrupt based on transcription
+                    # Stop any in-progress TTS immediately — user talking = robot listens
+                    if result.transcription and not any(
+                        p in result.transcription.lower() for p in self._QA_ADVANCE_PHRASES
+                    ):
+                        self.send_to_robot(client_id, {"event": "tts_stop"})
+                        if self._demo_orchestrator:
+                            status = self._demo_orchestrator.get_status()
+                            if status["state"] in ("running", "waiting_ack"):
+                                self._demo_orchestrator.qa_interrupt()
                     response_data: dict = {
                         "event": "speech_response",
                         "transcription": result.transcription,
@@ -432,13 +535,15 @@ class WebSocketGateway:
                     # Check advance intent from visitor's transcription
                     if result.transcription:
                         self.check_qa_advance_from_user(result.transcription)
-                    # Ask Pepper if it's a natural wrap-up point (non-blocking)
-                    if result.chat:
-                        threading.Thread(
-                            target=self._check_qa_pepper_wrap_up,
-                            args=(client_id, result.chat.clean_text or ""),
-                            daemon=True,
-                        ).start()
+                    # Send "more questions?" if still in QA window after response
+                    if result.chat and self._demo_orchestrator:
+                        if self._demo_orchestrator.get_status()["state"] == "qa_window":
+                            self.send_to_robot(client_id, {
+                                "event": "demo_step",
+                                "step_id": "_qa_more_questions",
+                                "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
+                                "require_ack": False,
+                            })
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")

@@ -75,27 +75,48 @@ class DelegationHandler:
             print(f"[Delegation] JSON parse error: {e}")
         return None, None
 
-    def _execute(self, source_id: str, target_id: str, task: str):
+    def execute_sync(self, source_id: str, target_id: str, task: str) -> "dict | None":
         """
-        Run in background thread.
-        1. Get target robot instance
-        2. Process the task in execution mode
-        3. Push the response to the target robot via WebSocket
+        Run delegation synchronously in the calling thread.
+        Sends verbal handoff to source robot, then sends result to target robot's WebSocket.
+        Returns {"robot_name": str, "clean_text": str} or None on failure.
         """
         target = self._registry.get(target_id)
         if not target:
             print(f"[Delegation] Target '{target_id}' not connected — cannot delegate.")
-            return
-
+            return None
         try:
+            robot_name = target.robot_name or target_id
+
+            # Verbal handoff: source robot (Pepper) addresses the target out loud
+            verbal_address = f"{robot_name}, {task}"
+            self._ws.send_to_robot(source_id, {
+                "event": "chat_sentence",
+                "text": verbal_address,
+                "emotion_tag": "[DEFAULT]",
+            })
+
             result = target.process_chat(task, is_delegated=True)
             print(f"[Delegation] {target_id} response: {result.response}")
-            # Push the response to the physical robot
             self._ws.send_to_robot(target_id, {
                 "event": "chat_response",
                 "response": result.response,
                 "emotion_tag": result.emotion_tag,
                 "clean_text": result.clean_text,
             })
+            return {
+                "robot_name": robot_name,
+                "clean_text": result.clean_text or result.response,
+            }
         except Exception as e:
             print(f"[Delegation] Execution error for {target_id}: {e}")
+            return None
+
+    def _execute(self, source_id: str, target_id: str, task: str):
+        """
+        Run in background thread (used by WebSocket gateway path).
+        1. Get target robot instance
+        2. Process the task in execution mode
+        3. Push the response to the target robot via WebSocket
+        """
+        self.execute_sync(source_id, target_id, task)

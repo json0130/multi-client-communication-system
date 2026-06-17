@@ -64,6 +64,44 @@ class OllamaProvider(LLMProvider):
         messages.append({"role": "user", "content": user_message})
         return self._call(messages)
 
+    def stream_with_history(
+        self,
+        system_prompt: str,
+        history: list[dict],
+        user_message: str,
+    ):
+        """Stream sentences from Ollama as they complete. Yields clean sentence strings."""
+        import re
+        if not self._available or self._client is None:
+            yield "Local LLM is not available."
+            return
+        messages = [{"role": "system", "content": system_prompt}]
+        messages.extend(history)
+        messages.append({"role": "user", "content": user_message})
+        try:
+            stream = self._client.chat.completions.create(
+                model=self._model,
+                messages=messages,
+                temperature=0.6,
+                timeout=30,
+                stream=True,
+            )
+            buffer = ""
+            for chunk in stream:
+                delta = (chunk.choices[0].delta.content or "") if chunk.choices else ""
+                buffer += delta
+                parts = re.split(r'(?<=[.!?])\s+', buffer)
+                for sentence in parts[:-1]:
+                    s = sentence.strip()
+                    if s:
+                        yield s
+                buffer = parts[-1]
+            if buffer.strip():
+                yield buffer.strip()
+        except Exception as e:
+            print(f"[OllamaProvider] Streaming error: {e}")
+            yield "Sorry, I encountered an error."
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _call(self, messages: list[dict]) -> LLMResponse:

@@ -1,0 +1,26 @@
+{
+    "robot_name": "Pepper",
+    "client_id":  "pepper_001",
+    "server_url": "http://130.216.239.187:5000",
+    "ws_port":    8765,
+    "ip_address": "127.0.0.1",
+    "modules":    ["gpt", "speech", "rag"],
+    "allowed_tags": [
+        "[DEFAULT]",
+        "[WAVE]",
+        "[HAPPY]",
+        "[SAD]",
+        "[GREETING]",
+        "[POINT]"
+    ],
+
+    "pepper_config": {
+        "pepper_ip":           "172.24.192.51",
+        "pepper_port":         8001,
+        "record_duration":     5.0,
+        "pepper_sample_rate":  48000,
+        "pepper_channels":     1,
+        "vad_threshold":       300,
+        "words_per_second":    2.3
+    }
+}

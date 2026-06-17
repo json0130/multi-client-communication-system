@@ -139,6 +139,102 @@ class RobotInstance:
             delegation_target=target_id,
         )
 
+    def process_chat_stream(
+        self,
+        message: str,
+        on_sentence,
+        is_delegated: bool = False,
+    ) -> ChatResult:
+        """
+        Like process_chat() but fires on_sentence(clean_text, emotion_tag) for each
+        sentence as the LLM generates it. Returns the final ChatResult after streaming.
+        on_sentence is called synchronously — the caller thread is held during generation.
+        """
+        self.last_active = time.time()
+        self._refresh_role_from_db()
+
+        if not self.llm or not self.llm.is_available():
+            clean = "LLM module not available."
+            on_sentence(clean, "DEFAULT")
+            return ChatResult(
+                response="[DEFAULT] LLM module not available.",
+                emotion_tag="DEFAULT",
+                clean_text=clean,
+                user_emotion=self._current_user_emotion(),
+                is_delegation=False,
+            )
+
+        if is_delegated:
+            system, user_msg = build_execution_prompt(
+                self.client_id, self._robot_role, self._allowed_tags, message
+            )
+        else:
+            rag_context = self._get_rag_context(message)
+            active_peers = self._get_active_peers()
+            system, user_msg = build_delegation_prompt(
+                self.client_id, self._robot_role, self._allowed_tags,
+                message, active_peers, rag_context,
+            )
+
+        from modules.llm.llm_provider import parse_response
+        full_text = ""
+        first = True
+        for sentence in self.llm.stream_with_history(system, self._history, user_msg):
+            full_text += (" " if full_text else "") + sentence
+            if first:
+                parsed = parse_response(sentence)
+                on_sentence(parsed.clean_text, parsed.emotion_tag)
+                first = False
+            else:
+                on_sentence(sentence, "")
+
+        full_text = full_text.strip()
+
+        self._history.append({"role": "user", "content": user_msg})
+        self._history.append({"role": "assistant", "content": full_text})
+        if len(self._history) > self._max_history:
+            self._history = self._history[-self._max_history:]
+        self._persist(message, full_text)
+
+        final = parse_response(full_text)
+        is_deleg, target_id = self._parse_delegation(full_text)
+        return ChatResult(
+            response=final.text,
+            emotion_tag=final.emotion_tag,
+            clean_text=final.clean_text,
+            user_emotion=self._current_user_emotion(),
+            is_delegation=is_deleg,
+            delegation_target=target_id,
+        )
+
+    def classify_qa_intent(self, user_message: str) -> str:
+        """
+        Fast binary classifier: should the demo resume, or does the visitor have more questions?
+        Returns 'done' (resume demo) or 'continue' (more Q&A).
+        Uses a single-turn generate() call — no conversation history needed.
+        Safe default is 'continue' so real questions are never skipped.
+        """
+        if not self.llm or not self.llm.is_available():
+            return "continue"
+        system = (
+            "You are an intent classifier for a robot demo guide. "
+            "The guide robot just asked the visitor: "
+            "'Do you have any other questions, or shall we continue the demonstration?' "
+            "Classify the visitor's reply with ONLY one word:\n"
+            "  done     — visitor is satisfied and ready to continue the demo\n"
+            "  continue — visitor has more questions or is still engaged\n"
+            "Reply with exactly one word. No punctuation, no explanation."
+        )
+        try:
+            resp = self.llm.generate(system, user_message[:200])
+            first_word = resp.text.strip().lower().split()[0] if resp.text.strip() else "continue"
+            decision = "done" if first_word == "done" else "continue"
+            print(f"[QA Classifier] '{user_message[:60]}' → LLM first word: '{first_word}' → {decision}")
+            return decision
+        except Exception as e:
+            print(f"[QA Classifier] LLM error ({e}) → defaulting to 'continue'")
+            return "continue"
+
     # ── Demo speech generation ────────────────────────────────────────────────
 
     def generate_demo_speech(self, instruction: str) -> "ChatResult":

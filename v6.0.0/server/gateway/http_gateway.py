@@ -18,11 +18,12 @@ No business logic lives here.
 """
 
 from __future__ import annotations
+import re
 import time
 from flask import Flask, request, jsonify, Blueprint
 
 from robot.robot_registry import RobotRegistry
-from gateway.websocket_gateway import WebSocketGateway
+from gateway.websocket_gateway import WebSocketGateway, _looks_like_question
 from data import robot_repo
 
 
@@ -227,12 +228,7 @@ def create_http_gateway(
 
     @bp.route("/robots/<client_id>/chat", methods=["POST"])
     def robot_chat(client_id: str):
-        """
-        Send a chat message to a robot from the server side.
-        The response is also pushed to the robot via WebSocket.
-
-        Body: { "message": "Hello robot" }
-        """
+        """Send a chat message to a robot from the server dashboard."""
         instance = registry.get(client_id)
         if not instance:
             return jsonify({"error": f"'{client_id}' is not connected."}), 404
@@ -242,33 +238,87 @@ def create_http_gateway(
         if not message:
             return jsonify({"error": "message field required"}), 400
 
-        result = instance.process_chat(message)
+        # Stop any in-progress TTS immediately — user talking = robot listens
+        if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):
+            ws_gateway.send_to_robot(client_id, {"event": "tts_stop"})
+            # Also pause the demo if it was running
+            if ws_gateway._demo_orchestrator:
+                status = ws_gateway._demo_orchestrator.get_status()
+                if status["state"] in ("running", "waiting_ack"):
+                    ws_gateway._demo_orchestrator.qa_interrupt()
 
-        # Push to the physical robot
-        ws_gateway.send_to_robot(client_id, {
-            "event": "chat_response",
-            "response": result.response,
-            "emotion_tag": result.emotion_tag,
-            "clean_text": result.clean_text,
-        })
+        ws_gateway.check_qa_advance_from_user(message)
 
-        # Auto-close Q&A window if the response is a closing statement
-        ws_gateway.check_qa_auto_close(result.clean_text)
+        # Q&A intent classification — skip classifier for obvious questions
+        if ws_gateway._demo_orchestrator:
+            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
+                if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):
+                    if _looks_like_question(message):
+                        print(f"[QA Router] '{message[:60]}' → question detected → full chat")
+                    else:
+                        print(f"[QA Router] '{message[:60]}' → calling LLM classifier...")
+                        intent = instance.classify_qa_intent(message)
+                        if intent == "done":
+                            print(f"[QA Router] Classifier → 'done' → advancing demo")
+                            ws_gateway._demo_orchestrator.qa_end()
+                            ws_gateway.send_to_robot(client_id, {
+                                "event": "demo_step",
+                                "step_id": "_qa_classifier_done",
+                                "text": "[DEFAULT] Great! Let's continue with the demonstration then!",
+                                "require_ack": False,
+                            })
+                            return jsonify({
+                                "client_id": client_id,
+                                "response": "Resuming demonstration.",
+                                "emotion_tag": "",
+                                "clean_text": "Resuming demonstration.",
+                                "is_delegation": False,
+                                "delegation_target": None,
+                            })
+                        else:
+                            print(f"[QA Router] Classifier → 'continue' → full chat")
 
-        # Handle delegation
+        def _on_sentence(clean_text, emotion_tag):
+            if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
+                return
+            ws_gateway.send_to_robot(client_id, {
+                "event": "chat_sentence",
+                "text": clean_text,
+                "emotion_tag": emotion_tag,
+            })
+
+        result = instance.process_chat_stream(message, _on_sentence)
+
+        # Send "more questions?" if still in QA window after response
+        if ws_gateway._demo_orchestrator:
+            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
+                ws_gateway.send_to_robot(client_id, {
+                    "event": "demo_step",
+                    "step_id": "_qa_more_questions",
+                    "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
+                    "require_ack": False,
+                })
+
+        # Handle delegation — run synchronously so the browser gets the target's answer
+        delegation_result = None
         if result.is_delegation and result.delegation_target:
             from gateway.delegation_handler import DelegationHandler
-            DelegationHandler(registry, ws_gateway).handle(
-                client_id, result.response
-            )
+            handler = DelegationHandler(registry, ws_gateway)
+            target_id_del, task_del = handler._extract(result.response)
+            if target_id_del and task_del:
+                delegation_result = handler.execute_sync(client_id, target_id_del, task_del)
+
+        # Strip internal ```json delegation block from what the browser displays
+        clean_for_browser = re.sub(r'```(?:json)?\s*[\s\S]*?```', '', result.clean_text or '').strip()
 
         return jsonify({
-            "client_id": client_id,
-            "response": result.response,
-            "emotion_tag": result.emotion_tag,
-            "clean_text": result.clean_text,
-            "is_delegation": result.is_delegation,
+            "client_id":         client_id,
+            "response":          result.response,
+            "emotion_tag":       result.emotion_tag,
+            "clean_text":        clean_for_browser or result.clean_text,
+            "is_delegation":     result.is_delegation,
             "delegation_target": result.delegation_target,
+            "delegation_result": delegation_result,
         })
 
     # ── CORS ──────────────────────────────────────────────────────────────────
