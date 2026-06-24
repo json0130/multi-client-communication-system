@@ -487,15 +487,6 @@ class WebSocketGateway:
                         })
 
                     result = instance.process_chat_stream(message, _on_sentence)
-                    # Send "more questions?" if still in QA window after response
-                    if self._demo_orchestrator:
-                        if self._demo_orchestrator.get_status()["state"] == "qa_window":
-                            self.send_to_robot(client_id, {
-                                "event": "demo_step",
-                                "step_id": "_qa_more_questions",
-                                "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
-                                "require_ack": False,
-                            })
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler
@@ -506,11 +497,41 @@ class WebSocketGateway:
                 audio_b64 = data.get("audio", "")
                 if audio_b64:
                     result = instance.process_speech(audio_b64)
-                    # Auto QA interrupt based on transcription
-                    # Stop any in-progress TTS immediately — user talking = robot listens
-                    if result.transcription and not any(
+
+                    _is_advance = result.transcription and any(
                         p in result.transcription.lower() for p in self._QA_ADVANCE_PHRASES
+                    )
+
+                    # Fast-path: advance phrase in active QA window — robot gives a brief
+                    # acknowledgment, then Pepper's transition generates in parallel.
+                    if _is_advance and (
+                        self._demo_orchestrator and
+                        self._demo_orchestrator.get_status()["state"] == "qa_window"
                     ):
+                        self.send_to_robot(client_id, {"event": "tts_stop"})
+                        # Use first sentence of the LLM response as a brief acknowledgment.
+                        # Falls back to a fixed phrase if no LLM response was generated.
+                        ack_text = "Of course, let's move on!"
+                        ack_tag  = "DEFAULT"
+                        if result.chat and result.chat.clean_text:
+                            import re as _re
+                            first = _re.split(r'(?<=[.!?])\s+', result.chat.clean_text.strip())[0]
+                            if first:
+                                ack_text = first
+                                ack_tag  = result.chat.emotion_tag or "DEFAULT"
+                        self.send_to_robot(client_id, {
+                            "event": "speech_response",
+                            "transcription": result.transcription,
+                            "confidence": result.confidence,
+                            "response":    f"[{ack_tag}] {ack_text}",
+                            "emotion_tag": ack_tag,
+                            "clean_text":  ack_text,
+                        })
+                        self.check_qa_advance_from_user(result.transcription)
+                        return
+
+                    # Stop any in-progress TTS immediately — user talking = robot listens
+                    if result.transcription and not _is_advance:
                         self.send_to_robot(client_id, {"event": "tts_stop"})
                         if self._demo_orchestrator:
                             status = self._demo_orchestrator.get_status()
@@ -535,15 +556,6 @@ class WebSocketGateway:
                     # Check advance intent from visitor's transcription
                     if result.transcription:
                         self.check_qa_advance_from_user(result.transcription)
-                    # Send "more questions?" if still in QA window after response
-                    if result.chat and self._demo_orchestrator:
-                        if self._demo_orchestrator.get_status()["state"] == "qa_window":
-                            self.send_to_robot(client_id, {
-                                "event": "demo_step",
-                                "step_id": "_qa_more_questions",
-                                "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
-                                "require_ack": False,
-                            })
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")

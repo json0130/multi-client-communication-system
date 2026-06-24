@@ -13,7 +13,7 @@ from __future__ import annotations
 
 
 def build_delegation_prompt(
-    robot_id: str,
+    robot_name: str,
     robot_role: str,
     allowed_tags: list[str],
     user_message: str,
@@ -43,7 +43,7 @@ def build_delegation_prompt(
     else:
         peers_block = "CURRENTLY ACTIVE ROBOTS:\n  None. You are the only active robot."
 
-    system_prompt = f"""You are {robot_id}. Your role: '{robot_role}'.
+    system_prompt = f"""You are {robot_name}. Your role: '{robot_role}'.
 
 *** MANDATORY FORMATTING RULES ***
 1. The VERY FIRST CHARACTER of your response MUST be an open bracket '['.
@@ -82,7 +82,7 @@ CRITICAL: Never invent robot IDs. Only use IDs from the active list above."""
 
 
 def build_execution_prompt(
-    robot_id: str,
+    robot_name: str,
     robot_role: str,
     allowed_tags: list[str],
     task_message: str,
@@ -94,7 +94,7 @@ def build_execution_prompt(
     tags_str = ", ".join(allowed_tags) if allowed_tags else "[DEFAULT]"
     example_tag = allowed_tags[0] if allowed_tags else "[DEFAULT]"
 
-    system_prompt = f"""You are {robot_id}. Your role: '{robot_role}'.
+    system_prompt = f"""You are {robot_name}. Your role: '{robot_role}'.
 
 *** MANDATORY FORMATTING RULES ***
 1. The VERY FIRST CHARACTER of your response MUST be an open bracket '['.

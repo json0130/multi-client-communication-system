@@ -102,14 +102,14 @@ class RobotInstance:
         # Build prompt
         if is_delegated:
             system, user_msg = build_execution_prompt(
-                self.client_id, self._robot_role,
+                self.robot_name, self._robot_role,
                 self._allowed_tags, message
             )
         else:
             rag_context = self._get_rag_context(message)
             active_peers = self._get_active_peers()
             system, user_msg = build_delegation_prompt(
-                self.client_id, self._robot_role, self._allowed_tags,
+                self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context
             )
 
@@ -166,13 +166,13 @@ class RobotInstance:
 
         if is_delegated:
             system, user_msg = build_execution_prompt(
-                self.client_id, self._robot_role, self._allowed_tags, message
+                self.robot_name, self._robot_role, self._allowed_tags, message
             )
         else:
             rag_context = self._get_rag_context(message)
             active_peers = self._get_active_peers()
             system, user_msg = build_delegation_prompt(
-                self.client_id, self._robot_role, self._allowed_tags,
+                self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context,
             )
 
@@ -262,15 +262,15 @@ class RobotInstance:
         example_tag = self._allowed_tags[0] if self._allowed_tags else "[DEFAULT]"
 
         system_prompt = (
-            f"You are {self.client_id}. Your role: {self._robot_role}\n\n"
+            f"You are {self.robot_name}. Your role: {self._robot_role}\n\n"
             f"DEMO SPEECH RULES:\n"
             f"1. The VERY FIRST character of your response MUST be '['.\n"
             f"2. Use EXACTLY ONE emotion tag chosen from: {tags_str}\n"
             f"3. Speak naturally as yourself — the instruction you receive tells you\n"
             f"   what to say, the emotional tone, and how long to speak.\n"
             f"4. Do NOT include any extra commentary, JSON, or meta-text.\n\n"
-            f"CORRECT:   {example_tag} Welcome to the CARES lab! I am Pepper, your guide today.\n"
-            f"INCORRECT: Welcome! {example_tag} I am Pepper.   <- tag must be first"
+            f"CORRECT:   {example_tag} Welcome to the CARES lab! I am {self.robot_name}, your guide today.\n"
+            f"INCORRECT: Welcome! {example_tag} I am {self.robot_name}.   <- tag must be first"
         )
 
         llm_resp = self.llm.generate_with_history(system_prompt, self._history, instruction)

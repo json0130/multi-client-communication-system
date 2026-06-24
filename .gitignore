@@ -17,5 +17,6 @@ robot/
 
 v6.0.0/server/rag_indexes/
 v6.0.0/tools/
+v6.0.0/pepper_client/
 
 v6.0.0/server/robot-dashboard/node_modules/
