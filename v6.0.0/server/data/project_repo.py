@@ -75,10 +75,15 @@ def get_by_id(project_id: str) -> Optional[ProjectRecord]:
         return None
 
 
-def get_for_robot(robot_id: str) -> list[ProjectRecord]:
+def get_for_robot(robot_id: str, audit_sink=None) -> list[ProjectRecord]:
     """
     RDAC-filtered fetch — returns only projects the robot has access to
     via a row in robot_project_access.
+
+    This predates core.rbac and keeps its own junction-table model: project
+    access is an explicit per-robot grant, not a function of access level. Pass
+    audit_sink to route its decisions into the same rbac_audit_log, so denial
+    counts cover every access path rather than just the memory layer.
     """
     try:
         access_resp = (
@@ -88,14 +93,18 @@ def get_for_robot(robot_id: str) -> list[ProjectRecord]:
             .eq("robot_id", robot_id)
             .execute()
         )
-        ids = [r["project_id"] for r in (access_resp.data or [])]
-        if not ids:
+        granted = {r["project_id"] for r in (access_resp.data or [])}
+
+        if audit_sink is not None:
+            _audit_rdac(robot_id, granted, audit_sink)
+
+        if not granted:
             return []
         resp = (
             get_client()
             .table("projects")
             .select("*")
-            .in_("id", ids)
+            .in_("id", list(granted))
             .order("created_at")
             .execute()
         )
@@ -103,6 +112,36 @@ def get_for_robot(robot_id: str) -> list[ProjectRecord]:
     except Exception as e:
         print(f"[project_repo] get_for_robot error: {e}")
         return []
+
+
+def _audit_rdac(robot_id: str, granted: set, audit_sink) -> None:
+    """
+    Record one decision per existing project, so denials are countable.
+    Never raises — an audit failure must not break the fetch.
+    """
+    try:
+        from datetime import datetime, timezone
+        from core.rbac import AuditEvent, make_record_id
+
+        all_resp = get_client().table("projects").select("id").execute()
+        now = datetime.now(timezone.utc)
+        for row in (all_resp.data or []):
+            pid = row["id"]
+            allowed = pid in granted
+            audit_sink.record(AuditEvent(
+                requester_robot_id=robot_id,
+                record_id=make_record_id("projects", pid),
+                allowed=allowed,
+                reason="rdac_grant" if allowed else "rdac_no_grant",
+                matched_grant_id=None,
+                scenario_id=None,
+                session_id=None,
+                store="projects",
+                decided_at=now,
+            ))
+    except Exception as e:
+        import warnings
+        warnings.warn(f"[project_repo] RDAC audit failed (ignored): {e}", RuntimeWarning)
 
 
 # ── Write ─────────────────────────────────────────────────────────────────────

@@ -6,21 +6,41 @@ One RobotInstance per connected robot.
 Responsibilities:
   - Hold references to whichever modules are enabled for this robot
   - Coordinate modules to handle chat, speech, and image frame requests
-  - Refresh role/tags from the DB before each chat (so web UI changes apply live)
+  - Refresh role/tags/access level from the DB before each chat (so web UI and
+    database changes apply live)
   - Log every exchange to Supabase via chat_log_repo
 
 Does NOT:
   - Build prompts (that's prompt_builder)
   - Query Supabase directly (that's the data repos)
   - Know about Flask or WebSockets (that's the gateway layer)
+  - Decide access (that's core.rbac.policy; this class only supplies identity)
+
+RBAC
+----
+Every retrieval this instance performs is filtered by core.rbac before it can
+reach prompt assembly. The instance's access level is refreshed from the
+database on each chat alongside role and tags, so access hierarchies stay
+adjustable at the database level without reconfiguring individual robot nodes.
 """
 
 from __future__ import annotations
 import time
 from dataclasses import dataclass, field
-from typing import Optional, TYPE_CHECKING
+from datetime import datetime, timezone
+from typing import Optional, Sequence, TYPE_CHECKING
 
 from data import robot_repo, user_repo, chat_log_repo
+from core.rbac import (
+    AccessLevel,
+    ClearedRecord,
+    DelegationGrant,
+    GrantStore,
+    MemoryRecord,
+    RBACFilter,
+    RobotIdentity,
+    Visibility,
+)
 from robot.prompt_builder import build_delegation_prompt, build_execution_prompt
 
 if TYPE_CHECKING:
@@ -55,6 +75,12 @@ class RobotInstance:
         robot_name: str,
         user_id: int,
         enabled_modules: set[str],
+        rbac: Optional[RBACFilter] = None,
+        grants: Optional[GrantStore] = None,
+        access_level: object = AccessLevel.LOCAL,
+        scenario_id: Optional[str] = None,
+        session_id: Optional[str] = None,
+        default_visibility: object = Visibility.LOCAL,
     ):
         self.client_id = client_id
         self.robot_name = robot_name
@@ -67,25 +93,75 @@ class RobotInstance:
         self.emotion: Optional[EmotionModule] = None
         self.rag: Optional[RagModule] = None
 
-        # Conversation history (kept in memory per session)
+        # Conversation history (kept in memory per session).
+        # This is the temporal buffer. It is per-instance and never shared across
+        # robots, so it needs no RBAC filtering — the only path by which context
+        # crosses robot instances is a delegation grant (see process_chat).
         self._history: list[dict] = []
         self._max_history = 14  # 7 back-and-forth turns
 
-        # Cached role/tags — refreshed from DB before each chat
+        # Cached role/tags/access level — refreshed from DB before each chat
         self._robot_role = "You are a helpful robot."
         self._allowed_tags: list[str] = ["[DEFAULT]"]
+
+        # ── RBAC ──────────────────────────────────────────────────────────────
+        # Fail closed: with no filter supplied, nothing is retrievable.
+        self._rbac = rbac or RBACFilter()
+        self._grants = grants or GrantStore()
+        self._access_level = access_level
+        self._scenario_id = scenario_id
+        self._session_id = session_id or f"{client_id}:{int(time.time())}"
+        self._default_visibility = default_visibility
 
         self.created_at = time.time()
         self.last_active = time.time()
 
+    # ── Identity ─────────────────────────────────────────────────────────────
+
+    @property
+    def identity(self) -> RobotIdentity:
+        """
+        The robot's Social Identity as far as access control is concerned.
+        Rebuilt on each access so a DB-level change to access_level takes effect
+        without reconnecting the robot.
+        """
+        return RobotIdentity(
+            robot_id=self.client_id,
+            scenario_id=self._scenario_id,
+            session_id=self._session_id,
+            access_level=self._access_level,
+            role=self._robot_role,
+        )
+
+    @property
+    def access_level(self) -> object:
+        return self._access_level
+
+    @property
+    def rbac(self) -> RBACFilter:
+        return self._rbac
+
+    @property
+    def grants(self) -> GrantStore:
+        return self._grants
+
     # ── Chat ─────────────────────────────────────────────────────────────────
 
     def process_chat(
-        self, message: str, is_delegated: bool = False
+        self,
+        message: str,
+        is_delegated: bool = False,
+        delegated_context: Optional[Sequence[MemoryRecord]] = None,
+        task_id: Optional[str] = None,
     ) -> ChatResult:
         """
         Handle an incoming text message.
         is_delegated=True means this came from a peer robot, not a user.
+
+        delegated_context carries snippets serialized by the delegating Manager.
+        They are re-validated here against this robot's own grants — a snippet
+        not covered by an active grant is dropped, so handing over context is
+        never enough on its own to make it readable.
         """
         self.last_active = time.time()
         self._refresh_role_from_db()
@@ -103,7 +179,8 @@ class RobotInstance:
         if is_delegated:
             system, user_msg = build_execution_prompt(
                 self.robot_name, self._robot_role,
-                self._allowed_tags, message
+                self._allowed_tags, message,
+                self._clear_delegated_context(delegated_context, task_id),
             )
         else:
             rag_context = self._get_rag_context(message)
@@ -144,6 +221,8 @@ class RobotInstance:
         message: str,
         on_sentence,
         is_delegated: bool = False,
+        delegated_context: Optional[Sequence[MemoryRecord]] = None,
+        task_id: Optional[str] = None,
     ) -> ChatResult:
         """
         Like process_chat() but fires on_sentence(clean_text, emotion_tag) for each
@@ -166,7 +245,8 @@ class RobotInstance:
 
         if is_delegated:
             system, user_msg = build_execution_prompt(
-                self.robot_name, self._robot_role, self._allowed_tags, message
+                self.robot_name, self._robot_role, self._allowed_tags, message,
+                self._clear_delegated_context(delegated_context, task_id),
             )
         else:
             rag_context = self._get_rag_context(message)
@@ -355,19 +435,65 @@ class RobotInstance:
     # ── Internal helpers ──────────────────────────────────────────────────────
 
     def _refresh_role_from_db(self):
-        """Pull latest role and tags from Supabase so web UI changes apply immediately."""
+        """
+        Pull latest role, tags and access level from Supabase so web UI and
+        database changes apply immediately.
+
+        Access level is re-read here rather than cached at connect time because
+        the paper's design calls for hierarchies adjustable at the database level
+        without reconfiguring individual robot nodes.
+        """
         robot = robot_repo.get_robot(self.client_id)
         if robot:
             self._robot_role = robot.robot_role
             self._allowed_tags = robot.allowed_tags
+            if getattr(robot, "access_level", None):
+                self._access_level = robot.access_level
+            if getattr(robot, "scenario_id", None):
+                self._scenario_id = robot.scenario_id
 
-    def _get_rag_context(self, message: str) -> list[str]:
+    def _get_rag_context(self, message: str) -> list[ClearedRecord]:
+        """
+        Retrieve episodic context, RBAC-filtered.
+
+        Returns ClearedRecord, not raw strings — prompt assembly refuses
+        anything without a clearance stamp.
+        """
         if self.rag and self.rag.is_available():
             try:
-                return self.rag.search(message, top_k=5)
-            except Exception:
-                pass
+                return self.rag.search(
+                    message,
+                    requester=self.identity,
+                    rbac=self._rbac,
+                    grants=self._grants.active_for(self.client_id),
+                    top_k=5,
+                )
+            except Exception as e:
+                print(f"[RobotInstance] RAG search error: {e}")
         return []
+
+    def _clear_delegated_context(
+        self,
+        delegated_context: Optional[Sequence[MemoryRecord]],
+        task_id: Optional[str],
+    ) -> list[ClearedRecord]:
+        """
+        Validate snippets serialized by a delegating Manager against this robot's
+        own active grants.
+
+        The hand-off carries the snippet text; the grant carries the authority.
+        A record that arrives without a matching active grant is denied here, so
+        a Worker cannot be handed context it was never granted, and the snippets
+        expire with the grant.
+        """
+        if not delegated_context:
+            return []
+        active = self._grants.active_for(self.client_id, task_id=task_id)
+        if not active:
+            return []
+        return self._rbac.filter_records(
+            self.identity, delegated_context, active, store="delegation"
+        )
 
     def _get_active_peers(self) -> list[dict]:
         """Fetch all other currently active robots from DB."""
@@ -388,16 +514,39 @@ class RobotInstance:
         return "unknown"
 
     def _persist(self, message: str, response: str):
-        """Save to chat_logs and update RAG index."""
+        """
+        Save to chat_logs and update RAG index, stamping provenance and
+        visibility so the record can be reasoned about later.
+
+        Note what is *not* here: delegated context. Only the robot's own
+        message and response are written, so a snippet granted to this robot for
+        one task never enters its own memory.
+        """
+        visibility = self._visibility_value()
         try:
-            chat_log_repo.insert(self.user_id, message, response)
+            chat_log_repo.insert(
+                self.user_id, message, response,
+                source_robot_id=self.client_id,
+                scenario_id=self._scenario_id,
+                session_id=self._session_id,
+                visibility=visibility,
+                subject_user_id=self.user_id,
+            )
         except Exception as e:
             print(f"[RobotInstance] DB log error: {e}")
         if self.rag and self.rag.is_available():
             try:
-                self.rag.add(message)
+                self.rag.add(
+                    message,
+                    subject_user_id=self.user_id,
+                    visibility=visibility,
+                )
             except Exception as e:
                 print(f"[RobotInstance] RAG add error: {e}")
+
+    def _visibility_value(self) -> str:
+        v = self._default_visibility
+        return v.value if isinstance(v, Visibility) else str(v)
 
     def _parse_delegation(self, response_text: str) -> tuple[bool, Optional[str]]:
         """

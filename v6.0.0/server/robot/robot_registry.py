@@ -22,6 +22,7 @@ import threading
 from typing import Optional
 
 from data import robot_repo, user_repo
+from core.rbac import GrantStore, RBACFilter, Visibility
 from robot.robot_instance import RobotInstance
 
 
@@ -31,10 +32,30 @@ IDLE_TIMEOUT = 30 * 60   # 30 minutes
 
 class RobotRegistry:
 
-    def __init__(self):
+    def __init__(
+        self,
+        rbac: Optional[RBACFilter] = None,
+        grants: Optional[GrantStore] = None,
+        profiles=None,
+    ):
         self._instances: dict[str, RobotInstance] = {}
         self._lock = threading.RLock()
         self._cleanup_running = False
+
+        # Shared across every instance so a grant issued by one robot is visible
+        # to the robot it was granted to, and all decisions land in one audit log.
+        self._rbac = rbac or RBACFilter()
+        self._grants = grants or GrantStore()
+        # Optional ProfileRegistry — supplies default_visibility per robot.
+        self._profiles = profiles
+
+    @property
+    def rbac(self) -> RBACFilter:
+        return self._rbac
+
+    @property
+    def grants(self) -> GrantStore:
+        return self._grants
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -64,11 +85,20 @@ class RobotRegistry:
             # Ensure a user row exists for this robot
             user_id = self._ensure_user(client_id, robot.robot_name)
 
+            # RBAC identity comes from the DB row, which ProfileRegistry has
+            # already reconciled against the scenario profile at boot.
+            default_visibility = self._default_visibility_for(client_id)
+
             instance = RobotInstance(
                 client_id=client_id,
                 robot_name=robot.robot_name,
                 user_id=user_id,
                 enabled_modules=set(robot.modules),
+                rbac=self._rbac,
+                grants=self._grants,
+                access_level=robot.access_level,
+                scenario_id=robot.scenario_id,
+                default_visibility=default_visibility,
             )
 
             ok = self._init_modules(instance, robot)
@@ -139,6 +169,22 @@ class RobotRegistry:
         print("[Registry] Shutdown complete.")
 
     # ── Internal ──────────────────────────────────────────────────────────────
+
+    def _default_visibility_for(self, client_id: str) -> str:
+        """
+        Visibility stamped on records this robot writes.
+
+        Comes from the scenario profile when one is loaded; otherwise 'local',
+        so a deployment without a profile keeps every robot isolated.
+        """
+        if self._profiles is not None:
+            try:
+                entry = self._profiles.get_robot(client_id)
+                if entry is not None:
+                    return entry.default_visibility
+            except Exception as e:
+                print(f"[Registry] profile lookup failed for {client_id}: {e}")
+        return Visibility.LOCAL.value
 
     def _ensure_user(self, client_id: str, robot_name: str) -> int:
         """
@@ -211,7 +257,16 @@ class RobotRegistry:
         if "rag" in modules:
             try:
                 from modules.rag.rag_module import RagModule
-                mod = RagModule(user_id=instance.user_id)
+                # Provenance is threaded in so records this robot writes are
+                # attributable, and so a legacy v1 sidecar can be backfilled
+                # with the robot that owns the index.
+                mod = RagModule(
+                    user_id=instance.user_id,
+                    client_id=instance.client_id,
+                    scenario_id=getattr(robot, "scenario_id", None),
+                    session_id=instance.identity.session_id,
+                    default_visibility=self._default_visibility_for(instance.client_id),
+                )
                 if mod.initialize():
                     instance.rag = mod
                     print(f"  [Registry] {instance.client_id} — RAG ready")

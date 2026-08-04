@@ -4,7 +4,7 @@ data/robot_repo.py
 All database operations that touch the 'robots' table.
 No other layer queries this table directly.
 
-Supabase schema expected:
+Supabase schema expected (RBAC columns added by data/migrations/002_rbac.sql):
   robots (
     client_id       text PRIMARY KEY,
     robot_name      text NOT NULL,
@@ -13,8 +13,13 @@ Supabase schema expected:
     allowed_tags    text[],         -- e.g. ['[WAVE]', '[HAPPY]', '[DEFAULT]']
     modules         text[],         -- e.g. ['gpt', 'speech', 'emotion', 'rag']
     ip_address      text,
-    ws_port         integer
+    ws_port         integer,
+    access_level    text NOT NULL DEFAULT 'local',   -- 'global' (Manager) | 'local' (Worker)
+    scenario_id     text
   )
+
+Note robot_role is a free-text persona prompt fragment, NOT an access role.
+Authorization is governed solely by access_level.
 """
 
 from __future__ import annotations
@@ -34,6 +39,8 @@ class RobotRecord:
     modules: list[str]
     ip_address: Optional[str] = None
     ws_port: Optional[int] = None
+    access_level: str = "local"
+    scenario_id: Optional[str] = None
 
 
 def _row_to_record(row: dict) -> RobotRecord:
@@ -46,7 +53,30 @@ def _row_to_record(row: dict) -> RobotRecord:
         modules=row.get("modules") or [],
         ip_address=row.get("ip_address"),
         ws_port=row.get("ws_port"),
+        # Fail closed: a row predating 002_rbac.sql reads as a Worker.
+        access_level=row.get("access_level") or "local",
+        scenario_id=row.get("scenario_id"),
     )
+
+
+def set_access_level(
+    client_id: str,
+    access_level: str,
+    scenario_id: Optional[str] = None,
+) -> bool:
+    """
+    Set a robot's RBAC level. Called by ProfileRegistry at boot to reconcile the
+    database with the scenario profile — the level is data, not code.
+    """
+    updates: dict = {"access_level": access_level}
+    if scenario_id is not None:
+        updates["scenario_id"] = scenario_id
+    try:
+        get_client().table("robots").update(updates).eq("client_id", client_id).execute()
+        return True
+    except Exception as e:
+        print(f"[robot_repo] set_access_level error: {e}")
+        return False
 
 
 # ── Read ──────────────────────────────────────────────────────────────────────
