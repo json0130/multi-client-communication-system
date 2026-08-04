@@ -1,0 +1,37 @@
+# v6.0.0/server dependencies
+#
+# Versions pinned to what the server is currently verified against.
+# Install with:  pip install -r requirements.txt
+
+# ── Web framework ─────────────────────────────────────────────────────────────
+flask>=3.1.0
+
+# ── Database ──────────────────────────────────────────────────────────────────
+supabase>=2.28.0
+
+# ── Config ────────────────────────────────────────────────────────────────────
+python-dotenv>=0.19.0
+pyyaml>=5.4.1                  # scenario profile parsing (core/profiles)
+
+# ── LLM + embeddings ──────────────────────────────────────────────────────────
+# Also used for Ollama via its OpenAI-compatible /v1 shim.
+openai>=2.0.0
+
+# ── Retrieval ─────────────────────────────────────────────────────────────────
+faiss-cpu>=1.13.0
+numpy>=1.26.0
+
+# ── Speech ────────────────────────────────────────────────────────────────────
+faster-whisper>=0.10.0
+
+# ── Vision / emotion ──────────────────────────────────────────────────────────
+torch>=1.13.0
+torchvision>=0.14.0
+opencv-python>=4.5.0
+pillow>=8.0.0
+
+# ── Robot transport ───────────────────────────────────────────────────────────
+websocket-client>=1.0.0
+
+# ── Tests ─────────────────────────────────────────────────────────────────────
+pytest>=8.0.0
