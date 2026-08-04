@@ -12,17 +12,36 @@ Flow:
 
 This runs in a background thread so Robot A's HTTP response
 returns immediately without waiting for Robot B to finish.
+
+Context Serialization (RBAC)
+----------------------------
+A hand-off is also where the paper's Context Serialization happens. Before the
+target executes, the source robot retrieves context *as itself* — under its own
+access level — and issues a short-lived DelegationGrant naming those exact
+snippet IDs. The snippets travel with the task and appear only in the target's
+temporary execution prompt.
+
+The target's standing access level never changes. The grant is scoped to one
+task, expires on a timer, and is revoked when the task completes. Nothing
+granted is written into the target's own memory.
 """
 
 from __future__ import annotations
 import json
 import re
 import threading
-from typing import Optional, TYPE_CHECKING
+import uuid
+from typing import Optional, Sequence, TYPE_CHECKING
+
+from core.rbac import DelegationGrant, MemoryRecord, new_grant
 
 if TYPE_CHECKING:
     from robot.robot_registry import RobotRegistry
     from gateway.websocket_gateway import WebSocketGateway
+
+
+# How many context snippets a Manager may serialize into one hand-off.
+MAX_DELEGATED_SNIPPETS = 3
 
 
 class DelegationHandler:
@@ -80,13 +99,22 @@ class DelegationHandler:
         Run delegation synchronously in the calling thread.
         Sends verbal handoff to source robot, then sends result to target robot's WebSocket.
         Returns {"robot_name": str, "clean_text": str} or None on failure.
+
+        Serializes the source robot's context into a short-lived grant so the
+        target inherits conversational state without its access level widening.
         """
         target = self._registry.get(target_id)
         if not target:
             print(f"[Delegation] Target '{target_id}' not connected — cannot delegate.")
             return None
+
+        task_id = str(uuid.uuid4())
+        snippets: list[MemoryRecord] = []
         try:
             robot_name = target.robot_name or target_id
+
+            # ── Context Serialization ─────────────────────────────────────────
+            snippets = self._serialize_context(source_id, target_id, task, task_id)
 
             # Verbal handoff: source robot (Pepper) addresses the target out loud
             verbal_address = f"{robot_name}, {task}"
@@ -96,7 +124,12 @@ class DelegationHandler:
                 "emotion_tag": "[DEFAULT]",
             })
 
-            result = target.process_chat(task, is_delegated=True)
+            result = target.process_chat(
+                task,
+                is_delegated=True,
+                delegated_context=snippets,
+                task_id=task_id,
+            )
             print(f"[Delegation] {target_id} response: {result.response}")
             self._ws.send_to_robot(target_id, {
                 "event": "chat_response",
@@ -111,6 +144,62 @@ class DelegationHandler:
         except Exception as e:
             print(f"[Delegation] Execution error for {target_id}: {e}")
             return None
+        finally:
+            # Revoke on task completion, success or failure. Grants also carry
+            # their own expiry, so a crash between here and there still closes.
+            self._revoke(task_id)
+
+    # ── Context Serialization ─────────────────────────────────────────────────
+
+    def _serialize_context(
+        self, source_id: str, target_id: str, task: str, task_id: str
+    ) -> list[MemoryRecord]:
+        """
+        Retrieve context as the *source* robot, then grant those exact snippets
+        to the target for this task only.
+
+        Returns the snippet records to travel with the hand-off. The target
+        re-validates them against the grant before using them, so the payload
+        alone confers nothing.
+        """
+        source = self._registry.get(source_id)
+        if not source:
+            return []
+        try:
+            cleared = source._get_rag_context(task)[:MAX_DELEGATED_SNIPPETS]
+            if not cleared:
+                return []
+
+            records = [c.record for c in cleared]
+            grant = new_grant(
+                snippet_ids=[r.record_id for r in records],
+                granted_to=target_id,
+                granted_by=source_id,
+                task_id=task_id,
+                session_id=source.identity.session_id,
+            )
+            self._grant_store().issue(grant)
+            print(
+                f"[Delegation] Serialized {len(records)} snippet(s) to {target_id} "
+                f"(grant {grant.grant_id[:8]}, task {task_id[:8]})"
+            )
+            return records
+        except Exception as e:
+            # Context serialization is an enhancement, not a precondition — a
+            # failure here must not abort the hand-off itself.
+            print(f"[Delegation] Context serialization failed (continuing): {e}")
+            return []
+
+    def _grant_store(self):
+        return self._registry.grants
+
+    def _revoke(self, task_id: str) -> None:
+        try:
+            n = self._grant_store().revoke_task(task_id)
+            if n:
+                print(f"[Delegation] Revoked {n} grant(s) for task {task_id[:8]}")
+        except Exception as e:
+            print(f"[Delegation] Grant revoke error (ignored): {e}")
 
     def _execute(self, source_id: str, target_id: str, task: str):
         """
