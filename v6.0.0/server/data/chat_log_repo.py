@@ -62,20 +62,31 @@ def insert(
     visibility defaults to 'local' — fail closed. Widening is a deployment
     decision expressed in the scenario profile, never an implicit default.
     """
+    base = {"user_id": user_id, "message": message, "response": response}
+    payload = {
+        **base,
+        "source_robot_id": source_robot_id,
+        "scenario_id": scenario_id,
+        "session_id": session_id,
+        "visibility": visibility,
+        "subject_user_id": subject_user_id if subject_user_id is not None else user_id,
+    }
     try:
-        payload = {
-            "user_id": user_id,
-            "message": message,
-            "response": response,
-            "source_robot_id": source_robot_id,
-            "scenario_id": scenario_id,
-            "session_id": session_id,
-            "visibility": visibility,
-            "subject_user_id": subject_user_id if subject_user_id is not None else user_id,
-        }
         resp = get_client().table("chat_logs").insert(payload).execute()
         return resp.data[0]["id"]
     except Exception as e:
+        # 002_rbac.sql not applied yet: keep logging rather than losing the
+        # exchange. Provenance is then absent, and those rows read as
+        # unattributed — deny by default until the migration backfills them.
+        if "does not exist" in str(e):
+            print(f"[chat_log_repo] RBAC columns missing — logging without "
+                  f"provenance. Apply 002_rbac.sql.")
+            try:
+                resp = get_client().table("chat_logs").insert(base).execute()
+                return resp.data[0]["id"]
+            except Exception as e2:
+                print(f"[chat_log_repo] insert error: {e2}")
+                return None
         print(f"[chat_log_repo] insert error: {e}")
         return None
 

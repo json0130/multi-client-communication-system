@@ -100,8 +100,24 @@ def run():
     from modules.rag.rag_module import RagModule
 
     # ── 2. Status before init ─────────────────────────────────
+    # RBAC identity for retrieval — search() is filtered, so it needs a requester.
+    from core.rbac import AccessLevel, RBACFilter, RobotIdentity, Visibility
+
+    TEST_ROBOT_ID = "_checkpoint_rag_robot"
+    TEST_SCENARIO = "_checkpoint"
+    rbac = RBACFilter()
+    requester = RobotIdentity(
+        TEST_ROBOT_ID, TEST_SCENARIO, "sess", AccessLevel.LOCAL
+    )
+
     total += 1
-    module = RagModule(user_id=TEST_USER_ID)
+    module = RagModule(
+        user_id=TEST_USER_ID,
+        client_id=TEST_ROBOT_ID,
+        scenario_id=TEST_SCENARIO,
+        session_id="sess",
+        default_visibility=Visibility.LOCAL,
+    )
     status = module.get_status()
     required = {"module", "available", "user_id", "vector_count", "embed_model"}
     if check("get_status() returns required keys before init",
@@ -120,7 +136,7 @@ def run():
 
     # ── 4. Search on empty index ──────────────────────────────
     total += 1
-    results = module.search("hello robot")
+    results = module.search("hello robot", requester=requester, rbac=rbac)
     if check("search() on empty index returns empty list",
              isinstance(results, list) and len(results) == 0):
         passed += 1
@@ -161,7 +177,7 @@ def run():
 
     # ── 7. Search returns result ──────────────────────────────
     module.add("I love robotics and machine learning")
-    results = module.search("chess and books", top_k=3)
+    results = module.search("chess and books", requester=requester, rbac=rbac, top_k=3)
 
     total += 1
     if check("search() returns relevant result",
@@ -169,10 +185,11 @@ def run():
         passed += 1
 
     total += 1
-    found = any("chess" in r or "science fiction" in r or "robotics" in r
+    # search() now returns RBAC-cleared records, not bare strings.
+    found = any("chess" in r.text or "science fiction" in r.text or "robotics" in r.text
                 for r in results)
     if check("result contains the added message text", found,
-             f"Got: {results}"):
+             f"Got: {[r.text for r in results]}"):
         passed += 1
 
     _cleanup(module)

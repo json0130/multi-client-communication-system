@@ -230,10 +230,39 @@ python3 tools/check_rag.py
 python3 tools/check_robot.py
 python3 tools/check_gateway.py
 python3 tools/check_app.py
+python3 tools/check_rbac.py      # no DB / Ollama / hardware needed
 
 # Start the server
 python3 app.py
 ```
+
+---
+
+## Tests
+
+Two complementary things live side by side:
+
+**`tools/check_*.py`** — checkpoint scripts, run by hand, one per layer. Most need
+live infrastructure (Supabase, Ollama, robot hardware) and `check_data.py` writes
+real rows to your database. `check_rbac.py` is the exception and needs none of it.
+
+**`tests/`** — the automated suite. Hermetic: no network, no database, no Ollama,
+no `.env` required. A guard fixture fails any test that reaches for a real Supabase
+client.
+
+```bash
+cd server
+python3 -m pytest tests/          # ~1s
+python3 -m pytest tests/ -v -m integration
+```
+
+| File | Covers |
+|---|---|
+| `test_rbac_policy.py` | the full access matrix and every default-deny branch |
+| `test_rbac_grants.py` | grant lifecycle, the filter, the clearance stamp |
+| `test_faiss_topk_regression.py` | a Worker still gets *k* results behind inaccessible records; sidecar v1→v2 compatibility |
+| `test_delegation_integration.py` | end-to-end Contextual Inheritance across a hand-off |
+| `test_profile_registry.py` | profile validation fails fast at boot |
 
 ---
 

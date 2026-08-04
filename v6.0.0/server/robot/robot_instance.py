@@ -106,8 +106,11 @@ class RobotInstance:
 
         # ── RBAC ──────────────────────────────────────────────────────────────
         # Fail closed: with no filter supplied, nothing is retrievable.
-        self._rbac = rbac or RBACFilter()
-        self._grants = grants or GrantStore()
+        # `is not None` rather than `or` — GrantStore defines __len__, so an
+        # empty (but shared) store is falsy and `or` would silently replace it
+        # with a private one, breaking every grant issued to this robot.
+        self._rbac = rbac if rbac is not None else RBACFilter()
+        self._grants = grants if grants is not None else GrantStore()
         self._access_level = access_level
         self._scenario_id = scenario_id
         self._session_id = session_id or f"{client_id}:{int(time.time())}"
@@ -454,7 +457,13 @@ class RobotInstance:
 
     def _get_rag_context(self, message: str) -> list[ClearedRecord]:
         """
-        Retrieve episodic context, RBAC-filtered.
+        Retrieve episodic context under this robot's standing access level.
+
+        Deliberately passes no grants. A delegation grant authorises specific
+        snippets for one hand-off and is consumed only in
+        _clear_delegated_context; letting it reach ordinary retrieval would turn
+        a task-scoped grant into a standing widening of access for its lifetime,
+        which is exactly what Context Serialization exists to avoid.
 
         Returns ClearedRecord, not raw strings — prompt assembly refuses
         anything without a clearance stamp.
@@ -465,7 +474,7 @@ class RobotInstance:
                     message,
                     requester=self.identity,
                     rbac=self._rbac,
-                    grants=self._grants.active_for(self.client_id),
+                    grants=(),
                     top_k=5,
                 )
             except Exception as e:

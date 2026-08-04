@@ -117,9 +117,31 @@ def run():
     # ── 2. Prompt builder ─────────────────────────────────────
     print("\n  -- Prompt builder tests --")
 
+    # RAG context must be RBAC-cleared before prompt assembly will accept it.
+    from datetime import datetime, timezone
+    from core.rbac import (
+        AccessLevel, ClearanceError, MemoryRecord, RBACFilter,
+        RobotIdentity, Visibility,
+    )
+
+    _rbac = RBACFilter()
+    _identity = RobotIdentity("bot_01", "check", "sess", AccessLevel.LOCAL)
+    _cleared = _rbac.filter_records(
+        _identity,
+        [MemoryRecord(
+            record_id="check:0",
+            content="I like oat milk in my coffee",
+            source_robot_id="bot_01",
+            scenario_id="check",
+            visibility=Visibility.LOCAL,
+        )],
+        (),
+        datetime.now(timezone.utc),
+    )
+
     total += 1
     system, user = build_delegation_prompt(
-        robot_id="bot_01",
+        robot_name="bot_01",
         robot_role="You are a front desk assistant.",
         allowed_tags=["[WAVE]", "[HAPPY]", "[DEFAULT]"],
         user_message="Can you bring me a coffee?",
@@ -128,14 +150,14 @@ def run():
             "robot_name": "CoffeeBot",
             "robot_role": "I make and deliver coffee.",
         }],
-        rag_context=["I like oat milk in my coffee"],
+        rag_context=_cleared,
     )
     if check("build_delegation_prompt returns (system, user) strings",
              isinstance(system, str) and isinstance(user, str)):
         passed += 1
 
     total += 1
-    if check("System prompt contains robot_id", "bot_01" in system):
+    if check("System prompt contains robot name", "bot_01" in system):
         passed += 1
 
     total += 1
@@ -153,7 +175,7 @@ def run():
 
     total += 1
     exec_sys, exec_user = build_execution_prompt(
-        robot_id="bot_02",
+        robot_name="bot_02",
         robot_role="I make and deliver coffee.",
         allowed_tags=["[DEFAULT]"],
         task_message="Please make one oat milk latte.",
@@ -165,6 +187,20 @@ def run():
     total += 1
     if check("Execution prompt contains task message",
              "oat milk latte" in exec_user):
+        passed += 1
+
+    # ── RBAC: prompt assembly refuses unfiltered memory ───────
+    total += 1
+    try:
+        build_delegation_prompt(
+            robot_name="bot_01", robot_role="desk",
+            allowed_tags=["[DEFAULT]"], user_message="hi",
+            active_robots=[], rag_context=["an unfiltered raw string"],
+        )
+        refused = False
+    except ClearanceError:
+        refused = True
+    if check("Prompt assembly refuses records with no RBAC clearance", refused):
         passed += 1
 
     # ── 3. Registry — no DB robot ─────────────────────────────

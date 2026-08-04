@@ -44,8 +44,10 @@ class RobotRegistry:
 
         # Shared across every instance so a grant issued by one robot is visible
         # to the robot it was granted to, and all decisions land in one audit log.
-        self._rbac = rbac or RBACFilter()
-        self._grants = grants or GrantStore()
+        # `is not None` rather than `or`: GrantStore defines __len__, so an empty
+        # store is falsy and `or` would quietly hand every robot its own store.
+        self._rbac = rbac if rbac is not None else RBACFilter()
+        self._grants = grants if grants is not None else GrantStore()
         # Optional ProfileRegistry — supplies default_visibility per robot.
         self._profiles = profiles
 

@@ -350,14 +350,31 @@ class RagModule(BaseModule):
         print(f"[RagModule] No local index found — rebuilding from Supabase...")
         try:
             from data.connection import get_client
-            resp = (
-                get_client()
-                .table("chat_logs")
-                .select("message, source_robot_id, scenario_id, session_id, visibility, subject_user_id")
-                .eq("user_id", self._user_id)
-                .order("id")
-                .execute()
-            )
+
+            def _fetch(columns: str):
+                return (
+                    get_client()
+                    .table("chat_logs")
+                    .select(columns)
+                    .eq("user_id", self._user_id)
+                    .order("id")
+                    .execute()
+                )
+
+            try:
+                resp = _fetch(
+                    "message, source_robot_id, scenario_id, session_id, "
+                    "visibility, subject_user_id"
+                )
+            except Exception as e:
+                # 002_rbac.sql has not been applied yet. Fall back to the
+                # pre-RBAC column set so the server still boots; the records
+                # below are then stamped with this robot's own identity, which
+                # is the same provenance the migration's backfill would recover.
+                print(f"[RagModule] RBAC columns unavailable ({e}) — "
+                      f"rebuilding without provenance. Apply 002_rbac.sql.")
+                resp = _fetch("message")
+
             rows = [r for r in (resp.data or []) if (r.get("message") or "").strip()]
             texts = [r["message"].strip() for r in rows]
 
