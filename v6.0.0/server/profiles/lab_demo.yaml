@@ -1,0 +1,47 @@
+# CARES lab demo — scenario profile
+#
+# Declares each robot's Social Identity for this deployment: role, and the RBAC
+# access level that governs what it can retrieve from the memory layer.
+#
+# Loaded and validated at boot by core.profiles.ProfileRegistry, which then
+# reconciles robots.access_level / robots.scenario_id in Supabase. Access
+# hierarchies are therefore adjustable as data, without touching robot nodes.
+#
+# Robot IDs must match client_id in each robot's client_config.json, and the
+# constants at the top of demo/demo_script.py.
+#
+# Keys are documented in v6.0.0/README.md under "Scenario Profiles".
+
+scenario_id: lab_demo
+description: >
+  CARES lab tour. Pepper guides visitors and delegates project questions to the
+  specialist robots, each of which speaks only to its own research area.
+
+robots:
+  # Main guide. Manager: cross-client visibility over global records within this
+  # scenario, so it can maintain a unified view of the visitor across the team.
+  # Previously described in demo_script.py as "full DB access".
+  - id: pepper_01
+    role: "Guide"
+    access_level: global
+
+  # Specialist robots. Workers: local isolation — each retrieves only its own
+  # interaction history and cannot read what another platform generated.
+  #
+  # default_visibility: global means the records they write are readable by the
+  # Manager, which is what gives Pepper its unified view. It does not widen what
+  # these robots can read — that is governed by access_level alone.
+  - id: chatbox_jetson_001
+    role: "Conversational AI researcher"
+    access_level: local
+    default_visibility: global
+
+  - id: navel_001
+    role: "Emotion-aware interaction researcher"
+    access_level: local
+    default_visibility: global
+
+  - id: silbot_01
+    role: "Human-aware navigation researcher"
+    access_level: local
+    default_visibility: global

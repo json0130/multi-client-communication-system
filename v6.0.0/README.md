@@ -107,6 +107,69 @@ CREATE TABLE IF NOT EXISTS chat_logs (
 );
 ```
 
+Then apply the migrations in `server/data/migrations/`, in order:
+
+| File | Adds |
+|---|---|
+| `001_projects.sql` | `projects`, `robot_project_access` |
+| `002_rbac.sql` | `robots.access_level` / `scenario_id`, RBAC columns on `chat_logs` |
+| `003_rbac_audit.sql` | `rbac_audit_log` + denial-count views |
+
+Each has a matching `*_down.sql`.
+
+---
+
+## Scenario Profiles
+
+A Scenario Profile declares, per deployment, which robots take part and what each
+one's Social Identity is — role, persona, and its RBAC access level. Profiles live
+in `server/profiles/*.yaml`, one per deployment, and are loaded and validated once
+at boot by `core.profiles.ProfileRegistry`.
+
+```yaml
+scenario_id: lab_demo
+description: >
+  Optional free text.
+
+robots:
+  - id: pepper_01              # must match client_id in client_config.json
+    role: "Guide"
+    access_level: global       # Manager
+
+  - id: silbot_01
+    role: "Human-aware navigation researcher"
+    access_level: local        # Worker
+    default_visibility: global # visibility stamped on records this robot writes
+```
+
+### Keys
+
+| Key | Required | Values | Meaning |
+|---|---|---|---|
+| `scenario_id` | yes | string | Deployment identifier. Cross-robot visibility never crosses scenarios. |
+| `description` | no | string | Free text. |
+| `robots[].id` | yes | string | The robot's `client_id`. Must be unique across all profiles. |
+| `robots[].role` | no | string | Persona role. **Not** used for access decisions. |
+| `robots[].access_level` | yes | `global` \| `local` | `global` = Manager (cross-client visibility over global records in its scenario). `local` = Worker (local isolation — its own records only). |
+| `robots[].default_visibility` | no | `global` \| `local` \| `restricted` | Visibility stamped on records this robot *writes*. Defaults to `local`. Does **not** widen what the robot can read. |
+| `robots[].persona` | no | string | Optional persona name. |
+
+`default_visibility: global` on a Worker is what gives the Manager its unified view
+of the user across the team. It is a deliberate, per-deployment decision: the
+default is `local`, so a robot added without thought stays isolated.
+
+### Boot validation
+
+The server refuses to start on an invalid profile, rather than failing at the first
+request. It rejects: an unknown `access_level` or `default_visibility`, a duplicate
+robot `id` (within or across profiles), a duplicate `scenario_id`, a missing
+`scenario_id`, an empty `robots` list, and any scenario with no `global` robot.
+
+At boot the registry also reconciles `robots.access_level` and `robots.scenario_id`
+in Supabase from the profile. Access hierarchies are therefore adjustable as data —
+edit the profile and restart, or change the column directly. Levels are **not**
+hot-swappable at runtime.
+
 ---
 
 ## Environment variables (`.env`)
