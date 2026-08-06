@@ -268,16 +268,24 @@ class ProfileRegistry:
         job via the web UI.
         """
         synced = 0
+        failed: list[str] = []
         for profile in self._by_scenario.values():
             for robot in profile.robots:
                 try:
                     if writer(robot.id, robot.access_level.value, profile.scenario_id):
                         synced += 1
                     else:
-                        print(
-                            f"[ProfileRegistry] Could not set access level for "
-                            f"'{robot.id}' — is it registered?"
-                        )
+                        failed.append(robot.id)
                 except Exception as e:
+                    failed.append(robot.id)
                     print(f"[ProfileRegistry] sync error for '{robot.id}': {e}")
+
+        if failed:
+            # One line, not one per robot — the underlying cause is almost
+            # always shared (missing migration, or robots not yet registered).
+            print(
+                f"[ProfileRegistry] Could not set access level for "
+                f"{len(failed)} robot(s): {', '.join(failed)}. "
+                f"They stay at the fail-closed 'local' default."
+            )
         return synced

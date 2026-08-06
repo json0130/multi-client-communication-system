@@ -59,6 +59,10 @@ def _row_to_record(row: dict) -> RobotRecord:
     )
 
 
+# The missing-migration hint is the same for every robot; warn once per process.
+_warned_missing_rbac_columns = False
+
+
 def set_access_level(
     client_id: str,
     access_level: str,
@@ -75,7 +79,19 @@ def set_access_level(
         get_client().table("robots").update(updates).eq("client_id", client_id).execute()
         return True
     except Exception as e:
-        print(f"[robot_repo] set_access_level error: {e}")
+        # Distinguish "migration not applied" from "robot not registered" —
+        # they need completely different fixes, and the first is far more likely
+        # on a fresh checkout.
+        msg = str(e)
+        if "access_level" in msg or "schema cache" in msg or "does not exist" in msg:
+            global _warned_missing_rbac_columns
+            if not _warned_missing_rbac_columns:
+                _warned_missing_rbac_columns = True
+                print("[robot_repo] robots.access_level is missing — apply "
+                      "data/migrations/002_rbac.sql. Every robot stays 'local' "
+                      "(fail closed) until then.")
+        else:
+            print(f"[robot_repo] set_access_level error: {e}")
         return False
 
 

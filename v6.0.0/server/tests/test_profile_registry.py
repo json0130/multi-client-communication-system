@@ -188,7 +188,18 @@ class TestSyncToDb:
     def test_an_unregistered_robot_is_skipped_not_fatal(self, capsys):
         r = ProfileRegistry([parse_profile(VALID)])
         assert r.sync_to_db(lambda rid, lvl, sid: False) == 0
-        assert "is it registered?" in capsys.readouterr().out
+
+        out = capsys.readouterr().out
+        assert "Could not set access level for 2 robot(s)" in out
+        assert "pepper_01" in out and "silbot_01" in out
+        # The failure must state what happens next, not just that it failed.
+        assert "local" in out
+
+    def test_sync_failures_are_reported_once_not_per_robot(self, capsys):
+        r = ProfileRegistry([parse_profile(VALID)])
+        r.sync_to_db(lambda rid, lvl, sid: False)
+        out = capsys.readouterr().out
+        assert out.count("Could not set access level") == 1
 
     def test_a_writer_error_does_not_abort_the_rest(self):
         seen = []
