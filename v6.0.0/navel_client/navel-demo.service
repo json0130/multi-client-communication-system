@@ -1,0 +1,46 @@
+# navel-demo.service — start the Navel lab-demo client at boot.
+#
+# This makes the Navel robot register + listen for the central server automatically
+# whenever it is powered on. It auto-detects its own IP (run.py) so no config edit
+# is needed, and restarts itself if it ever crashes.
+#
+# INSTALL (run on the Navel robot, once):
+#   sudo cp navel-demo.service /etc/systemd/system/navel-demo.service
+#   # --- edit the path/user below if your folder is not the default ---
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable navel-demo.service     # start on every boot
+#   sudo systemctl start  navel-demo.service     # start right now
+#
+# USEFUL:
+#   systemctl status navel-demo.service          # is it running?
+#   journalctl -u navel-demo.service -f          # live logs
+#   sudo systemctl restart navel-demo.service    # after pulling new code
+#   sudo systemctl disable navel-demo.service    # stop auto-start on boot
+
+[Unit]
+Description=Navel CARES lab-demo client (waits for central server)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=navel
+WorkingDirectory=/home/navel/control-studio/scripts/navel_client_Lab-Demo
+ExecStart=/usr/bin/python3 run.py
+
+# Navel SDK shared-memory lib (run.py also sets a sane default; this is belt-and-braces)
+Environment=NAVEL_SHM_LIB=/usr/lib/python3/dist-packages/navel/libnavel_shm.cpython-311-aarch64-linux-gnu.so
+Environment=PYTHONUNBUFFERED=1
+
+# Audio device access for the ODAS mic + Navel TTS
+SupplementaryGroups=audio
+
+# Keep it alive — relaunch on crash, and wait for the network at boot
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,199 @@
+================================================================================
+  CHATBOX DEMO — COMMAND REFERENCE
+  Working directory for ALL commands: CHATBOX-DEMO_V4/CHATBOX_SERVER/
+================================================================================
+
+cd /home/jay/Desktop/2026-Jay/ChatBox-companion-robot/CHATBOX-DEMO_V4/CHATBOX_SERVER
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 1. ENROLL A FACE  (do this first before running the main loop)
+────────────────────────────────────────────────────────────────────────────────
+
+  # Enroll one person — opens a webcam window and GUIDES you through five head
+  # poses (front, left, right, chin up, chin down), storing each as a separate
+  # view. Follow the on-screen prompt; it refuses frames that just repeat a view
+  # it already has.
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Jay
+
+  # ACCURACY COMES FROM POSE COVERAGE, NOT FRAME COUNT. 30 frames all shot
+  # face-on collapse into ONE view and stay angle-brittle; --n-captures is split
+  # across the poses (30 → 6 frames per pose).
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Jay --n-captures 30
+
+  # Only capture certain poses
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Jay \
+      --enroll-poses front,left,right
+
+  # Enroll a second person
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Peter
+
+  # Enroll using a different camera (e.g. external USB cam = index 1)
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Jay --camera 1
+
+  # Inspect what is stored — how many views each person has and how distinct
+  # they are. "only ONE view" means recognition will fail off-angle.
+  python3 -m modules.face_webcam.webcam_loop --faces-info
+
+  # Enrollments are saved automatically to faces.npz in the working directory.
+  # Re-enrolling the same name ADDS to that person's views (same pose refines an
+  # existing view; a new angle becomes a new one).
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 1b. ANGLE ROBUSTNESS / FLICKER  (defaults are already on — tune only if needed)
+────────────────────────────────────────────────────────────────────────────────
+
+  # The robot also LEARNS new views of a known person while talking to them.
+  # Watch for:  [FaceID] learned a new view of 'jay' (sim 0.81) — 5 enrolled + 1 learned
+  # Undo everything it taught itself (enrolled views are kept):
+  python3 -m modules.face_webcam.webcam_loop --reset-adaptive
+  python3 -m modules.face_webcam.webcam_loop --reset-adaptive jay
+  # Turn the learning off entirely:
+  python3 -m modules.face_webcam.webcam_loop --llm --no-adapt
+
+  # Calibration trace — per-frame box, similarity and votes. Use it to pick
+  # --threshold / --retain-threshold for your lighting.
+  python3 -m modules.face_webcam.webcam_loop --llm --id-debug
+
+  # Still flickering? hold the identity longer / through more missed windows:
+  python3 -m modules.face_webcam.webcam_loop --llm --retain-threshold 0.55 --id-miss-grace 3
+  # Mixing people up? tighten instead:
+  python3 -m modules.face_webcam.webcam_loop --llm --threshold 0.80 --id-margin 0.08
+
+  # Profile detection costs ~3 ms/frame; disable if you only ever face the camera:
+  python3 -m modules.face_webcam.webcam_loop --llm --no-multi-pose
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 2. RUN THE MAIN LOOP
+────────────────────────────────────────────────────────────────────────────────
+
+  --- Standard (face reco + emotion, no LLM) ---
+
+  python3 -m modules.face_webcam.webcam_loop
+
+  --- With LLM chat (Ollama qwen2.5:7b must be running) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm
+
+  --- Full stack: LLM + hsemotion (recommended) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion hsemotion
+
+  --- Full stack for ELLEBOT persona ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion hsemotion --robot ellebot
+
+  --- Use the larger, more accurate B2 emotion model (~12 ms/frame) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion hsemotion-b2
+
+  --- Use original EfficientNet emotion model (HQRAF, PyTorch) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion efficientnet
+
+  --- Faster tick (0.5 s) — KG + PAD updates twice per second ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion hsemotion --tick 0.5
+
+  --- Looser face matching (lower threshold = accepts less-clear matches) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --threshold 0.65
+
+  --- Different Ollama model ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --model llama3.2:3b
+
+  --- Full stack with ESP32 expression dispatch ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --emotion hsemotion --esp32-host 10.42.0.100
+
+  --- Headless (no OpenCV window, terminal output only) ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --no-window
+
+  --- External USB camera ---
+
+  python3 -m modules.face_webcam.webcam_loop --llm --camera 1
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 3. IN-WINDOW KEYBOARD CONTROLS  (during --mode run)
+────────────────────────────────────────────────────────────────────────────────
+
+  T          Open chat box — type message → Enter to send to LLM
+  E          Open enroll box — type name → Enter to enroll face from live frame
+  Esc        Cancel current input box
+  Backspace  Delete last character in input box
+  Q          Quit
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 4. OLLAMA — START / CHECK
+────────────────────────────────────────────────────────────────────────────────
+
+  # Check Ollama is running
+  curl http://127.0.0.1:11434/v1/models
+
+  # Start Ollama server (if not already running as a service)
+  ollama serve
+
+  # Pull the default model (one-time, ~4 GB)
+  ollama pull qwen2.5:7b
+
+  # Pull a lighter model for slower machines
+  ollama pull llama3.2:3b
+
+  # List downloaded models
+  ollama list
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 5. ALL CLI FLAGS — QUICK REFERENCE
+────────────────────────────────────────────────────────────────────────────────
+
+  Flag                Default         Description
+  ──────────────────────────────────────────────────────────────────────────────
+  --mode              run             "run" or "enroll"
+  --name              (none)          Person name — required for enroll mode
+  --robot             chatbox         Robot persona: "chatbox" or "ellebot"
+  --faces             faces.npz       Path to face embedding database
+  --camera            0               Camera device index
+  --threshold         0.75            Cosine similarity threshold (0–1)
+  --tick              1.0             KG/PAD pipeline tick interval in seconds
+  --n-captures        15              Frames captured per enroll session
+  --llm               (off)           Enable Ollama LLM verbal responses
+  --model             qwen2.5:7b      Ollama model name
+  --emotion           hsemotion       Backend: hsemotion / hsemotion-b2 / efficientnet
+  --no-window         (off)           Headless mode — no OpenCV window
+  --kg                kg_state.json   KG persistence file (auto-saved on quit, loaded on start)
+  --esp32-host        (disabled)      ESP32 IP for TCP expression dispatch (e.g. 10.42.0.100)
+  --esp32-port        8888            ESP32 TCP port
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 6. FACE DATABASE
+────────────────────────────────────────────────────────────────────────────────
+
+  faces.npz            Auto-saved after every enrollment.
+
+  # Use a different database file (useful for separate demo vs. test sets)
+  python3 -m modules.face_webcam.webcam_loop --faces demo_faces.npz --llm
+  python3 -m modules.face_webcam.webcam_loop --mode enroll --name Jay --faces demo_faces.npz
+
+
+────────────────────────────────────────────────────────────────────────────────
+ 7. TIER PROGRESSION  (how long to reach each KG relationship tier)
+────────────────────────────────────────────────────────────────────────────────
+
+  Tier       Condition                    Approx ticks (happy emotion, tick=1.0s)
+  ──────────────────────────────────────────────────────────────────────────────
+  visitor    interaction_count >= 1       immediate on first recognition
+  known      interaction_count >= 6       ~6 ticks
+             OR rapport/trust > 0.45
+  close      rapport/trust > 0.70         ~34 ticks of happy emotion
+  unknown    not recognised               —
+
+  delta per tick = 0.025 × PAD_Pleasure  (max delta = 0.025 when P=1.0)
+================================================================================

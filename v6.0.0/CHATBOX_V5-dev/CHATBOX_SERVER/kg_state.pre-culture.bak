@@ -1,0 +1,1041 @@
+{
+  "nodes": [
+    {
+      "id": "jay",
+      "display_name": "Jay",
+      "created_at": "2026-07-20T06:10:09.882644Z",
+      "node_type": "person"
+    },
+    {
+      "id": "chatbox",
+      "name": "ChatBox",
+      "embodiment": "CAT",
+      "persona_traits": {},
+      "capabilities": [],
+      "node_type": "robot"
+    },
+    {
+      "id": "jay:persona:curious-talkative",
+      "descriptor": "curious, talkative",
+      "node_type": "persona"
+    },
+    {
+      "id": "chatbox:persona:introverted-shy",
+      "descriptor": "introverted, shy",
+      "node_type": "persona"
+    },
+    {
+      "id": "chatbox:role:companion",
+      "descriptor": "companion",
+      "node_type": "role"
+    },
+    {
+      "id": "jay:role:student",
+      "descriptor": "student",
+      "node_type": "role"
+    },
+    {
+      "id": "interest:jay:music",
+      "label": "music",
+      "node_type": "interest"
+    },
+    {
+      "id": "interaction:jay:chatbox",
+      "rapport": 0.9,
+      "trust": 0.0,
+      "interaction_count": 95,
+      "node_type": "interaction"
+    },
+    {
+      "id": "interest:jay:space",
+      "label": "space",
+      "node_type": "interest"
+    },
+    {
+      "id": "interest:jay:coding",
+      "label": "coding",
+      "node_type": "interest"
+    },
+    {
+      "id": "interest:jay:math",
+      "label": "math",
+      "node_type": "interest"
+    },
+    {
+      "id": "chatbox:capability",
+      "items": [
+        "tells stories",
+        "knows jazz",
+        "knows about space",
+        "knows about coding",
+        "good at math"
+      ],
+      "node_type": "capability"
+    },
+    {
+      "id": "topic:multiplication",
+      "label": "multiplication",
+      "category": "science",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child asked about solving 2x2, which likely means multiplication.",
+          "ts": "2026-07-06T03:22:24.876242+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Brief discussion on math.",
+          "ts": "2026-07-16T02:15:56.261284+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed math problems related to multiplication.",
+          "ts": "2026-07-16T02:24:17.640524+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:math-problems",
+      "label": "math problems",
+      "category": "science",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child asked about math problems, specifically 2x2.",
+          "ts": "2026-07-06T03:23:31.524256+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Talked about solving math problems.",
+          "ts": "2026-07-16T02:24:17.640656+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:jazz",
+      "label": "jazz",
+      "category": "music",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child expressed a preference for R&B music, especially SZA's 'Open Arms', and mentioned enjoying jazz as well.",
+          "ts": "2026-07-14T01:01:49.420440+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The robot suggested listening to jazz music as a way to cheer up the child.",
+          "ts": "2026-07-14T05:31:49.176644+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed potentially listening to jazz music.",
+          "ts": "2026-07-15T23:34:26.631300+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child mentioned jazz several times.",
+          "ts": "2026-07-16T00:07:56.815624+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The robot suggested listening to jazz music to lift the child's spirits.",
+          "ts": "2026-07-16T01:50:49.047551+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Previously mentioned enjoying jazz music",
+          "ts": "2026-07-16T02:14:39.876479+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:space",
+      "label": "space",
+      "category": "science",
+      "notes": [],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:r-b",
+      "label": "r&b",
+      "category": "music",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child expressed a preference for R&B music, especially SZA's 'Open Arms', and mentioned enjoying jazz as well.",
+          "ts": "2026-07-14T01:01:49.420464+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Child wants to listen to R&B music.",
+          "ts": "2026-07-16T00:11:25.856723+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child talked about their favorite R&B music.",
+          "ts": "2026-07-16T01:50:49.047503+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed music style",
+          "ts": "2026-07-20T04:41:37.996365+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:jay:personal-preferences",
+      "label": "personal preferences",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:favorite-songs",
+      "label": "favorite songs",
+      "category": "music",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child shared their favorite song by SZA, 'Open Arms'.",
+          "ts": "2026-07-14T01:01:50.472046+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Child is open to suggestions for popular R&B songs.",
+          "ts": "2026-07-16T00:11:25.856839+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed SZA's 'Open Arms'",
+          "ts": "2026-07-16T02:14:39.876429+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Child might be talking about their favorite songs.",
+          "ts": "2026-07-16T02:15:23.971169+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Talked about favorite songs",
+          "ts": "2026-07-16T02:16:21.487345+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:hiphop",
+      "label": "hiphop",
+      "category": "music",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child expressed interest in listening to hip-hop today.",
+          "ts": "2026-07-14T02:15:44.009653+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed potentially listening to hip-hop music.",
+          "ts": "2026-07-15T23:34:26.631404+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child talked about hiphop music.",
+          "ts": "2026-07-16T02:35:19.425730+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:tennis",
+      "label": "tennis",
+      "category": "sport",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child mentioned liking tennis.",
+          "ts": "2026-07-14T02:29:27.151432+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child expressed enthusiasm for tennis and mentioned being a fan of Roger Federer but preferring Rafael Nadal.",
+          "ts": "2026-07-14T02:46:49.095930+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child briefly mentioned their favorite tennis player, Rafael Nadal.",
+          "ts": "2026-07-14T05:31:47.935597+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "The child and robot discussed tennis, with the child mentioning Nadal as a favorite player.",
+          "ts": "2026-07-16T01:50:49.047588+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed favorite sports player Rafael Nadal.",
+          "ts": "2026-07-16T02:06:48.353460+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Previous interest in tennis expressed",
+          "ts": "2026-07-16T02:14:39.876515+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed sport",
+          "ts": "2026-07-20T04:41:37.996416+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "conversation:jay:chatbox",
+      "topics": [
+        "greeting",
+        "previous conversation",
+        "past conversations"
+      ],
+      "mood": 0.007759042941688681,
+      "emotion": "neutral",
+      "node_type": "conversation"
+    },
+    {
+      "id": "HJ",
+      "display_name": "HJ",
+      "created_at": "2026-07-14T05:40:17.075342Z",
+      "node_type": "person"
+    },
+    {
+      "id": "interest:HJ:cooking",
+      "label": "cooking",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:baking",
+      "label": "baking",
+      "category": "food",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ loves baking sourdough on weekends.",
+          "ts": "2026-07-14T05:40:17.075420+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:pasta",
+      "label": "pasta",
+      "category": "food",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ loves baking sourdough on weekends.",
+          "ts": "2026-07-14T05:40:17.075447+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:HJ:outdoors",
+      "label": "outdoors",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:hiking",
+      "label": "hiking",
+      "category": "activity",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ went camping in the mountains recently.",
+          "ts": "2026-07-14T05:40:17.075465+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:camping",
+      "label": "camping",
+      "category": "activity",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ went camping in the mountains recently.",
+          "ts": "2026-07-14T05:40:17.075474+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:HJ:photography",
+      "label": "photography",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:landscapes",
+      "label": "landscapes",
+      "category": "place",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ shoots landscape photos at sunrise.",
+          "ts": "2026-07-14T05:40:17.075489+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:HJ:pets",
+      "label": "pets",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:dogs",
+      "label": "dogs",
+      "category": "animals",
+      "notes": [
+        {
+          "person": "HJ",
+          "text": "HJ has a golden retriever named Milo.",
+          "ts": "2026-07-14T05:40:17.075501+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:creating-playlist",
+      "label": "creating_playlist",
+      "category": "activity",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "Child and robot will make a playlist together.",
+          "ts": "2026-07-16T00:11:25.856913+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Child mentioned creating a playlist.",
+          "ts": "2026-07-16T02:15:23.970970+00:00"
+        },
+        {
+          "person": "jay",
+          "text": "Discussed creating a playlist",
+          "ts": "2026-07-16T02:16:21.487281+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:jay:activity",
+      "label": "activity",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:football-player",
+      "label": "football_player",
+      "category": "sport",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "Expression of thoughts about Lionel Messi",
+          "ts": "2026-07-16T02:14:39.876546+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "interest:jay:sport",
+      "label": "sport",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:pickleball",
+      "label": "pickleball",
+      "category": "sport",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "Discussed rules and tips for playing pickleball.",
+          "ts": "2026-07-16T02:24:17.640754+00:00"
+        }
+      ],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:mars",
+      "label": "mars",
+      "category": "other",
+      "notes": [],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:rap",
+      "label": "rap",
+      "category": "music",
+      "notes": [
+        {
+          "person": "jay",
+          "text": "The child mentioned rap music.",
+          "ts": "2026-07-16T02:35:19.425678+00:00"
+        }
+      ],
+      "node_type": "topic"
+    }
+  ],
+  "edges": [
+    {
+      "id": "5d3f64af-fa1f-4312-b7a5-1cbf1b1232b7",
+      "source_id": "jay",
+      "target_id": "jay",
+      "provenance": {
+        "source": "chatbox",
+        "timestamp": "2026-07-20T06:11:57.658161Z",
+        "confidence": 1.0
+      },
+      "edge_type": "mood",
+      "value": 0.007759042941688681,
+      "label": "neutral",
+      "timescale": "FAST"
+    },
+    {
+      "id": "9049b4a1-fca9-4c4b-b3fe-171678fc013c",
+      "source_id": "jay",
+      "target_id": "jay",
+      "provenance": {
+        "source": "chatbox",
+        "timestamp": "2026-07-06T03:23:22.096339Z",
+        "confidence": 1.0
+      },
+      "edge_type": "attention",
+      "value": 0.761284325,
+      "timescale": "FAST"
+    },
+    {
+      "id": "982e3343-f62f-481f-96b9-97d55ac7d78c",
+      "source_id": "jay",
+      "target_id": "jay:persona:curious-talkative",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.882705Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_persona",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "aa07d185-a301-470f-9ef2-a8fd7fcdd368",
+      "source_id": "chatbox",
+      "target_id": "chatbox:persona:introverted-shy",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.883618Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_persona",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "a3397a18-63c6-4c4d-b85c-dc8199b7e525",
+      "source_id": "chatbox",
+      "target_id": "chatbox:role:companion",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.883637Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_role",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "c271c73f-ed46-4bf6-a7b0-e3928df10ff6",
+      "source_id": "jay",
+      "target_id": "jay:role:student",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.882742Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_role",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "5e05fbaa-2857-4448-be8d-b0cae2fdd47c",
+      "source_id": "jay",
+      "target_id": "interest:jay:music",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.882758Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "7c6e69e2-c115-4c39-b0fe-51112e2dbc3e",
+      "source_id": "jay",
+      "target_id": "interaction:jay:chatbox",
+      "provenance": {
+        "source": "chatbox",
+        "timestamp": "2026-07-03T02:13:41.885623Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interaction"
+    },
+    {
+      "id": "dfe6becb-0626-41b9-87c0-fdbe437f9b92",
+      "source_id": "chatbox",
+      "target_id": "interaction:jay:chatbox",
+      "provenance": {
+        "source": "chatbox",
+        "timestamp": "2026-07-03T02:13:41.885623Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interaction"
+    },
+    {
+      "id": "aa60f4a2-a1c2-407e-a9a2-3f53b523fea8",
+      "source_id": "jay",
+      "target_id": "interest:jay:space",
+      "provenance": {
+        "source": "extraction",
+        "timestamp": "2026-07-06T03:11:10.550436Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "e2269973-f73c-4971-b58b-bb1a75b457cc",
+      "source_id": "jay",
+      "target_id": "interest:jay:coding",
+      "provenance": {
+        "source": "extraction",
+        "timestamp": "2026-07-03T02:46:15.998193Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "10dede68-4aa4-484a-a010-1270d3354c1f",
+      "source_id": "jay",
+      "target_id": "interest:jay:math",
+      "provenance": {
+        "source": "extraction:c8d94662-b29f-41af-a653-f8e5f337eb0f",
+        "timestamp": "2026-07-16T02:24:17.640598Z",
+        "confidence": 0.9
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "9dee339f-5379-486d-9c53-b9a4a23db98c",
+      "source_id": "chatbox",
+      "target_id": "chatbox:capability",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.883652Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_capability",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "9e98a470-8175-4a55-97ea-8f8aa9b34d3e",
+      "source_id": "interest:jay:math",
+      "target_id": "topic:multiplication",
+      "provenance": {
+        "source": "extraction:c8d94662-b29f-41af-a653-f8e5f337eb0f",
+        "timestamp": "2026-07-16T02:24:17.640479Z",
+        "confidence": 0.8
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "4e3bf7f1-f044-4635-a84c-ee989cb8ee0c",
+      "source_id": "interest:jay:math",
+      "target_id": "topic:math-problems",
+      "provenance": {
+        "source": "extraction:c8d94662-b29f-41af-a653-f8e5f337eb0f",
+        "timestamp": "2026-07-16T02:24:17.640629Z",
+        "confidence": 0.9
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "90bf2925-94ab-457c-9152-a24250dd1665",
+      "source_id": "chatbox:capability",
+      "target_id": "topic:math-problems",
+      "provenance": {
+        "source": "extraction",
+        "timestamp": "2026-07-06T03:23:31.524289Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": "good at math",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "3ed3c4e3-8c5f-4f06-9cea-7fe2831996e3",
+      "source_id": "interest:jay:music",
+      "target_id": "topic:jazz",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-20T06:10:09.882770Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "c6638763-36f5-4e8c-8798-523ef94c0017",
+      "source_id": "chatbox:capability",
+      "target_id": "topic:jazz",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-14T00:31:17.733655Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": "knows jazz",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "d03dbef5-5f3d-4d0e-a254-c5a54a42d422",
+      "source_id": "chatbox:capability",
+      "target_id": "topic:space",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-14T00:31:17.733671Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": "knows about space",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "a8da3ebc-7085-4f77-9a52-4b62fbb63512",
+      "source_id": "interest:jay:music",
+      "target_id": "topic:r-b",
+      "provenance": {
+        "source": "extraction:51f56840-c165-4c86-a845-7e4c79da4084",
+        "timestamp": "2026-07-20T04:41:37.996347Z",
+        "confidence": 0.9
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "1554c369-9d33-4880-9e33-ca87f929360b",
+      "source_id": "jay",
+      "target_id": "interest:jay:personal-preferences",
+      "provenance": {
+        "source": "extraction:0e7efa56-0bfe-4ec6-85b6-cded887d8ae7",
+        "timestamp": "2026-07-16T02:16:21.487318Z",
+        "confidence": 0.7
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "aa1135d7-6eff-4095-a00b-e379fccc739f",
+      "source_id": "interest:jay:personal-preferences",
+      "target_id": "topic:favorite-songs",
+      "provenance": {
+        "source": "extraction:0e7efa56-0bfe-4ec6-85b6-cded887d8ae7",
+        "timestamp": "2026-07-16T02:16:21.487331Z",
+        "confidence": 0.7
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "9f8e41f9-26d7-44cf-8fc1-4bab2751260a",
+      "source_id": "interest:jay:music",
+      "target_id": "topic:hiphop",
+      "provenance": {
+        "source": "extraction:8bd0775a-acde-4de3-8322-1f6ed42fc770",
+        "timestamp": "2026-07-16T02:35:19.425720Z",
+        "confidence": 0.75
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "6336477a-8346-40f2-b905-a14bdb6c2ea2",
+      "source_id": "jay",
+      "target_id": "conversation:jay:chatbox",
+      "provenance": {
+        "source": "live-topic",
+        "timestamp": "2026-07-14T02:45:22.728413Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_conversation",
+      "timescale": "FAST"
+    },
+    {
+      "id": "c3605585-87d2-4569-99fd-f0503957c3a1",
+      "source_id": "chatbox",
+      "target_id": "conversation:jay:chatbox",
+      "provenance": {
+        "source": "live-topic",
+        "timestamp": "2026-07-14T02:45:22.728456Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_conversation",
+      "timescale": "FAST"
+    },
+    {
+      "id": "4817e84a-85ee-442b-8638-a7a113cd0d7f",
+      "source_id": "HJ",
+      "target_id": "interest:HJ:cooking",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075386Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "6e4bd4c6-0e1b-4d47-97e7-c3b4e08ec082",
+      "source_id": "interest:HJ:cooking",
+      "target_id": "topic:baking",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075409Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "c5336557-f443-4d64-a799-9c9c183d1ca9",
+      "source_id": "interest:HJ:cooking",
+      "target_id": "topic:pasta",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075440Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "9363ba39-93d5-470b-90f5-092202773f22",
+      "source_id": "HJ",
+      "target_id": "interest:HJ:outdoors",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075454Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "9e6c8e4c-96e9-4695-b488-6541503591be",
+      "source_id": "interest:HJ:outdoors",
+      "target_id": "topic:hiking",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075461Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "c2619558-e98f-4c3f-aa09-3bedd042a923",
+      "source_id": "interest:HJ:outdoors",
+      "target_id": "topic:camping",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075470Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "37d11222-f6ba-43c7-a82b-c914b3cc19ab",
+      "source_id": "HJ",
+      "target_id": "interest:HJ:photography",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075478Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "b6aecade-83ec-416b-9cbb-43c7fe95b81f",
+      "source_id": "interest:HJ:photography",
+      "target_id": "topic:landscapes",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075485Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "065a9599-c907-4a6d-874d-65b011b1b1ca",
+      "source_id": "HJ",
+      "target_id": "interest:HJ:pets",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075493Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "2845b67f-ba18-407b-9e45-52196552e9a5",
+      "source_id": "interest:HJ:pets",
+      "target_id": "topic:dogs",
+      "provenance": {
+        "source": "seed:HJ",
+        "timestamp": "2026-07-14T05:40:17.075498Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "f771c48f-0866-4cfa-9062-dd25a98cac8c",
+      "source_id": "jay",
+      "target_id": "interest:jay:activity",
+      "provenance": {
+        "source": "extraction:93ccc6cc-0728-4a1c-8a61-95620ae51c47",
+        "timestamp": "2026-07-16T02:29:04.061553Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "e8edc985-ae52-4498-a6e6-42dea936cf67",
+      "source_id": "interest:jay:activity",
+      "target_id": "topic:creating-playlist",
+      "provenance": {
+        "source": "extraction:93ccc6cc-0728-4a1c-8a61-95620ae51c47",
+        "timestamp": "2026-07-16T02:29:04.061596Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "d5e5b6ce-4fe5-44f9-85e4-46129d90d717",
+      "source_id": "jay",
+      "target_id": "interest:jay:sport",
+      "provenance": {
+        "source": "extraction:51f56840-c165-4c86-a845-7e4c79da4084",
+        "timestamp": "2026-07-20T04:41:37.996393Z",
+        "confidence": 0.9
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "e2dbe6c3-3233-44dd-a78d-649d860d824c",
+      "source_id": "interest:jay:sport",
+      "target_id": "topic:football-player",
+      "provenance": {
+        "source": "extraction:34155c5c-b21f-40d4-8f29-aabe8bc806ab",
+        "timestamp": "2026-07-16T02:14:39.876540Z",
+        "confidence": 0.9
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "12668bd1-87f8-40c4-8954-e28010bc2f26",
+      "source_id": "interest:jay:sport",
+      "target_id": "topic:tennis",
+      "provenance": {
+        "source": "extraction:51f56840-c165-4c86-a845-7e4c79da4084",
+        "timestamp": "2026-07-20T04:41:37.996405Z",
+        "confidence": 0.9
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "5055d63a-014f-4924-8daa-fc86406266fc",
+      "source_id": "interest:jay:sport",
+      "target_id": "topic:pickleball",
+      "provenance": {
+        "source": "extraction:c8d94662-b29f-41af-a653-f8e5f337eb0f",
+        "timestamp": "2026-07-16T02:24:17.640735Z",
+        "confidence": 0.85
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "a83d0300-b05d-49c0-9826-96c5483867ec",
+      "source_id": "interest:jay:music",
+      "target_id": "topic:rap",
+      "provenance": {
+        "source": "extraction:8bd0775a-acde-4de3-8322-1f6ed42fc770",
+        "timestamp": "2026-07-16T02:35:19.425660Z",
+        "confidence": 0.8
+      },
+      "edge_type": "about",
+      "label": null,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "88330903-8daf-4f32-a2b1-903b6c16d9a2",
+      "source_id": "topic:math-problems",
+      "target_id": "topic:multiplication",
+      "provenance": {
+        "source": "related",
+        "timestamp": "2026-07-16T02:42:01.777608Z",
+        "confidence": 1.0
+      },
+      "edge_type": "related_topic",
+      "weight": 0.642072605870989,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "d3b6cbf0-22f9-4876-bf02-c07b843c8a92",
+      "source_id": "topic:hiphop",
+      "target_id": "topic:rap",
+      "provenance": {
+        "source": "related",
+        "timestamp": "2026-07-16T02:42:01.778178Z",
+        "confidence": 1.0
+      },
+      "edge_type": "related_topic",
+      "weight": 0.6776691887582208,
+      "timescale": "SLOW"
+    }
+  ]
+}

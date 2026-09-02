@@ -1,11 +1,12 @@
 # modules/input/voice_input.py - WAKE WORD, KEYBOARD & VAD HYBRID
+import sys
 import threading
 import time
 import tempfile
 import wave
 import os
 import logging
-import audioop  
+import audioop
 import numpy as np
 import collections # Added for pre-roll buffer
 from typing import Optional, Dict
@@ -225,23 +226,29 @@ class VoiceInputModule(InputModule):
                 time.sleep(0.1)
 
     def _keyboard_input_loop(self):
+        # Headless / boot (systemd) has no terminal — skip the interactive prompt
+        # instead of hammering input() with EOFError. Voice (VAD/wake-word) still works.
+        if not sys.stdin or not sys.stdin.isatty():
+            logger.info("⌨️  No interactive terminal — keyboard input disabled (voice only).")
+            return
+
         logger.info("💬 Chat Interface Ready!")
         logger.info("   🗣️ Talk normally (Auto-VAD)")
         logger.info("   🎙️ Or say Wake Word")
         logger.info("   🎤 Or press Enter to force manual record")
         logger.info("-" * 50)
-        
+
         while not self.stop_event.is_set() and self.enabled:
             try:
                 user_input = input("\n💬 You (text) or 🎤 Enter for voice: ").strip()
-                
+
                 if user_input.lower() == 'exit':
                     if self.client: self.client.running = False
                     break
-                    
+
                 elif user_input:
                     threading.Thread(target=self._process_request_in_background, args=('chat', user_input), daemon=True).start()
-                    
+
                 else:
                     if self.mode != "manual_record":
                         self.mode = "manual_record"
@@ -251,8 +258,11 @@ class VoiceInputModule(InputModule):
                         logger.info("🟢 Recording stopped.")
                         self._save_and_send_audio()
                         self.mode = "listening"
-                        
+
             except KeyboardInterrupt:
+                break
+            except (EOFError, OSError):
+                logger.info("⌨️  stdin closed — keyboard input disabled.")
                 break
 
     def _save_and_send_audio(self):

@@ -2,40 +2,155 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   getDemoStatus,
   startDemo, stopDemo, pauseDemo, resumeDemo, nextDemoStep,
-  startQaMode, endQaMode,
+  startQaMode, endQaMode, reviseDemo,
   getRobots, chatRobot,
 } from '../api'
 
+// Preset reasons for an operator override. Every control click is recorded as a
+// supervisor correction on the server; the reason is what turns "they clicked
+// Move On here" into "they clicked Move On *because* it was dragging". Presets
+// exist because nobody types during a live demo — one click is the whole cost,
+// and leaving it blank still records the correction.
+const OVERRIDE_REASONS = [
+  'dragging on',
+  'wrong robot answered',
+  'visitors lost interest',
+  'running late',
+  'robot got it wrong',
+  'visitors had more to ask',
+]
+
+/** mm:ss for the run clock. */
+function clock(sec) {
+  if (sec == null) return '—'
+  const s = Math.max(0, Math.round(sec))
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`
+}
+
 // ── Browser TTS ───────────────────────────────────────────────────────────────
 
-// Per-robot voice characteristics (pitch / rate). Browser picks best voice.
+// Per-robot voice identity. `prefer` is matched against voice names in order —
+// the first available match that no other robot has taken wins, so each robot
+// gets a genuinely different voice rather than one voice at four pitches.
+// pitch/rate stay as secondary separation when the browser ships few voices.
 const ROBOT_VOICE = {
-  pepper_01:  { pitch: 1.15, rate: 0.92 },   // warm guide voice
-  chatbox_01: { pitch: 1.25, rate: 1.05 },   // energetic, slightly faster
-  navel_01:   { pitch: 1.05, rate: 0.88 },   // slower, empathetic
-  silbot_01:  { pitch: 0.80, rate: 0.93 },   // deeper, measured
+  pepper_01:  { pitch: 1.12, rate: 0.94, prefer: [/aria|jenny|samantha|zira|female/i, /uk english female/i] },
+  chatbox_01: { pitch: 1.22, rate: 1.04, prefer: [/guy|eric|mark|david|us english male/i] },
+  navel_01:   { pitch: 1.02, rate: 0.88, prefer: [/libby|sonia|hazel|uk english female/i] },
+  silbot_01:  { pitch: 0.82, rate: 0.92, prefer: [/ryan|thomas|george|uk english male/i] },
+}
+
+// Same identities under the production client_ids, so the hardcoded demo script
+// and the dynamic one sound identical.
+ROBOT_VOICE.chatbox_jetson_001 = ROBOT_VOICE.chatbox_01
+ROBOT_VOICE.navel_001          = ROBOT_VOICE.navel_01
+ROBOT_VOICE.pepper_001         = ROBOT_VOICE.pepper_01
+
+// Voices load asynchronously in Chrome: getVoices() returns [] on first call and
+// only fills in after `voiceschanged`. Cache them and rebuild the assignment
+// whenever the list grows, otherwise the first line of the demo speaks in the
+// browser default voice and everything after it does not.
+let _voices     = []
+let _assignment = null
+
+function loadVoices() {
+  const found = window.speechSynthesis?.getVoices?.() || []
+  if (found.length !== _voices.length) {
+    _voices     = found
+    _assignment = null      // rebuild against the fuller list
+  }
+  return _voices
+}
+
+if (typeof window !== 'undefined' && window.speechSynthesis) {
+  loadVoices()
+  window.speechSynthesis.addEventListener('voiceschanged', loadVoices)
+}
+
+/** English voices, best-sounding first. Robotic espeak fallbacks sink to the bottom. */
+function englishVoices() {
+  return _voices
+    .filter(v => v.lang?.toLowerCase().startsWith('en'))
+    .sort((a, b) => rankVoice(a) - rankVoice(b))
+}
+
+function rankVoice(v) {
+  const n = v.name.toLowerCase()
+  if (/espeak|pico|festival/.test(n)) return 3
+  if (/google|microsoft|natural|neural/.test(n)) return 0
+  return v.localService ? 2 : 1
+}
+
+/** robotId -> SpeechSynthesisVoice, every robot distinct while voices last. */
+function voiceAssignment() {
+  if (_assignment) return _assignment
+
+  const pool  = englishVoices()
+  const taken = new Set()
+  const map   = {}
+
+  for (const [robotId, cfg] of Object.entries(ROBOT_VOICE)) {
+    let pick = null
+    for (const rx of cfg.prefer || []) {
+      pick = pool.find(v => !taken.has(v.name) && rx.test(v.name))
+      if (pick) break
+    }
+    if (!pick) pick = pool.find(v => !taken.has(v.name))   // any unclaimed voice
+    if (!pick) pick = pool[Object.keys(map).length % (pool.length || 1)] || null
+    if (pick) {
+      taken.add(pick.name)
+      map[robotId] = pick
+    }
+  }
+
+  _assignment = map
+  if (pool.length) {
+    console.log('[TTS] voices:', Object.entries(map).map(([r, v]) => `${r} → ${v.name}`).join(' · '))
+  }
+  return map
+}
+
+/** Deterministic pitch/rate for a robot the table does not know about. */
+function fallbackProfile(robotId) {
+  let h = 0
+  for (let i = 0; i < robotId.length; i++) h = (h * 31 + robotId.charCodeAt(i)) >>> 0
+  return { pitch: 0.8 + (h % 50) / 100, rate: 0.88 + ((h >> 5) % 25) / 100, prefer: [] }
 }
 
 function browserSpeak(text, robotId, volume = 1) {
   if (!window.speechSynthesis || !text) return
   window.speechSynthesis.cancel()          // stop any current speech first
 
-  const utt  = new SpeechSynthesisUtterance(text)
-  const cfg  = ROBOT_VOICE[robotId] || { pitch: 1, rate: 1 }
-  utt.pitch  = cfg.pitch
-  utt.rate   = cfg.rate
-  utt.volume = volume
+  const say = () => {
+    const utt  = new SpeechSynthesisUtterance(text)
+    const cfg  = ROBOT_VOICE[robotId] || fallbackProfile(robotId || '')
+    utt.pitch  = cfg.pitch
+    utt.rate   = cfg.rate
+    utt.volume = volume
 
-  // Try to grab a good English voice; fall back to default
-  const voices = window.speechSynthesis.getVoices()
-  if (voices.length) {
-    const en = voices.find(v => v.lang.startsWith('en') && v.localService)
-            || voices.find(v => v.lang.startsWith('en'))
-            || voices[0]
-    if (en) utt.voice = en
+    const voice = voiceAssignment()[robotId]
+                || englishVoices()[0]
+                || _voices[0]
+    if (voice) utt.voice = voice
+
+    window.speechSynthesis.speak(utt)
   }
 
-  window.speechSynthesis.speak(utt)
+  // First utterance of a fresh tab: wait briefly for the voice list rather than
+  // speaking in whatever the browser defaults to.
+  if (loadVoices().length) return say()
+
+  const onReady = () => {
+    clearTimeout(timer)
+    window.speechSynthesis.removeEventListener('voiceschanged', onReady)
+    loadVoices()
+    say()
+  }
+  const timer = setTimeout(() => {
+    window.speechSynthesis.removeEventListener('voiceschanged', onReady)
+    say()
+  }, 800)
+  window.speechSynthesis.addEventListener('voiceschanged', onReady)
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -60,6 +175,10 @@ function RobotSelectorModal({ onClose, onStart }) {
   const [allRobots,   setAllRobots]   = useState([])
   const [loading,     setLoading]     = useState(true)
   const [selectedIds, setSelectedIds] = useState([])  // ordered list
+  // Minutes the whole tour should take. Blank is meaningful, not missing: with
+  // no budget the server never trims the script on its own, so leaving this
+  // empty is how you opt out of clock-driven plan revision entirely.
+  const [budgetMin,   setBudgetMin]   = useState('')
 
   useEffect(() => {
     getRobots()
@@ -220,13 +339,40 @@ function RobotSelectorModal({ onClose, onStart }) {
               )}
             </div>
 
+            {/* ── Time budget ── */}
+            <div style={{ marginBottom: 24 }}>
+              <div className="demo-section-title" style={{ marginBottom: 6 }}>
+                Time Budget
+                <span className="muted" style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.75rem' }}>
+                  optional
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <input
+                  className="form-input"
+                  type="number"
+                  min="1"
+                  placeholder="e.g. 20"
+                  value={budgetMin}
+                  onChange={e => setBudgetMin(e.target.value)}
+                  style={{ width: 90 }}
+                />
+                <span className="muted" style={{ fontSize: '0.78rem' }}>
+                  minutes. Leave blank and the tour is never shortened automatically.
+                </span>
+              </div>
+            </div>
+
             {/* ── Actions ── */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="btn btn-sm" onClick={onClose}>Cancel</button>
               <button
                 className="btn btn-primary btn-sm"
                 disabled={selectedIds.length === 0}
-                onClick={() => onStart(selectedIds)}
+                onClick={() => onStart(
+                  selectedIds,
+                  Number(budgetMin) > 0 ? Number(budgetMin) * 60 : null,
+                )}
               >
                 Start Demo →
               </button>
@@ -235,6 +381,36 @@ function RobotSelectorModal({ onClose, onStart }) {
         )}
       </div>
     </div>
+  )
+}
+
+/**
+ * Run clock, and the projected finish against the budget.
+ *
+ * The projection extends the pace so far over the steps that remain — the same
+ * estimator the server uses for PLAN_REVISE, so the operator sees the number the
+ * system is acting on rather than a second opinion. It is crude early in a run,
+ * which is why it only shows once a few steps are done.
+ */
+function RunClock({ status }) {
+  const { elapsed_sec: elapsed, time_budget_sec: budget, step_idx: idx, total } = status || {}
+  if (elapsed == null) return null
+
+  let overrun = null
+  if (budget && idx > 0) {
+    overrun = (elapsed + (elapsed / idx) * Math.max(total - idx, 0)) - budget
+  }
+  const late = overrun != null && overrun > 30
+
+  return (
+    <span className="demo-progress" title={budget ? `Budget ${clock(budget)}` : 'No time budget set'}>
+      ⏱ {clock(elapsed)}{budget ? ` / ${clock(budget)}` : ''}
+      {overrun != null && (
+        <span style={{ marginLeft: 6, color: late ? '#f87171' : '#34d399' }}>
+          {late ? `~${clock(overrun)} over` : 'on time'}
+        </span>
+      )}
+    </span>
   )
 }
 
@@ -276,6 +452,8 @@ export default function DemoTab() {
   const [status,       setStatus]       = useState(null)
   const [ctrlLoad,     setCtrlLoad]     = useState(false)
   const [showSelector, setShowSelector] = useState(false)
+  // Why the operator is overriding. Optional — see OVERRIDE_REASONS.
+  const [reason,       setReason]       = useState('')
 
   // ── TTS state ───────────────────────────────────────────────────────────────
   const [ttsEnabled, setTtsEnabled] = useState(true)
@@ -366,11 +544,52 @@ export default function DemoTab() {
   }, [status?.step_idx])
 
   // ── Demo controls ───────────────────────────────────────────────────────────
+  // Every override carries the currently-selected reason, then clears it — a
+  // reason belongs to one click, and a stale one silently mislabels the next
+  // correction, which is worse than no label at all.
   const run = async fn => {
     setCtrlLoad(true)
-    try { setStatus(await fn()) } catch {}
-    finally { setCtrlLoad(false) }
+    try { setStatus(await fn(reason)) } catch {}
+    finally {
+      setReason('')
+      setCtrlLoad(false)
+    }
   }
+
+  // ── Mid-demo plan revision ──────────────────────────────────────────────────
+  const revise = async (kind, robotId) => {
+    setCtrlLoad(true)
+    try {
+      const res = await reviseDemo([{ kind, robot_id: robotId }], reason)
+      setStatus(res)
+      const applied = res.revision?.applied?.length || 0
+      addMsg({
+        role: 'system',
+        text: applied
+          ? `Script revised: ${kind} ${robotId || ''}`.trim()
+          // Ops that no longer apply come back ignored rather than as errors —
+          // by the time someone says "skip that", it may already be over.
+          : `Revision had no effect: ${res.revision?.ignored?.[0]?.why || kind}`,
+        time: ts(),
+      })
+    } catch (e) {
+      addMsg({ role: 'system', text: `Revision failed: ${e.message}`, time: ts() })
+    } finally {
+      setReason('')
+      setCtrlLoad(false)
+    }
+  }
+
+  // Project blocks that still have steps ahead of the play head. The block
+  // currently presenting is included — its farewell has not been said yet — but
+  // it cannot be reordered, only skipped or extended.
+  const upcomingBlocks = (() => {
+    const seen = []
+    for (const s of (status?.steps || []).slice((status?.step_idx ?? 0) + 1)) {
+      if (s.block_robot_id && !seen.includes(s.block_robot_id)) seen.push(s.block_robot_id)
+    }
+    return seen
+  })()
 
   // ── Chat ────────────────────────────────────────────────────────────────────
   const handleSend = async () => {
@@ -423,6 +642,7 @@ export default function DemoTab() {
               {status.robot_id && <span className="demo-robot"> · {status.robot_id}</span>}
             </span>
           )}
+          {isRunning && <RunClock status={status} />}
         </div>
 
         {/* Compact controls */}
@@ -436,8 +656,20 @@ export default function DemoTab() {
           <button className="btn btn-sm"     disabled={ctrlLoad || isIdle}    onClick={() => run(nextDemoStep)} title="Skip current step">Skip</button>
           {inQa
             ? <button className="btn btn-sm btn-danger" disabled={ctrlLoad}   onClick={() => run(endQaMode)}>End Q&amp;A</button>
-            : <button className="btn btn-sm btn-qa"     disabled={ctrlLoad || isIdle} onClick={() => run(() => startQaMode(''))}>Q&amp;A</button>
+            : <button className="btn btn-sm btn-qa"     disabled={ctrlLoad || isIdle} onClick={() => run(r => startQaMode('', r))}>Q&amp;A</button>
           }
+          {/* Optional label for the next override. One click, then it clears. */}
+          <select
+            className="form-select"
+            value={reason}
+            disabled={ctrlLoad || isIdle}
+            onChange={e => setReason(e.target.value)}
+            title="Why are you overriding? Optional — recorded as a training label."
+            style={{ width: 'auto', maxWidth: 170, fontSize: '0.75rem', padding: '4px 6px' }}
+          >
+            <option value="">why? (optional)</option>
+            {OVERRIDE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
+          </select>
           {/* TTS toggle */}
           <button
             className={`btn btn-sm ${ttsEnabled ? 'btn-tts-on' : ''}`}
@@ -479,6 +711,47 @@ export default function DemoTab() {
         {/* ── Left: Step timeline ──────────────────────────────────────── */}
         <div className="demox-timeline-pane">
           <div className="demo-section-title">Script</div>
+
+          {/* Mid-demo revision. The pre-start modal can reorder robots; this is
+              the equivalent once the tour is under way, for when visitors say
+              they are short on time or want more of one project. */}
+          {isRunning && upcomingBlocks.length > 0 && (
+            <div className="demox-revise">
+              <div className="muted" style={{ fontSize: '0.72rem', marginBottom: 5 }}>
+                Remaining projects — revise
+              </div>
+              {upcomingBlocks.map((rid, i) => (
+                <div key={rid} className="demox-revise-row">
+                  <span className="demox-revise-name">
+                    {robots.find(r => r.client_id === rid)?.robot_name || rid}
+                  </span>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    <button className="btn btn-sm" disabled={ctrlLoad}
+                            onClick={() => revise('extend_qa', rid)}
+                            title="More Q&A time for this project">+Q&amp;A</button>
+                    <button className="btn btn-sm" disabled={ctrlLoad}
+                            onClick={() => revise('compress', rid)}
+                            title="Keep the research talk, drop the intro and greeting">Trim</button>
+                    <button className="btn btn-sm" disabled={ctrlLoad || i === 0}
+                            onClick={() => revise('reorder', rid)}
+                            title="Move this project next">↑</button>
+                    <button className="btn btn-sm btn-danger" disabled={ctrlLoad}
+                            onClick={() => revise('skip', rid)}
+                            title="Drop this project entirely">Skip</button>
+                  </div>
+                </div>
+              ))}
+              <button
+                className="btn btn-sm btn-danger"
+                disabled={ctrlLoad}
+                onClick={() => revise('drop_remaining')}
+                title="Cut to the wrap-up — the closing steps still run"
+                style={{ marginTop: 5, width: '100%' }}
+              >
+                Cut to wrap-up
+              </button>
+            </div>
+          )}
           <div className="demox-timeline">
             {(status?.steps || []).map((step, i) => {
               const isCurrent   = i === status.step_idx
@@ -587,9 +860,9 @@ export default function DemoTab() {
       {showSelector && (
         <RobotSelectorModal
           onClose={() => setShowSelector(false)}
-          onStart={robotIds => {
+          onStart={(robotIds, timeBudgetSec) => {
             setShowSelector(false)
-            run(() => startDemo(robotIds))
+            run(() => startDemo(robotIds, timeBudgetSec))
           }}
         />
       )}

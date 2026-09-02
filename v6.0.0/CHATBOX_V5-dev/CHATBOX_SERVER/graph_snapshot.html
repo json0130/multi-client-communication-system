@@ -1,0 +1,127 @@
+<html>
+    <head>
+        <meta charset="utf-8">
+        
+            <script src="lib/bindings/utils.js"></script>
+            <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/dist/vis-network.min.css" integrity="sha512-WgxfT5LWjfszlPHXRmBWHkV2eceiWTOBvrKCNbdgDYTHrT2AeLCGbF4sZlZw3UMN3WtL0tGUoIAKsu8mllg/XA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+            <script src="https://cdnjs.cloudflare.com/ajax/libs/vis-network/9.1.2/dist/vis-network.min.js" integrity="sha512-LnvoEWDFrqGHlHmDD2101OrLcbsfkrzoSpvtSQtxK3RMnRV0eOkhhBN2dXHKRrUU8p2DGRTk35n4O8nWSVe1mQ==" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+            
+        
+<center>
+<h1></h1>
+</center>
+
+<!-- <link rel="stylesheet" href="../node_modules/vis/dist/vis.min.css" type="text/css" />
+<script type="text/javascript" src="../node_modules/vis/dist/vis.js"> </script>-->
+        <link
+          href="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/css/bootstrap.min.css"
+          rel="stylesheet"
+          integrity="sha384-eOJMYsd53ii+scO/bJGFsiCZc+5NDVN2yr8+0RDqr0Ql0h+rP48ckxlpbzKgwra6"
+          crossorigin="anonymous"
+        />
+        <script
+          src="https://cdn.jsdelivr.net/npm/bootstrap@5.0.0-beta3/dist/js/bootstrap.bundle.min.js"
+          integrity="sha384-JEW9xMcG8R+pH31jmWH6WWP0WintQrMb4s7ZOdauHnUtxwoG2vI5DkLtS3qm9Ekf"
+          crossorigin="anonymous"
+        ></script>
+
+
+        <center>
+          <h1></h1>
+        </center>
+        <style type="text/css">
+
+             #mynetwork {
+                 width: 100%;
+                 height: 780px;
+                 background-color: #1a1a2e;
+                 border: 1px solid lightgray;
+                 position: relative;
+                 float: left;
+             }
+
+             
+
+             
+
+             
+        </style>
+    </head>
+
+
+    <body>
+        <div class="card" style="width: 100%">
+            
+            
+            <div id="mynetwork" class="card-body"></div>
+        </div>
+
+        
+        
+
+        <script type="text/javascript">
+
+              // initialize global variables.
+              var edges;
+              var nodes;
+              var allNodes;
+              var allEdges;
+              var nodeColors;
+              var originalNodes;
+              var network;
+              var container;
+              var options, data;
+              var filter = {
+                  item : '',
+                  property : '',
+                  value : []
+              };
+
+              
+
+              
+
+              // This method is responsible for drawing the graph, returns the drawn network
+              function drawGraph() {
+                  var container = document.getElementById('mynetwork');
+
+                  
+
+                  // parsing and collecting nodes and edges from the python
+                  nodes = new vis.DataSet([{"color": "#5CB85C", "font": {"color": "#e0e0e0"}, "id": "jay", "label": "Jay", "shape": "ellipse", "size": 20, "title": "type: person\u003cbr\u003eid: jay"}, {"color": "#4A90D9", "font": {"color": "#e0e0e0"}, "id": "chatbox", "label": "chatbox", "shape": "star", "size": 30, "title": "type: robot\u003cbr\u003eid: chatbox\u003cbr\u003eembodiment: CAT"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "jay:persona:curious-talkative", "label": "jay:persona:curious-talkative", "shape": "ellipse", "size": 20, "title": "type: persona\u003cbr\u003eid: jay:persona:curious-talkative"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "chatbox:persona:introverted-shy", "label": "chatbox:persona:introverted-shy", "shape": "ellipse", "size": 20, "title": "type: persona\u003cbr\u003eid: chatbox:persona:introverted-shy"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "chatbox:role:companion", "label": "chatbox:role:companion", "shape": "ellipse", "size": 20, "title": "type: role\u003cbr\u003eid: chatbox:role:companion"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "jay:role:student", "label": "jay:role:student", "shape": "ellipse", "size": 20, "title": "type: role\u003cbr\u003eid: jay:role:student"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "interest:jay:music", "label": "interest:jay:music", "shape": "ellipse", "size": 20, "title": "type: interest\u003cbr\u003eid: interest:jay:music"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "interaction:jay:chatbox", "label": "interaction:jay:chatbox", "shape": "ellipse", "size": 20, "title": "type: interaction\u003cbr\u003eid: interaction:jay:chatbox"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "3d7c7bf1-8b1d-48b5-8a5d-8953f8af6471", "label": "3d7c7bf1-8b1d-48b5-8a5d-8953f8af6471", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 3d7c7bf1-8b1d-48b5-8a5d-8953f8af6471"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "896c3160-00b1-4094-a0b7-577bcc38c890", "label": "896c3160-00b1-4094-a0b7-577bcc38c890", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 896c3160-00b1-4094-a0b7-577bcc38c890"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "interest:jay:space", "label": "interest:jay:space", "shape": "ellipse", "size": 20, "title": "type: interest\u003cbr\u003eid: interest:jay:space"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "0e69294a-5468-4ff5-b707-40da924ffe8e", "label": "0e69294a-5468-4ff5-b707-40da924ffe8e", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 0e69294a-5468-4ff5-b707-40da924ffe8e"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "interest:jay:coding", "label": "interest:jay:coding", "shape": "ellipse", "size": 20, "title": "type: interest\u003cbr\u003eid: interest:jay:coding"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "7fd58f4d-38d3-4a63-93d5-c5571bd59ad0", "label": "7fd58f4d-38d3-4a63-93d5-c5571bd59ad0", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 7fd58f4d-38d3-4a63-93d5-c5571bd59ad0"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "interest:jay:math", "label": "interest:jay:math", "shape": "ellipse", "size": 20, "title": "type: interest\u003cbr\u003eid: interest:jay:math"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "chatbox:capability", "label": "chatbox:capability", "shape": "ellipse", "size": 20, "title": "type: capability\u003cbr\u003eid: chatbox:capability"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "9e53c9dd-fbfe-49b3-b562-566037a445c1", "label": "9e53c9dd-fbfe-49b3-b562-566037a445c1", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 9e53c9dd-fbfe-49b3-b562-566037a445c1"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "748576d9-f3b1-48e3-8e64-9094f755ed6f", "label": "748576d9-f3b1-48e3-8e64-9094f755ed6f", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 748576d9-f3b1-48e3-8e64-9094f755ed6f"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "cd473ee1-4ad0-42a9-909e-10fd4e79b6ba", "label": "cd473ee1-4ad0-42a9-909e-10fd4e79b6ba", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: cd473ee1-4ad0-42a9-909e-10fd4e79b6ba"}, {"color": "#AAAAAA", "font": {"color": "#e0e0e0"}, "id": "0bc087e4-0269-49da-9cb2-fcf4d50e18fa", "label": "0bc087e4-0269-49da-9cb2-fcf4d50e18fa", "shape": "ellipse", "size": 20, "title": "type: session\u003cbr\u003eid: 0bc087e4-0269-49da-9cb2-fcf4d50e18fa"}, {"color": "#F0AD4E", "font": {"color": "#e0e0e0"}, "id": "topic:multiplication", "label": "topic:multiplication", "shape": "box", "size": 20, "title": "type: topic\u003cbr\u003eid: topic:multiplication"}, {"color": "#F0AD4E", "font": {"color": "#e0e0e0"}, "id": "topic:math-problems", "label": "topic:math-problems", "shape": "box", "size": 20, "title": "type: topic\u003cbr\u003eid: topic:math-problems"}]);
+                  edges = new vis.DataSet([{"arrows": "to", "from": "jay", "label": "mood=0.27", "title": "type: mood\u003cbr\u003esource: jay\u003cbr\u003etarget: jay", "to": "jay"}, {"arrows": "to", "from": "jay", "label": "attention=0.76", "title": "type: attention\u003cbr\u003esource: jay\u003cbr\u003etarget: jay", "to": "jay"}, {"arrows": "to", "from": "jay", "label": "has_persona", "title": "type: has_persona\u003cbr\u003esource: jay\u003cbr\u003etarget: jay:persona:curious-talkative", "to": "jay:persona:curious-talkative"}, {"arrows": "to", "from": "chatbox", "label": "has_persona", "title": "type: has_persona\u003cbr\u003esource: chatbox\u003cbr\u003etarget: chatbox:persona:introverted-shy", "to": "chatbox:persona:introverted-shy"}, {"arrows": "to", "from": "chatbox", "label": "has_role", "title": "type: has_role\u003cbr\u003esource: chatbox\u003cbr\u003etarget: chatbox:role:companion", "to": "chatbox:role:companion"}, {"arrows": "to", "from": "jay", "label": "has_role", "title": "type: has_role\u003cbr\u003esource: jay\u003cbr\u003etarget: jay:role:student", "to": "jay:role:student"}, {"arrows": "to", "from": "jay", "label": "has_interest", "title": "type: has_interest\u003cbr\u003esource: jay\u003cbr\u003etarget: interest:jay:music", "to": "interest:jay:music"}, {"arrows": "to", "from": "jay", "label": "has_interaction", "title": "type: has_interaction\u003cbr\u003esource: jay\u003cbr\u003etarget: interaction:jay:chatbox", "to": "interaction:jay:chatbox"}, {"arrows": "to", "from": "chatbox", "label": "has_interaction", "title": "type: has_interaction\u003cbr\u003esource: chatbox\u003cbr\u003etarget: interaction:jay:chatbox", "to": "interaction:jay:chatbox"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 3d7c7bf1-8b1d-48b5-8a5d-8953f8af6471", "to": "3d7c7bf1-8b1d-48b5-8a5d-8953f8af6471"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 896c3160-00b1-4094-a0b7-577bcc38c890", "to": "896c3160-00b1-4094-a0b7-577bcc38c890"}, {"arrows": "to", "from": "jay", "label": "has_interest", "title": "type: has_interest\u003cbr\u003esource: jay\u003cbr\u003etarget: interest:jay:space", "to": "interest:jay:space"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 0e69294a-5468-4ff5-b707-40da924ffe8e", "to": "0e69294a-5468-4ff5-b707-40da924ffe8e"}, {"arrows": "to", "from": "jay", "label": "has_interest", "title": "type: has_interest\u003cbr\u003esource: jay\u003cbr\u003etarget: interest:jay:coding", "to": "interest:jay:coding"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 7fd58f4d-38d3-4a63-93d5-c5571bd59ad0", "to": "7fd58f4d-38d3-4a63-93d5-c5571bd59ad0"}, {"arrows": "to", "from": "jay", "label": "has_interest", "title": "type: has_interest\u003cbr\u003esource: jay\u003cbr\u003etarget: interest:jay:math", "to": "interest:jay:math"}, {"arrows": "to", "from": "chatbox", "label": "has_capability", "title": "type: has_capability\u003cbr\u003esource: chatbox\u003cbr\u003etarget: chatbox:capability", "to": "chatbox:capability"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 9e53c9dd-fbfe-49b3-b562-566037a445c1", "to": "9e53c9dd-fbfe-49b3-b562-566037a445c1"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 748576d9-f3b1-48e3-8e64-9094f755ed6f", "to": "748576d9-f3b1-48e3-8e64-9094f755ed6f"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: cd473ee1-4ad0-42a9-909e-10fd4e79b6ba", "to": "cd473ee1-4ad0-42a9-909e-10fd4e79b6ba"}, {"arrows": "to", "from": "interaction:jay:chatbox", "label": "has_session", "title": "type: has_session\u003cbr\u003esource: interaction:jay:chatbox\u003cbr\u003etarget: 0bc087e4-0269-49da-9cb2-fcf4d50e18fa", "to": "0bc087e4-0269-49da-9cb2-fcf4d50e18fa"}, {"arrows": "to", "from": "interest:jay:math", "label": "about", "title": "type: about\u003cbr\u003esource: interest:jay:math\u003cbr\u003etarget: topic:multiplication", "to": "topic:multiplication"}, {"arrows": "to", "from": "interest:jay:math", "label": "about", "title": "type: about\u003cbr\u003esource: interest:jay:math\u003cbr\u003etarget: topic:math-problems", "to": "topic:math-problems"}, {"arrows": "to", "from": "chatbox:capability", "label": "about", "title": "type: about\u003cbr\u003esource: chatbox:capability\u003cbr\u003etarget: topic:math-problems", "to": "topic:math-problems"}]);
+
+                  nodeColors = {};
+                  allNodes = nodes.get({ returnType: "Object" });
+                  for (nodeId in allNodes) {
+                    nodeColors[nodeId] = allNodes[nodeId].color;
+                  }
+                  allEdges = edges.get({ returnType: "Object" });
+                  // adding nodes and edges to the graph
+                  data = {nodes: nodes, edges: edges};
+
+                  var options = {"nodes": {"font": {"size": 14, "face": "monospace"}, "borderWidth": 2}, "edges": {"font": {"size": 10, "color": "#bbbbbb", "align": "middle"}, "arrows": {"to": {"enabled": true, "scaleFactor": 0.7}}, "smooth": {"type": "curvedCW", "roundness": 0.2}}, "physics": {"enabled": true, "solver": "forceAtlas2Based", "forceAtlas2Based": {"gravitationalConstant": -60, "springLength": 120}}};
+
+                  
+
+
+                  
+
+                  network = new vis.Network(container, data, options);
+
+                  
+
+                  
+
+                  
+
+
+                  
+
+                  return network;
+
+              }
+              drawGraph();
+        </script>
+    </body>
+</html>

@@ -1,0 +1,50 @@
+# robot-client.service — generic "power-on and ready" unit for any CARES robot client.
+#
+# Drop this in a robot's deploy folder, fill in the <PLACEHOLDERS>, and the robot will
+# register + listen for the central server automatically every time it boots, and
+# restart itself if it ever crashes. The client auto-detects its own IP (BasicClient),
+# so you do NOT need to hand-edit ip_address per robot.
+#
+# INSTALL (run on the robot, once):
+#   sudo cp robot-client.service /etc/systemd/system/<robot>-client.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable <robot>-client.service     # start on every boot
+#   sudo systemctl start  <robot>-client.service     # start right now
+#
+# USEFUL:
+#   systemctl status <robot>-client.service
+#   journalctl -u <robot>-client.service -f          # live logs
+#   sudo systemctl restart <robot>-client.service    # after pulling new code
+
+[Unit]
+Description=CARES robot client (waits for central server)
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- EDIT THESE PER ROBOT ---------------------------------------------------
+User=<robot-user>
+WorkingDirectory=</absolute/path/to/this/robot/folder>
+ExecStart=/usr/bin/python3 <entrypoint>.py          # e.g. run.py, chatbox.py
+# If the client runs under a conda/venv, point at that python instead, e.g.:
+#   ExecStart=/home/<user>/miniconda3/envs/<env>/bin/python run.py
+# Robot-specific env vars go here, e.g. for the Navel SDK:
+#   Environment=NAVEL_SHM_LIB=/usr/lib/python3/dist-packages/navel/libnavel_shm.cpython-311-aarch64-linux-gnu.so
+# ---------------------------------------------------------------------------
+
+Environment=PYTHONUNBUFFERED=1
+
+# Audio device access for mic + TTS
+SupplementaryGroups=audio
+
+# Keep it alive — relaunch on crash
+Restart=always
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -23,7 +23,8 @@ import time
 from flask import Flask, request, jsonify, Blueprint
 
 from robot.robot_registry import RobotRegistry
-from gateway.websocket_gateway import WebSocketGateway, _looks_like_question
+from gateway.websocket_gateway import WebSocketGateway
+from decision import ActionKind, DecisionPoint, Mechanism
 from data import robot_repo
 
 
@@ -245,38 +246,32 @@ def create_http_gateway(
             if ws_gateway._demo_orchestrator:
                 status = ws_gateway._demo_orchestrator.get_status()
                 if status["state"] in ("running", "waiting_ack"):
-                    ws_gateway._demo_orchestrator.qa_interrupt()
+                    ws_gateway._demo_orchestrator.qa_interrupt(source="auto")
 
-        ws_gateway.check_qa_advance_from_user(message)
+        # This route carried its own copy of the Q&A cascade, which had to be
+        # kept in step with the WebSocket one by hand. Both now go through the
+        # same decision layer, so a dashboard-typed question and a spoken one
+        # are judged by the same rules and land in the same log.
+        decision = ws_gateway.check_qa_advance_from_user(instance, message)
+        if decision is not None and decision.action.kind is ActionKind.ADVANCE:
+            if decision.mechanism == Mechanism.LLM_CLASSIFIER:
+                ws_gateway.send_to_robot(client_id, {
+                    "event": "demo_step",
+                    "step_id": "_qa_classifier_done",
+                    "text": "[DEFAULT] Great! Let's continue with the demonstration then!",
+                    "require_ack": False,
+                })
+                return jsonify({
+                    "client_id": client_id,
+                    "response": "Resuming demonstration.",
+                    "emotion_tag": "",
+                    "clean_text": "Resuming demonstration.",
+                    "is_delegation": False,
+                    "delegation_target": None,
+                })
 
-        # Q&A intent classification — skip classifier for obvious questions
-        if ws_gateway._demo_orchestrator:
-            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
-                if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):
-                    if _looks_like_question(message):
-                        print(f"[QA Router] '{message[:60]}' → question detected → full chat")
-                    else:
-                        print(f"[QA Router] '{message[:60]}' → calling LLM classifier...")
-                        intent = instance.classify_qa_intent(message)
-                        if intent == "done":
-                            print(f"[QA Router] Classifier → 'done' → advancing demo")
-                            ws_gateway._demo_orchestrator.qa_end()
-                            ws_gateway.send_to_robot(client_id, {
-                                "event": "demo_step",
-                                "step_id": "_qa_classifier_done",
-                                "text": "[DEFAULT] Great! Let's continue with the demonstration then!",
-                                "require_ack": False,
-                            })
-                            return jsonify({
-                                "client_id": client_id,
-                                "response": "Resuming demonstration.",
-                                "emotion_tag": "",
-                                "clean_text": "Resuming demonstration.",
-                                "is_delegation": False,
-                                "delegation_target": None,
-                            })
-                        else:
-                            print(f"[QA Router] Classifier → 'continue' → full chat")
+        ws_gateway.check_plan_revision(instance, message)
+        ws_gateway._decide(DecisionPoint.QA_ROUTE, instance, message)
 
         def _on_sentence(clean_text, emotion_tag):
             if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON

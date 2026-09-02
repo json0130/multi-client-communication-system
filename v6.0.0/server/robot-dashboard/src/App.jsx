@@ -5,6 +5,7 @@ import RobotModal from './components/RobotModal'
 import PersonaCard from './components/PersonaCard'
 import PersonaModal from './components/PersonaModal'
 import DemoTab from './components/DemoTab'
+import KGTab from './components/KGTab'
 import { ToastContainer } from './components/Toast'
 
 const REFRESH_INTERVAL = 5000
@@ -110,6 +111,9 @@ export default function App() {
           </button>
           <button className={`nav-tab ${tab === 'demo' ? 'active' : ''}`} onClick={() => setTab('demo')}>
             Demo
+          </button>
+          <button className={`nav-tab ${tab === 'kg' ? 'active' : ''}`} onClick={() => setTab('kg')}>
+            Knowledge Graph
           </button>
         </nav>
         <div className="header-right">
@@ -292,6 +296,7 @@ export default function App() {
         )}
         {/* ── Demo tab ── */}
         {tab === 'demo' && <DemoTab />}
+        {tab === 'kg'   && <KGTab />}
 
       </main>
 

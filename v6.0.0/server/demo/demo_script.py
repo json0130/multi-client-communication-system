@@ -35,7 +35,7 @@ Edit instructions:
   • Restart the server after any change.
 """
 
-from demo.demo_orchestrator import DemoStep
+from demo.demo_orchestrator import DemoStep, StepRole
 
 # ── Robot IDs — must match client_id in each robot's client_config.json ───────
 
@@ -362,6 +362,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
     n = len(project_ids)
 
     # ── Opening ────────────────────────────────────────────────────────────────
+    # No block_robot_id: these belong to no project, so plan revision never
+    # touches them. They are behind the play head by the time anyone would ask.
     steps.append(DemoStep(
         step_id     = "greeting",
         robot_id    = guide_id,
@@ -370,6 +372,7 @@ def build_script(guide_id: str, project_ids: list) -> list:
                       "you are excited to show them around today. Keep it to 2 sentences. Start with [GREETING].",
         generate    = True,
         timeout_sec = 60,
+        role        = StepRole.OPENING,
     ))
 
     steps.append(DemoStep(
@@ -380,6 +383,7 @@ def build_script(guide_id: str, project_ids: list) -> list:
                       "people in real-world environments. Keep it to 2-3 sentences. Start with [WAVE].",
         generate    = True,
         timeout_sec = 60,
+        role        = StepRole.OPENING,
     ))
 
     if n > 0:
@@ -393,6 +397,7 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "Keep it to 2 sentences. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
+            role        = StepRole.OPENING,
         ))
     else:
         steps.append(DemoStep(
@@ -403,9 +408,15 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "2 sentences. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
+            role        = StepRole.OPENING,
         ))
 
     # ── One block per project robot ────────────────────────────────────────────
+    # Every step carries block_robot_id and role. That tagging is what lets
+    # DemoOrchestrator.revise_script() act on "ChatBox's part of the tour"
+    # mid-demo — skip it, trim it, reorder it — without pattern-matching step_id
+    # strings. Add a step here and it must be tagged, or plan revision will
+    # silently leave it behind when the rest of its block moves.
     for i, robot_id in enumerate(project_ids):
         is_last    = (i == n - 1)
         proj_label = chr(65 + i)   # 'A', 'B', 'C', …
@@ -418,6 +429,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "that is the robot's job. 2 sentences. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
+            block_robot_id = robot_id,
+            role           = StepRole.INTRO,
         ))
 
         steps.append(DemoStep(
@@ -428,6 +441,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "1-2 sentences. Use [POINT].",
             generate    = True,
             timeout_sec = 50,
+            block_robot_id = robot_id,
+            role           = StepRole.HANDOFF,
         ))
 
         steps.append(DemoStep(
@@ -437,6 +452,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "genuine excitement about meeting them. 2 sentences. Start with [WAVE].",
             generate    = True,
             timeout_sec = 50,
+            block_robot_id = robot_id,
+            role           = StepRole.GREETING,
         ))
 
         steps.append(DemoStep(
@@ -446,8 +463,12 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "1 sentence. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 40,
+            block_robot_id = robot_id,
+            role           = StepRole.PROMPT,
         ))
 
+        # PROJECT and QA are never dropped by a COMPRESS — the research content
+        # and the visitors' chance to ask about it are what the tour is for.
         steps.append(DemoStep(
             step_id     = f"{robot_id}_project",
             robot_id    = robot_id,
@@ -456,6 +477,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
                           "Make it engaging and accessible. 3-4 sentences. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 90,
+            block_robot_id = robot_id,
+            role           = StepRole.PROJECT,
         ))
 
         steps.append(DemoStep(
@@ -469,10 +492,14 @@ def build_script(guide_id: str, project_ids: list) -> list:
             timeout_sec = 60,
             qa_window   = True,
             qa_timeout  = 0,    # manual advance only — operator clicks Move On
+            block_robot_id = robot_id,
+            role           = StepRole.QA,
         ))
 
         if not is_last:
             next_robot = project_ids[i + 1]
+            # Belongs to the block it signs off, not the one it announces —
+            # skipping robot i must take its own farewell with it.
             steps.append(DemoStep(
                 step_id     = f"transition_to_{next_robot}",
                 robot_id    = guide_id,
@@ -481,6 +508,8 @@ def build_script(guide_id: str, project_ids: list) -> list:
                               "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
                 generate    = True,
                 timeout_sec = 50,
+                block_robot_id = robot_id,
+                role           = StepRole.TRANSITION,
             ))
 
     # ── Closing ────────────────────────────────────────────────────────────────
@@ -497,12 +526,15 @@ def build_script(guide_id: str, project_ids: list) -> list:
             "Wrap up the demonstration. Thank the visitors for joining and let them know they are welcome "
             "to ask you more questions or explore the lab. 2 sentences. Use [HAPPY]."
         )
+    # StepRole.CLOSING survives a DROP_REMAINING — a tour cut short for time
+    # still gets a proper goodbye rather than stopping mid-sentence.
     steps.append(DemoStep(
         step_id     = "wrap_up",
         robot_id    = guide_id,
         text        = wrap_text,
         generate    = True,
         timeout_sec = 60,
+        role        = StepRole.CLOSING,
     ))
 
     steps.append(DemoStep(
@@ -516,6 +548,7 @@ def build_script(guide_id: str, project_ids: list) -> list:
         timeout_sec = 60,
         qa_window   = True,
         qa_timeout  = 0,
+        role        = StepRole.CLOSING,
     ))
 
     return steps

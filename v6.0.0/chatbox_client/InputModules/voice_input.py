@@ -1,283 +1,294 @@
-"""
-InputModules/voice_input.py
-============================
-PyAudio-based voice input with VAD (volume-triggered) and keyboard fallback.
-
-Audio captured at native device sample rate, downsampled to 16 kHz, then
-forwarded to the server as a WAV file via send_to_server('speech', wav_bytes).
-
-Keyboard fallback:
-  - Type text + Enter  → sends as chat message
-  - Press Enter alone  → starts/stops manual voice recording
-  - Type 'exit'        → stops the client
-"""
-
-import audioop
-import collections
-import logging
-import os
-import tempfile
+# modules/input/voice_input.py - WAKE WORD, KEYBOARD & VAD HYBRID
+import sys
 import threading
 import time
+import tempfile
 import wave
-from typing import Dict, Optional
-
+import os
+import logging
+import audioop
+import numpy as np
+import collections # Added for pre-roll buffer
+from typing import Optional, Dict
 from client import InputModule
 
 logger = logging.getLogger(__name__)
 
 try:
     import pyaudio
-    import numpy as np
-    _PYAUDIO_AVAILABLE = True
+    PYAUDIO_AVAILABLE = True
 except ImportError:
-    _PYAUDIO_AVAILABLE = False
-    logger.warning("[Voice] PyAudio or numpy not available — voice input disabled")
+    PYAUDIO_AVAILABLE = False
+    logger.warning("⚠️ PyAudio not available - voice input disabled")
 
+# Mocking WakeWordModel for context (assuming you have this imported elsewhere)
+# from your_wakeword_module import WakeWordModel, WAKEWORD_AVAILABLE 
+WAKEWORD_AVAILABLE = True 
 
 class VoiceInputModule(InputModule):
-    """
-    Hybrid voice input: VAD auto-trigger + keyboard text/manual record fallback.
-
-    Config keys (all optional):
-      sample_rate        : int   target sample rate for server (default 16000)
-      max_record_time    : float max seconds per auto-recording (default 30)
-      vad_trigger_threshold : int  RMS level to start recording (default 1000)
-      volume_threshold   : int   RMS floor to keep recording (default 500)
-      silence_seconds    : float seconds of silence before sending (default 1.5)
-    """
-
     def __init__(self, name: str = "voice_input", config: Dict = None):
         super().__init__(name, config)
-
-        self._target_rate   = self.config.get("sample_rate", 16000)
-        self._max_record    = self.config.get("max_record_time", 30)
-        self._vad_trigger   = self.config.get("vad_trigger_threshold", 1000)
-        self._vol_threshold = self.config.get("volume_threshold", 500)
-        self._silence_sec   = self.config.get("silence_seconds", 1.5)
-
-        self._chunk_duration  = 0.08   # 80 ms frames
-        self._native_rate     = 48000
-        self._native_channels = 1
-        self._device_index: Optional[int] = None
-
-        self._audio  = None
-        self._stream = None
-        self._resample_state = None
-
-        # Pre-roll buffer: ~1s of audio captured before VAD triggers
-        _pre_roll_chunks = int(1.0 / self._chunk_duration)
-        self._pre_roll   = collections.deque(maxlen=_pre_roll_chunks)
-
-        self._mode    = "listening"   # "listening" | "auto_record" | "manual_record"
-        self._frames  = []
-        self._silence_chunks = 0
-        self._silence_limit  = int((self._target_rate / int(self._target_rate * self._chunk_duration)) * self._silence_sec)
-
-        self._stop_event   = threading.Event()
-        self._audio_thread = None
-        self._kb_thread    = None
-
-    # ── BaseModule interface ──────────────────────────────────────────────────
+        
+        # Audio configuration
+        self.target_sample_rate = 16000 
+        self.native_sample_rate = 48000 
+        self.channels = 1
+        self.audio_format = pyaudio.paInt16
+        
+        self.chunk_duration = 0.08 
+        self.native_chunk_size = int(self.native_sample_rate * self.chunk_duration)
+        
+        self.usb_device_index = None
+        self.audio = None
+        self.stream = None
+        self.resample_state = None
+        
+        # State Management
+        self.mode = "listening"
+        self.audio_frames = []
+        self.silence_chunks = 0
+        self.SILENCE_LIMIT = int((16000 / 1280) * 1.5) # 1.5 seconds of silence stops recording
+        
+        # VAD & Volume Thresholds
+        self.VOLUME_THRESHOLD = 500 # Threshold to stay recording
+        self.VAD_TRIGGER_THRESHOLD = 1000 # How loud a sound must be to TRIGGER recording (tweak this!)
+        
+        # Pre-roll buffer to keep the first syllable of your sentence before VAD triggers
+        self.pre_roll_chunks = int(1.0 / self.chunk_duration) # Store ~1 second of audio
+        self.audio_buffer = collections.deque(maxlen=self.pre_roll_chunks)
+        
+        # Wake Word Model
+        self.oww_model = None
+        
+        # Control
+        self.audio_thread = None
+        self.input_thread = None
+        self.stop_event = threading.Event()
 
     def initialize(self) -> bool:
-        if not _PYAUDIO_AVAILABLE:
-            logger.warning("[Voice] PyAudio unavailable — voice input disabled")
+        if not PYAUDIO_AVAILABLE:
             return False
+        
         try:
-            self._audio = pyaudio.PyAudio()
-            self._find_microphone()
-            chunk = int(self._native_rate * self._chunk_duration)
-            logger.info(
-                f"[Voice] Init — device {self._device_index}, "
-                f"native {self._native_rate} Hz → target {self._target_rate} Hz, "
-                f"chunk {chunk}"
-            )
+            self.audio = pyaudio.PyAudio()
+            self._find_usb_microphone()
+            
+            self.native_chunk_size = int(self.native_sample_rate * self.chunk_duration)
+            logger.info(f"🎤 Set mic rate to {self.native_sample_rate}Hz (will auto-convert to 16000Hz)")
+            
+            if WAKEWORD_AVAILABLE:
+                logger.info("🧠 Loading Wake Word Model...")
+                # self.oww_model = WakeWordModel(wakeword_models=['hey_jarvis'])
+            
             return True
         except Exception as e:
-            logger.error(f"[Voice] Init failed: {e}")
+            logger.error(f"❌ Initialization failed: {e}")
             return False
+
+    def _find_usb_microphone(self):
+        if not self.audio: return
+        for i in range(self.audio.get_device_count()):
+            try:
+                info = self.audio.get_device_info_by_index(i)
+                if info['maxInputChannels'] > 0:
+                    name_lower = info['name'].lower()
+                    usb_patterns = ['uacdemov1.0', 'usb audio', 'usb', 'microphone', 'mic', 'hw:2,0']
+                    is_not_tegra = 'tegra' not in name_lower
+                    if any(p in name_lower for p in usb_patterns) or (i == 11 and is_not_tegra):
+                        self.usb_device_index = i
+                        self.native_sample_rate = int(info['defaultSampleRate'])
+                        return True
+            except Exception:
+                continue
+                
+        try:
+            info = self.audio.get_device_info_by_index(11)
+            if info['maxInputChannels'] > 0:
+                self.usb_device_index = 0
+                self.native_sample_rate = int(info['defaultSampleRate'])
+                return True
+        except Exception:
+            pass
 
     def start(self) -> bool:
-        if self.enabled:
-            return False
-        self.enabled = True
-        self._stop_event.clear()
-        self._resample_state = None
-
-        if self._open_stream():
-            self._audio_thread = threading.Thread(
-                target=self._audio_loop, daemon=True, name="voice-audio"
-            )
-            self._audio_thread.start()
-
-        self._kb_thread = threading.Thread(
-            target=self._keyboard_loop, daemon=True, name="voice-keyboard"
-        )
-        self._kb_thread.start()
-        return True
+        if not self.enabled:
+            self.enabled = True
+            self.stop_event.clear()
+            self.resample_state = None
+            
+            if self._start_audio_stream():
+                self.audio_thread = threading.Thread(target=self._continuous_audio_loop, daemon=True)
+                self.audio_thread.start()
+            
+            self.input_thread = threading.Thread(target=self._keyboard_input_loop, daemon=True)
+            self.input_thread.start()
+            
+            return True
+        return False
 
     def stop(self):
         self.enabled = False
-        self._stop_event.set()
-        if self._stream:
-            try:
-                self._stream.stop_stream()
-                self._stream.close()
-            except Exception:
-                pass
-        if self._audio:
-            try:
-                self._audio.terminate()
-            except Exception:
-                pass
-        logger.info("[Voice] Stopped")
+        self.stop_event.set()
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+        if self.audio:
+            self.audio.terminate()
+        logger.info("🎤 Voice input stopped")
 
-    def get_data(self):
-        return None
+    def get_data(self): return None
 
-    # ── Microphone detection ──────────────────────────────────────────────────
-
-    def _find_microphone(self):
-        if not self._audio:
-            return
-        for i in range(self._audio.get_device_count()):
-            try:
-                info = self._audio.get_device_info_by_index(i)
-                if info['maxInputChannels'] > 0:
-                    name_lower = info['name'].lower()
-                    usb_keywords = ['uacdemov1.0', 'usb audio', 'usb', 'microphone', 'mic']
-                    if any(k in name_lower for k in usb_keywords) and 'tegra' not in name_lower:
-                        self._device_index = i
-                        self._native_rate  = int(info['defaultSampleRate'])
-                        logger.info(f"[Voice] USB mic: {info['name']} (device {i}, {self._native_rate} Hz)")
-                        return
-            except Exception:
-                continue
-        logger.info("[Voice] No USB mic found — using default input device")
-
-    def _open_stream(self) -> bool:
+    def _start_audio_stream(self) -> bool:
         try:
-            chunk = int(self._native_rate * self._chunk_duration)
-            self._stream = self._audio.open(
-                format=pyaudio.paInt16,
-                channels=self._native_channels,
-                rate=self._native_rate,
+            self.stream = self.audio.open(
+                format=self.audio_format,
+                channels=self.channels,
+                rate=self.native_sample_rate,
                 input=True,
-                input_device_index=self._device_index,
-                frames_per_buffer=chunk,
+                input_device_index=self.usb_device_index,
+                frames_per_buffer=self.native_chunk_size
             )
             return True
         except Exception as e:
-            logger.error(f"[Voice] Failed to open audio stream: {e}")
+            logger.error(f"❌ Failed to open audio stream: {e}")
             return False
 
-    # ── Audio capture loop ────────────────────────────────────────────────────
-
-    def _audio_loop(self):
-        chunk = int(self._native_rate * self._chunk_duration)
-        while not self._stop_event.is_set():
+    def _continuous_audio_loop(self):
+        """Background thread analyzing audio 24/7 for Wake Word AND Volume (VAD)"""
+        while not self.stop_event.is_set():
             try:
-                raw = self._stream.read(chunk, exception_on_overflow=False)
-
-                # Downsample to target rate
-                if self._native_rate != self._target_rate:
-                    resampled, self._resample_state = audioop.ratecv(
-                        raw, 2, 1, self._native_rate, self._target_rate, self._resample_state
+                data = self.stream.read(self.native_chunk_size, exception_on_overflow=False)
+                
+                if self.native_sample_rate != self.target_sample_rate:
+                    resampled_data, self.resample_state = audioop.ratecv(
+                        data, 2, 1, self.native_sample_rate, self.target_sample_rate, self.resample_state
                     )
                 else:
-                    resampled = raw
+                    resampled_data = data
+                    
+                audio_np = np.frombuffer(resampled_data, dtype=np.int16)
+                
+                # 🚀 CHECK THE SPEAKING LOCK
+                # If the robot is talking, empty the pre-roll buffer and ignore this audio!
+                if hasattr(self.client, 'is_speaking') and self.client.is_speaking.is_set():
+                    self.audio_buffer.clear() # Prevent robot voice from sneaking into next recording
+                    continue 
 
-                # Pause while TTS is playing to avoid echo
-                if self.client and hasattr(self.client, 'is_speaking') and self.client.is_speaking.is_set():
-                    self._pre_roll.clear()
-                    continue
+                # --- Normal VAD processing continues below ---                
+                if self.mode == "listening":
+                    # 1. Constantly add audio to the rolling buffer (pre-roll)
+                    self.audio_buffer.append(resampled_data)
+                    
+                    # 2. Calculate current volume (RMS)
+                    rms = np.sqrt(np.mean(np.square(audio_np.astype(np.float32))))
+                    triggered = False
+                    
+                    # 3. Check Wake Word
+                    if self.oww_model:
+                        prediction = self.oww_model.predict(audio_np)
+                        for mdl, score in prediction.items():
+                            if score > 0.5:
+                                logger.info("\n✨ Wake Word Detected! Listening...")
+                                triggered = True
+                                
+                    # 4. Check VAD (Did someone just start talking?)
+                    if not triggered and rms > self.VAD_TRIGGER_THRESHOLD:
+                        logger.info("\n🗣️ Voice Detected (VAD)! Listening...")
+                        triggered = True
 
-                audio_np = np.frombuffer(resampled, dtype=np.int16)
-                rms = float(np.sqrt(np.mean(np.square(audio_np.astype(np.float32)))))
-
-                if self._mode == "listening":
-                    self._pre_roll.append(resampled)
-                    if rms > self._vad_trigger:
-                        logger.info("[Voice] VAD triggered — recording")
-                        self._mode   = "auto_record"
-                        self._frames = list(self._pre_roll)
-                        self._pre_roll.clear()
-                        self._silence_chunks = 0
-
-                elif self._mode == "auto_record":
-                    self._frames.append(resampled)
-                    if rms < self._vol_threshold:
-                        self._silence_chunks += 1
+                    # 5. Switch modes if either triggered
+                    if triggered:
+                        self.mode = "auto_record"
+                        # Transfer the last 1 second of audio into the final recording!
+                        self.audio_frames = list(self.audio_buffer) 
+                        self.audio_buffer.clear()
+                        self.silence_chunks = 0
+                        
+                elif self.mode == "auto_record":
+                    self.audio_frames.append(resampled_data)
+                    
+                    rms = np.sqrt(np.mean(np.square(audio_np.astype(np.float32))))
+                    if rms < self.VOLUME_THRESHOLD:
+                        self.silence_chunks += 1
                     else:
-                        self._silence_chunks = 0
-                    if self._silence_chunks > self._silence_limit:
-                        logger.info("[Voice] Silence — sending audio")
-                        self._send_audio()
-                        self._mode = "listening"
-
-                elif self._mode == "manual_record":
-                    self._frames.append(resampled)
+                        self.silence_chunks = 0
+                        
+                    if self.silence_chunks > self.SILENCE_LIMIT:
+                        logger.info("🔇 Silence detected. Processing speech...")
+                        self._save_and_send_audio()
+                        self.mode = "listening"
+                        
+                elif self.mode == "manual_record":
+                    self.audio_frames.append(resampled_data)
 
             except Exception as e:
-                logger.error(f"[Voice] Audio loop error: {e}")
+                logger.error(f"❌ Audio loop error: {e}")
                 time.sleep(0.1)
 
-    # ── Keyboard fallback ─────────────────────────────────────────────────────
+    def _keyboard_input_loop(self):
+        # Headless / boot (systemd) has no terminal — skip the interactive prompt
+        # instead of hammering input() with EOFError. Voice (VAD/wake-word) still works.
+        if not sys.stdin or not sys.stdin.isatty():
+            logger.info("⌨️  No interactive terminal — keyboard input disabled (voice only).")
+            return
 
-    def _keyboard_loop(self):
-        logger.info("[Voice] Keyboard ready — type text or press Enter for manual record")
-        while not self._stop_event.is_set() and self.enabled:
+        logger.info("💬 Chat Interface Ready!")
+        logger.info("   🗣️ Talk normally (Auto-VAD)")
+        logger.info("   🎙️ Or say Wake Word")
+        logger.info("   🎤 Or press Enter to force manual record")
+        logger.info("-" * 50)
+
+        while not self.stop_event.is_set() and self.enabled:
             try:
-                user_input = input("\n[You] text or Enter for voice: ").strip()
+                user_input = input("\n💬 You (text) or 🎤 Enter for voice: ").strip()
+
                 if user_input.lower() == 'exit':
-                    if self.client:
-                        self.client.running = False
+                    if self.client: self.client.running = False
                     break
+
                 elif user_input:
-                    threading.Thread(
-                        target=self._send_text, args=(user_input,), daemon=True
-                    ).start()
+                    threading.Thread(target=self._process_request_in_background, args=('chat', user_input), daemon=True).start()
+
                 else:
-                    if self._mode != "manual_record":
-                        self._mode   = "manual_record"
-                        self._frames = []
-                        logger.info("[Voice] Manual record started — press Enter to stop")
+                    if self.mode != "manual_record":
+                        self.mode = "manual_record"
+                        self.audio_frames = []
+                        logger.info("🔴 Manual Recording started... Press Enter to stop")
                         input()
-                        logger.info("[Voice] Manual record stopped — sending")
-                        self._send_audio()
-                        self._mode = "listening"
+                        logger.info("🟢 Recording stopped.")
+                        self._save_and_send_audio()
+                        self.mode = "listening"
+
             except KeyboardInterrupt:
                 break
-            except EOFError:
+            except (EOFError, OSError):
+                logger.info("⌨️  stdin closed — keyboard input disabled.")
                 break
 
-    # ── Audio send helpers ────────────────────────────────────────────────────
-
-    def _send_audio(self):
-        if not self._frames or not self.client:
-            self._frames = []
-            return
-        frames = self._frames
-        self._frames = []
-        threading.Thread(target=self._encode_and_send, args=(frames,), daemon=True).start()
-
-    def _encode_and_send(self, frames: list):
+    def _save_and_send_audio(self):
+        if not self.audio_frames: return
+        
         try:
-            tmp = tempfile.NamedTemporaryFile(suffix='.wav', delete=False)
-            with wave.open(tmp, 'wb') as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)  # int16
-                wf.setframerate(self._target_rate)
-                wf.writeframes(b''.join(frames))
-            tmp.close()
-            with open(tmp.name, 'rb') as f:
-                wav_bytes = f.read()
-            os.unlink(tmp.name)
-            self.client.send_to_server('speech', wav_bytes)
+            with tempfile.NamedTemporaryFile(suffix='.wav', delete=False) as tmp_file:
+                wav_file = wave.open(tmp_file, 'wb')
+                wav_file.setnchannels(self.channels)
+                wav_file.setsampwidth(self.audio.get_sample_size(self.audio_format))
+                wav_file.setframerate(self.target_sample_rate) 
+                wav_file.writeframes(b''.join(self.audio_frames))
+                wav_file.close()
+                tmp_path = tmp_file.name
+                
+            with open(tmp_path, 'rb') as f:
+                wav_data = f.read()
+            os.unlink(tmp_path)
+            
+            if self.client:
+                threading.Thread(target=self._process_request_in_background, args=('speech', wav_data), daemon=True).start()
+                
         except Exception as e:
-            logger.error(f"[Voice] Encode/send error: {e}")
+            logger.error(f"❌ Audio saving error: {e}")
 
-    def _send_text(self, text: str):
+    def _process_request_in_background(self, data_type: str, data: any):
         if self.client:
-            self.client.send_to_server('chat', text)
+            response = self.client.send_to_server(data_type, data)
+            self.client.process_server_response(response, 'speech')

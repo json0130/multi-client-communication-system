@@ -21,9 +21,10 @@ import time
 import threading
 from typing import Optional
 
-# Add v6.0.0/client to path — provides BasicClient, InputModule, OutputModule
+# Self-contained: import the local client.py + modules bundled in this folder
+# (this folder is deployed standalone to the ChatBox robot — no ../client dependency).
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, '..', 'client'))
+sys.path.insert(0, _HERE)
 
 from client import BasicClient
 

@@ -1,0 +1,194 @@
+{
+  "nodes": [
+    {
+      "id": "jay",
+      "display_name": "Jay",
+      "created_at": "2026-07-30T22:17:23.336859Z",
+      "node_type": "person"
+    },
+    {
+      "id": "jay:persona:curious-talkative",
+      "descriptor": "curious, talkative",
+      "node_type": "persona"
+    },
+    {
+      "id": "jay:role:student",
+      "descriptor": "student",
+      "node_type": "role"
+    },
+    {
+      "id": "interest:jay:music",
+      "label": "music",
+      "node_type": "interest"
+    },
+    {
+      "id": "topic:jazz",
+      "label": "jazz",
+      "category": "other",
+      "notes": [],
+      "node_type": "topic"
+    },
+    {
+      "id": "chatbox",
+      "name": "ChatBox",
+      "embodiment": "CAT",
+      "persona_traits": {},
+      "capabilities": [],
+      "node_type": "robot"
+    },
+    {
+      "id": "chatbox:persona:introverted-shy",
+      "descriptor": "introverted, shy",
+      "node_type": "persona"
+    },
+    {
+      "id": "chatbox:role:companion",
+      "descriptor": "companion",
+      "node_type": "role"
+    },
+    {
+      "id": "chatbox:capability",
+      "items": [
+        "tells stories",
+        "knows jazz",
+        "knows about space",
+        "knows about coding",
+        "good at math"
+      ],
+      "node_type": "capability"
+    },
+    {
+      "id": "topic:space",
+      "label": "space",
+      "category": "other",
+      "notes": [],
+      "node_type": "topic"
+    },
+    {
+      "id": "topic:mars",
+      "label": "mars",
+      "category": "other",
+      "notes": [],
+      "node_type": "topic"
+    }
+  ],
+  "edges": [
+    {
+      "id": "0f58e945-8f9d-432b-97c4-2c739e149fa7",
+      "source_id": "jay",
+      "target_id": "jay:persona:curious-talkative",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.336919Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_persona",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "b43eab48-0d8b-4dd6-88a2-7560cec51083",
+      "source_id": "jay",
+      "target_id": "jay:role:student",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.336948Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_role",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "d4a900bd-b364-4616-a323-678602a6e0f4",
+      "source_id": "jay",
+      "target_id": "interest:jay:music",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.336966Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_interest",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "7c58f0b9-201e-4b2d-8caa-a3c79258fa1d",
+      "source_id": "interest:jay:music",
+      "target_id": "topic:jazz",
+      "provenance": {
+        "source": "spec:human_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.336982Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": null,
+      "affinity": 0.5,
+      "confidence": 1.0,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "f455c9e0-df95-4084-8891-8e975b00e764",
+      "source_id": "chatbox",
+      "target_id": "chatbox:persona:introverted-shy",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.337492Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_persona",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "322da1ec-a0a5-4f97-b2fd-67b72961e0d0",
+      "source_id": "chatbox",
+      "target_id": "chatbox:role:companion",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.337504Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_role",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "011dcb2b-3c5e-402f-83fc-2719f7534849",
+      "source_id": "chatbox",
+      "target_id": "chatbox:capability",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.337517Z",
+        "confidence": 1.0
+      },
+      "edge_type": "has_capability",
+      "timescale": "SLOW"
+    },
+    {
+      "id": "810c03a4-f37d-442c-9ba5-82589fd04b50",
+      "source_id": "chatbox:capability",
+      "target_id": "topic:jazz",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.337542Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": "knows jazz",
+      "affinity": 0.5,
+      "confidence": 1.0,
+      "timescale": "SLOW"
+    },
+    {
+      "id": "4e6a9622-5008-45fa-a479-a576f344725c",
+      "source_id": "chatbox:capability",
+      "target_id": "topic:space",
+      "provenance": {
+        "source": "spec:robot_spec.yaml",
+        "timestamp": "2026-07-30T22:17:23.337560Z",
+        "confidence": 1.0
+      },
+      "edge_type": "about",
+      "label": "knows about space",
+      "affinity": 0.5,
+      "confidence": 1.0,
+      "timescale": "SLOW"
+    }
+  ]
+}

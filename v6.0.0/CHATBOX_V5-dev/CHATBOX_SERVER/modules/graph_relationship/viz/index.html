@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>graph_relationship — live KG</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg:        #12131a;
+    --panel:     #1c1e29;
+    --panel-brd: #2c2f3f;
+    --text:      #e6e8f0;
+    --muted:     #8b90a8;
+    /* timescale palette */
+    --fast:         #ff8c42;  /* orange  */
+    --slow:         #4fc3f7;  /* blue    */
+    --relationship: #a678de;  /* purple  */
+    --node:      #dfe3ef;
+    --node-brd:  #7f8496;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #graph { width: 100vw; height: 100vh; display: block; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+
+  .panel {
+    position: fixed; background: rgba(28,30,41,0.92); border: 1px solid var(--panel-brd);
+    border-radius: 10px; padding: 12px 14px; font-size: 13px; backdrop-filter: blur(4px);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+  }
+  #hud   { top: 14px; left: 14px; min-width: 190px; }
+  #legend{ bottom: 14px; left: 14px; }
+  #controls { top: 14px; right: 14px; min-width: 216px; }
+
+  /* force sliders (Obsidian-style) */
+  .ctrl-row { display: flex; align-items: center; gap: 8px; line-height: 2.1; }
+  .ctrl-row label { flex: 0 0 80px; color: var(--muted); font-size: 12px; }
+  .ctrl-row input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--fast); cursor: pointer; }
+  .ctrl-row .val { flex: 0 0 34px; text-align: right; font-size: 12px;
+                   font-variant-numeric: tabular-nums; color: var(--text); }
+  #ctrl-reset { margin-top: 8px; width: 100%; background: transparent; color: var(--muted);
+                border: 1px solid var(--panel-brd); border-radius: 6px; padding: 5px 0;
+                font-size: 12px; cursor: pointer; }
+  #ctrl-reset:hover { color: var(--text); border-color: var(--muted); }
+
+  #hud h1 { margin: 0 0 8px; font-size: 14px; letter-spacing: .3px; }
+  .stat { display: flex; justify-content: space-between; gap: 18px; line-height: 1.7; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  #pulse { display:inline-block; width:8px; height:8px; border-radius:50%;
+           background:#3ddc84; margin-left:6px; vertical-align:middle; opacity:.25;
+           transition: opacity .15s; }
+  #pulse.on { opacity: 1; }
+
+  .legend-section { margin-top: 10px; }
+  .legend-section:first-child { margin-top: 0; }
+  .legend-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                  letter-spacing: .5px; margin-bottom: 6px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
+  .swatch-line { width: 22px; height: 0; border-top: 3px solid; border-radius: 2px; }
+  .swatch-dot  { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  svg.shape { overflow: visible; }
+
+  /* node + link visuals */
+  .link { stroke-opacity: 0.55; }
+  .link.dim { stroke-opacity: 0.06; }
+  .node-shape { fill: var(--node); stroke: var(--node-brd); stroke-width: 1.5px; }
+  .node-shape.conversation { fill: var(--fast); stroke: #ffd8b0; stroke-width: 2px; }
+  .node.dim .node-shape { opacity: 0.15; }
+  /* culture focus: the ACTIVE culture/person stays lit; everything else dims */
+  .link.inactive { stroke-opacity: 0.05; }
+  .node.inactive .node-shape { opacity: 0.10; }
+  .node.inactive .node-label { opacity: 0.18; }
+  .node.selected .node-shape { stroke: #ffd24a; stroke-width: 3px; }
+  .node-label { fill: var(--text); font-size: 11px; pointer-events: none;
+                paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+  .node.dim .node-label { opacity: 0.15; }
+  .edge-weight { fill: var(--muted); font-size: 10px; pointer-events: none;
+                 paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+  .node g, .node .node-shape { cursor: pointer; }
+
+  /* conversation panel */
+  #convo { top: 14px; right: 14px; width: 340px; max-height: calc(100vh - 28px);
+           display: none; flex-direction: column; padding: 0; overflow: hidden; }
+  #convo-head { display: flex; align-items: center; justify-content: space-between;
+                padding: 12px 14px; border-bottom: 1px solid var(--panel-brd); }
+  #convo-title { font-size: 14px; font-weight: 600; }
+  #convo-title small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  #convo-close { cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1;
+                 padding: 0 4px; }
+  #convo-close:hover { color: var(--text); }
+  #convo-body { padding: 10px 12px 14px; overflow-y: auto; }
+  .turn { margin-bottom: 12px; }
+  .turn .meta { color: var(--muted); font-size: 10px; text-transform: uppercase;
+                letter-spacing: .4px; margin-bottom: 4px; }
+  .bubble { border-radius: 10px; padding: 7px 10px; font-size: 12.5px; line-height: 1.4;
+            margin-bottom: 5px; white-space: pre-wrap; word-break: break-word; }
+  .bubble.child { background: #2a2d3d; }
+  .bubble.reply { background: #2f2540; border: 1px solid var(--relationship); }
+  .bubble .who { display: block; font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+  .convo-empty { color: var(--muted); font-size: 12.5px; padding: 4px 0; }
+  .sec-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .5px; margin: 12px 0 6px; }
+  .conn { display: flex; align-items: center; justify-content: space-between;
+          gap: 8px; font-size: 12px; line-height: 1.9; }
+  .conn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conn .del, .btn-danger { cursor: pointer; }
+  .conn .del { color: var(--muted); padding: 0 6px; border-radius: 4px; }
+  .conn .del:hover { color: #fff; background: #b3402f; }
+  .btn-danger { display: block; width: 100%; margin-top: 12px; padding: 8px;
+                background: #3a2020; color: #ff9b8a; border: 1px solid #b3402f;
+                border-radius: 8px; font-size: 12.5px; }
+  .btn-danger:hover { background: #b3402f; color: #fff; }
+</style>
+</head>
+<body>
+<canvas style="display:none"></canvas>
+<svg id="graph"></svg>
+
+<div id="hud" class="panel">
+  <h1>graph_relationship<span id="pulse"></span></h1>
+  <div class="stat"><span class="muted">nodes</span><b id="n-count">0</b></div>
+  <div class="stat"><span class="muted">edges</span><b id="e-count">0</b></div>
+  <div class="stat"><span class="muted">updated</span><b id="ts" class="muted">—</b></div>
+</div>
+
+<div id="controls" class="panel">
+  <div class="legend-title">Forces</div>
+  <div class="ctrl-row"><label>Repel</label>
+    <input id="f-charge" type="range" min="20" max="1200" step="10" value="700">
+    <span class="val" id="v-charge">700</span></div>
+  <div class="ctrl-row"><label>Link length</label>
+    <input id="f-dist" type="range" min="20" max="360" step="5" value="130">
+    <span class="val" id="v-dist">130</span></div>
+  <div class="ctrl-row"><label>Link force</label>
+    <input id="f-lstr" type="range" min="0" max="1" step="0.05" value="0.35">
+    <span class="val" id="v-lstr">0.35</span></div>
+  <div class="ctrl-row"><label>Center</label>
+    <input id="f-center" type="range" min="0" max="0.4" step="0.02" value="0.04">
+    <span class="val" id="v-center">0.04</span></div>
+  <button id="ctrl-reset">reset</button>
+</div>
+
+<div id="legend" class="panel">
+  <div class="legend-section">
+    <div class="legend-title">Node type → shape</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Person (circle)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Robot (square)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Topic (diamond)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Interaction (octagon)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Session (triangle)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Persona (hexagon)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Role (pentagon)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Capability (plus)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Interest (star)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Conversation (live)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Culture (heptagon)</div>
+    <div class="legend-row"><svg class="shape" width="18" height="18"></svg>Culture topic (sparkle)</div>
+  </div>
+  <div class="legend-section">
+    <div class="legend-title">Edge colour → person</div>
+    <div id="legend-people"></div>
+    <div class="legend-row"><span class="swatch-line" style="border-color:#ffffff"></span>ChatBox (robot)</div>
+    <div class="legend-row"><span class="swatch-line" style="border-color:#4fc3f7"></span>Korean knowledge (culture)</div>
+    <div class="legend-row muted" style="font-size:11px; margin-top:4px">lighter = FAST · darker = SLOW</div>
+  </div>
+  <div class="legend-section">
+    <div class="legend-title">Topic category → fill</div>
+    <div id="legend-categories"></div>
+  </div>
+  <div class="legend-section muted" style="font-size:11px">line thickness = weight · hover for value</div>
+  <div class="legend-section muted" style="font-size:11px">click a node → details, connections & delete</div>
+</div>
+
+<div id="convo" class="panel">
+  <div id="convo-head">
+    <span id="convo-title"></span>
+    <span id="convo-close" title="close">&times;</span>
+  </div>
+  <div id="convo-body"></div>
+</div>
+
+<script>
+const COLOR = { FAST: "#ff8c42", SLOW: "#4fc3f7", RELATIONSHIP: "#a678de" };
+
+// ---- topic category -> fill colour (Feature-2d) --------------------------
+const CATEGORY_COLOR = {
+  music:    "#ff8fab",  science:  "#59c1e8",  animals: "#f4a259",
+  food:     "#f6c445",  activity: "#9b8cff",  place:   "#7fd98b",
+  person:   "#ff7a6b",  media:    "#c792ea",  sport:   "#4db6ac",
+  other:    "#9aa0b5",
+};
+const categoryColor = (c) => CATEGORY_COLOR[c] || CATEGORY_COLOR.other;
+(function renderCategoryLegend() {
+  const el = document.getElementById("legend-categories");
+  if (!el) return;
+  el.innerHTML = Object.entries(CATEGORY_COLOR).map(([cat, col]) =>
+    `<div class="legend-row"><span class="swatch-dot" style="background:${col}"></span>${cat}</div>`
+  ).join("");
+})();
+
+// ---- per-person edge colours ---------------------------------------------
+// Each person gets a distinct base hue; the edge's timescale shades it
+// (FAST = lighter, SLOW = darker, RELATIONSHIP = base). Robot (chatbox) edges
+// are always a single blue. Blue is reserved for the robot, so it is excluded
+// from the person palette.
+const ROBOT_EDGE = "#ffffff";  // chatbox edges — white
+const CULTURE_EDGE = "#4fc3f7"; // culture-knowledge edges (knows_culture / culture_prior) — blue
+const CULTURE_EDGE_TYPES = new Set(["knows_culture", "culture_prior"]);
+const PERSON_PALETTE = ["#ff8c42","#e6689c","#9ccc65","#b39ddb","#ffd24a",
+                        "#26a69a","#f4694c","#c08457"];
+const personColor = d3.scaleOrdinal(PERSON_PALETTE);   // stable per person id
+const personIds = new Set();
+const robotIds  = new Set();
+
+function nodeOwner(nodeId) {
+  if (personIds.has(nodeId)) return { kind: "person", id: nodeId };
+  if (robotIds.has(nodeId))  return { kind: "robot",  id: nodeId };
+  let m = /^interest:([^:]+):/.exec(nodeId);
+  if (m) return { kind: "person", id: m[1] };
+  m = /^(?:conversation|interaction):([^:]+):/.exec(nodeId);
+  if (m) return { kind: "person", id: m[1] };
+  if (/^[^:]+:capability$/.test(nodeId)) return { kind: "robot", id: nodeId.split(":")[0] };
+  return null;
+}
+function shadeByTimescale(base, ts) {
+  const c = d3.color(base);
+  if (!c) return base;
+  if (ts === "FAST") return c.brighter(0.9).formatHex();   // lighter
+  if (ts === "SLOW") return c.darker(0.9).formatHex();     // darker
+  return c.formatHex();                                    // RELATIONSHIP = base
+}
+function edgeColor(d) {
+  // Culture-knowledge edges get their own colour so ChatBox's own (white) edges
+  // stay visually distinct from the Korean prior-knowledge subgraph.
+  if (CULTURE_EDGE_TYPES.has(d.type)) return shadeByTimescale(CULTURE_EDGE, d.timescale);
+  const s = d.source.id || d.source, t = d.target.id || d.target;
+  const owner = nodeOwner(s) || nodeOwner(t);   // source decides; target is fallback
+  const base = (owner && owner.kind === "person") ? personColor(owner.id) : ROBOT_EDGE;
+  return shadeByTimescale(base, d.timescale);
+}
+function renderLegendPeople(nodes) {
+  const el = document.getElementById("legend-people");
+  if (!el) return;
+  const people = nodes.filter(n => n.type === "Person")
+                      .sort((a, b) => a.id.localeCompare(b.id));
+  el.innerHTML = people.map(p =>
+    `<div class="legend-row"><span class="swatch-line" style="border-color:${personColor(p.id)}"></span>${p.id}</div>`
+  ).join("");
+}
+const R = 9;  // base node radius
+
+// ---- shape geometry helpers ----------------------------------------------
+function polyD(sides, r, rot = -Math.PI/2) {
+  const pts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = rot + i * 2*Math.PI/sides;
+    pts.push(`${(r*Math.cos(a)).toFixed(2)},${(r*Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + pts.join(" L") + " Z";
+}
+function starD(points, ro, ri, rot = -Math.PI/2) {
+  const pts = [];
+  for (let i = 0; i < points*2; i++) {
+    const r = (i % 2) ? ri : ro;
+    const a = rot + i * Math.PI/points;
+    pts.push(`${(r*Math.cos(a)).toFixed(2)},${(r*Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + pts.join(" L") + " Z";
+}
+function plusD(r, t) {
+  return `M${-t},${-r} L${t},${-r} L${t},${-t} L${r},${-t} L${r},${t} L${t},${t} `
+       + `L${t},${r} L${-t},${r} L${-t},${t} L${-r},${t} L${-r},${-t} L${-t},${-t} Z`;
+}
+
+// ---- node type -> shape (same generator used by graph AND legend) ---------
+function shapePath(type) {
+  switch (type) {
+    case "Robot":       return {tag:"rect",  attrs:{x:-R, y:-R, width:2*R, height:2*R, rx:2}};
+    case "Topic":       return {tag:"path",  attrs:{d:`M0,${-R*1.3} L${R*1.3},0 L0,${R*1.3} L${-R*1.3},0 Z`}};
+    case "Session":     return {tag:"path",  attrs:{d:`M0,${-R*1.3} L${R*1.2},${R} L${-R*1.2},${R} Z`}};  // triangle
+    case "Interaction": return {tag:"path",  attrs:{d: polyD(8, R*1.5)}};           // octagon (hub)
+    case "Persona":     return {tag:"path",  attrs:{d: polyD(6, R*1.2)}};           // hexagon
+    case "Role":        return {tag:"path",  attrs:{d: polyD(5, R*1.25)}};          // pentagon
+    case "Capability":  return {tag:"path",  attrs:{d: plusD(R*1.25, R*0.42)}};     // plus
+    case "Interest":    return {tag:"path",  attrs:{d: starD(5, R*1.45, R*0.6)}};   // star
+    case "Conversation":return {tag:"path",  attrs:{d: starD(4, R*1.7, R*0.75)}};   // 4-point burst (live)
+    case "Culture":     return {tag:"path",  attrs:{d: polyD(7, R*1.35)}};          // heptagon
+    case "CultureTopic":return {tag:"path",  attrs:{d: starD(6, R*1.2, R*0.5)}};    // 6-point sparkle (robot knowledge)
+    default:            return {tag:"circle",attrs:{r:R}};  // Person
+  }
+}
+document.querySelectorAll("#legend .shape").forEach((svg, i) => {
+  const type = ["Person","Robot","Topic","Interaction","Session","Persona","Role","Capability","Interest","Conversation","Culture","CultureTopic"][i];
+  const s = shapePath(type);
+  const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+  for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+  el.setAttribute("transform", "translate(9,9) scale(0.7)");
+  el.setAttribute("fill", "#dfe3ef"); el.setAttribute("stroke", "#7f8496"); el.setAttribute("stroke-width", 1.5);
+  svg.appendChild(el);
+});
+
+// ---- svg + zoom ----------------------------------------------------------
+const svg = d3.select("#graph");
+let width = window.innerWidth, height = window.innerHeight;
+svg.attr("width", width).attr("height", height);
+
+const root = svg.append("g");
+const gLinks  = root.append("g");
+const gLabels = root.append("g");  // edge-weight labels
+const gNodes  = root.append("g");
+
+svg.call(d3.zoom().scaleExtent([0.15, 4]).on("zoom", (e) => root.attr("transform", e.transform)));
+
+// ---- persistent data + simulation ---------------------------------------
+const nodeById = new Map();   // id -> node datum (keeps x/y across ticks)
+let links = [];
+
+// Per-node collision radius so nodes never overlap (hubs + labelled nodes get
+// more room). iterations(2) makes the non-overlap constraint hold firmly.
+function collideRadius(d) {
+  if (d.type === "Robot" || d.type === "Interaction") return 54;
+  if (d.type === "Conversation") return 48;
+  if (d.type === "Person") return 44;
+  return 38;
+}
+
+const sim = d3.forceSimulation([])
+  // Spread-out defaults: strong repulsion + long links + gentle centre-gravity so
+  // the graph untangles itself and stays on-screen without manual dragging.
+  .force("link", d3.forceLink([]).id(d => d.id).distance(130).strength(0.35))
+  .force("charge", d3.forceManyBody().strength(-700).distanceMax(600))
+  .force("center", d3.forceCenter(width/2, height/2))
+  .force("collide", d3.forceCollide().radius(collideRadius).iterations(2))
+  // Center-gravity (per-node pull to middle) — keeps components from drifting off.
+  .force("x", d3.forceX(width/2).strength(0.04))
+  .force("y", d3.forceY(height/2).strength(0.04))
+  .alphaDecay(0.045)
+  .on("tick", ticked);
+
+// ---- force sliders (Obsidian-style) --------------------------------------
+const FORCE_DEFAULTS = { "f-charge": 700, "f-dist": 130, "f-lstr": 0.35, "f-center": 0.04 };
+function bindForceSlider(id, valId, fmt, apply) {
+  const el = document.getElementById(id), out = document.getElementById(valId);
+  const run = () => { const v = +el.value; out.textContent = fmt(v); apply(v);
+                      sim.alpha(0.4).restart(); };
+  el.addEventListener("input", run);
+  return run;
+}
+const applyCharge = bindForceSlider("f-charge", "v-charge", v => v,
+  v => sim.force("charge").strength(-v));
+const applyDist   = bindForceSlider("f-dist", "v-dist", v => v,
+  v => sim.force("link").distance(v));
+const applyLstr   = bindForceSlider("f-lstr", "v-lstr", v => v.toFixed(2),
+  v => sim.force("link").strength(v));
+const applyCenter = bindForceSlider("f-center", "v-center", v => v.toFixed(2),
+  v => { sim.force("x").strength(v); sim.force("y").strength(v); });
+document.getElementById("ctrl-reset").addEventListener("click", () => {
+  for (const [id, def] of Object.entries(FORCE_DEFAULTS)) {
+    const el = document.getElementById(id);
+    el.value = def; el.dispatchEvent(new Event("input"));
+  }
+});
+
+const weightScale = d3.scaleSqrt().domain([0, 1]).range([1, 7]).clamp(true);
+
+// ---- diff + apply new graph ----------------------------------------------
+let activeState = {};   // {person, culture} — the loop's current focus (viz highlight)
+function update(graph) {
+  activeState = graph.active || {};
+  // nodes: keep existing (position preserved), add new near centre, drop removed
+  const incoming = new Set(graph.nodes.map(n => n.id));
+  for (const n of graph.nodes) {
+    if (nodeById.has(n.id)) {
+      const cur = nodeById.get(n.id);
+      cur.type = n.type; cur.label = n.label;   // refresh mutable fields
+      cur.turns = n.turns;                       // session transcript (if any)
+      cur.notes = n.notes;                       // topic conversation summaries (if any)
+      cur.category = n.category;                 // topic category (Feature-2d)
+      cur.topicLabel = n.topicLabel;
+      cur.facts = n.facts;                       // culture-topic facts (if any)
+    } else {
+      nodeById.set(n.id, {
+        id: n.id, type: n.type, label: n.label, turns: n.turns, notes: n.notes,
+        category: n.category, topicLabel: n.topicLabel, facts: n.facts,
+        x: width/2 + (Math.random()-0.5)*80,
+        y: height/2 + (Math.random()-0.5)*80,
+      });
+    }
+  }
+  for (const id of [...nodeById.keys()]) if (!incoming.has(id)) nodeById.delete(id);
+
+  const nodes = [...nodeById.values()];
+  // Refresh the person/robot id sets so edge colouring knows who owns what.
+  personIds.clear(); robotIds.clear();
+  for (const n of nodes) {
+    if (n.type === "Person") personIds.add(n.id);
+    else if (n.type === "Robot") robotIds.add(n.id);
+  }
+  renderLegendPeople(nodes);
+  // rebuild links against live node objects (dangling already filtered server-side)
+  links = graph.edges
+    .filter(e => nodeById.has(e.source) && nodeById.has(e.target))
+    .map(e => ({
+      source: nodeById.get(e.source), target: nodeById.get(e.target),
+      type: e.type, timescale: e.timescale, weight: e.weight, elabel: e.elabel,
+      affinity10: e.affinity10, confidence: e.confidence, cross: e.cross,
+    }));
+
+  const maxW = d3.max(links, d => Math.abs(d.weight)) || 1;
+  weightScale.domain([0, maxW]);
+
+  sim.nodes(nodes);
+  sim.force("link").links(links);
+  sim.alpha(0.35).restart();
+
+  render(nodes);
+}
+
+function render(nodes) {
+  // links
+  const link = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + d.type);
+  link.exit().transition().duration(400).attr("stroke-opacity", 0).remove();
+  const linkEnter = link.enter().append("line")
+    .attr("class", "link").attr("stroke-opacity", 0);
+  linkEnter.append("title");
+  linkEnter.merge(link)
+    .attr("stroke", d => edgeColor(d))
+    .attr("stroke-width", d => weightScale(Math.abs(d.weight)))
+    // Step-2 cross-namespace bridges (person topic ↔ culture ck) get a dash so the
+    // bridge is visible; all other edges stay solid.
+    .attr("stroke-dasharray", d => d.cross ? "5,4" : null)
+    .transition().duration(400).attr("stroke-opacity", 0.55);
+  gLinks.selectAll("line").select("title").text(d => {
+    // person interest→topic 'about' edges carry an affinity (0–10) + confidence.
+    if (d.type === "about" && d.affinity10 != null)
+      return `about · affinity ${d.affinity10}/10 · confidence ${d.confidence}`;
+    if (d.cross) return `culture bridge · ${d.type} = ${d.weight}`;
+    return `${d.type} = ${d.weight}`;
+  });
+
+  // edge weight labels
+  const wl = gLabels.selectAll("text").data(links, d => d.source.id + "→" + d.target.id + d.type);
+  wl.exit().remove();
+  wl.enter().append("text").attr("class", "edge-weight").attr("text-anchor", "middle")
+    .merge(wl).text(d => d.elabel != null ? d.elabel : d.weight);
+
+  // nodes
+  const node = gNodes.selectAll("g.node").data(nodes, d => d.id);
+  node.exit().transition().duration(400).style("opacity", 0).remove();
+
+  const enter = node.enter().append("g").attr("class", "node").style("opacity", 0)
+    .call(d3.drag().clickDistance(5)   // small movement still counts as a click
+      .on("start", (e,d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on("drag",  (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on("end",   (e,d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }))
+    .on("mouseenter", (e,d) => highlight(d.id))
+    .on("mouseleave", clearHighlight)
+    .on("click", (e,d) => { e.stopPropagation(); openConvo(d); });
+
+  enter.each(function(d) {
+    const s = shapePath(d.type);
+    const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+    for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+    el.setAttribute("class", "node-shape" + (d.type === "Conversation" ? " conversation" : ""));
+    this.appendChild(el);
+  });
+  enter.append("text").attr("class", "node-label").attr("x", R + 5).attr("y", 4);
+
+  enter.transition().duration(400).style("opacity", 1);
+
+  // refresh shape (type may change) + label on all nodes
+  const all = enter.merge(node);
+  all.select(".node-label").text(d => d.label);
+  all.each(function(d) {
+    const g = d3.select(this), existing = g.select(".node-shape");
+    const s = shapePath(d.type);
+    if (existing.node() && existing.node().tagName.toLowerCase() !== s.tag) {
+      existing.remove();
+      const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+      for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+      el.setAttribute("class", "node-shape" + (d.type === "Conversation" ? " conversation" : ""));
+      this.insertBefore(el, this.firstChild);
+    }
+    // Feature-2d: tint Topic nodes by their category (updates live on category change).
+    if (d.type === "Topic") {
+      g.select(".node-shape").style("fill", categoryColor(d.category));
+    }
+  });
+
+  document.getElementById("n-count").textContent = nodes.length;
+  document.getElementById("e-count").textContent = links.length;
+  applyCultureFocus();   // dim the non-active culture + other people
+}
+
+function ticked() {
+  gLinks.selectAll("line")
+    .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+  gLabels.selectAll("text")
+    .attr("x", d => (d.source.x + d.target.x)/2)
+    .attr("y", d => (d.source.y + d.target.y)/2 - 3);
+  gNodes.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
+}
+
+// ---- focus on the recognised person + their active culture -----------------
+// The loop reports (from face recognition) the CURRENT person + their resolved
+// active culture. We light: the robot, the current person's OWN subgraph
+// (interests → topics → their bridges), and the ACTIVE culture cluster; everything
+// else dims. So switching who's in front detaches the previous person's bridges,
+// while a second person of the SAME culture keeps the culture nodes lit and only
+// dims the previous person's own bridges. Display-only — no graph mutation.
+function computeLit() {
+  const lit = new Set();
+  const culture = activeState.culture;                 // "culture:korean" | null
+  const slug = culture ? culture.slice("culture:".length) : null;
+  const person = activeState.person || null;
+  const adj = new Map();
+  const add = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
+  links.forEach(l => { add(l.source.id, l.target.id); add(l.target.id, l.source.id); });
+
+  // Anchors: the robot + its OWN identity (persona / role / capabilities) always,
+  // AND the topics its capabilities know (space, jazz, math…) so they never dim.
+  const _robotSelf = new Set(["Robot", "Capability", "Persona", "Role"]);
+  nodeById.forEach((n, id) => {
+    if (!_robotSelf.has(n.type)) return;
+    lit.add(id);
+    if (n.type === "Capability") {
+      for (const t of (adj.get(id) || [])) {          // capability --about--> topic
+        const tn = nodeById.get(t);
+        if (tn && tn.type === "Topic") lit.add(t);
+      }
+    }
+  });
+  // Active culture node + its ck topics.
+  if (culture) lit.add(culture);
+  if (slug) nodeById.forEach((n, id) => {
+    if (id.startsWith("ck:" + slug + ":")) lit.add(id); });
+
+  // The current person's OWN subgraph only — namespaced by interest id
+  // (interest:<person>:…) so shared topics can NEVER leak the highlight to another
+  // person. When ChatBox sees someone else, jay's node/interests/exclusive bridges
+  // all dim; a topic both share stays lit (it's the current person's too).
+  if (person && nodeById.has(person)) {
+    lit.add(person);
+    for (const nb of (adj.get(person) || [])) {
+      const nn = nodeById.get(nb);
+      if (!nn) continue;
+      if (nn.type === "Interest" && nb.startsWith("interest:" + person + ":")) {
+        lit.add(nb);                                 // this person's own interest
+        for (const t of (adj.get(nb) || [])) {       // → its topics (about edges)
+          const tn = nodeById.get(t);
+          if (tn && tn.type === "Topic") lit.add(t);
+        }
+      } else if (nn.type === "Conversation" || nn.type === "Interaction") {
+        lit.add(nb);                                 // their live status / relationship
+      }
+    }
+  }
+  return lit;
+}
+function applyCultureFocus() {
+  const a = activeState || {};
+  // Only dim when the loop is LIVE and there's actually someone in front of the
+  // camera. If the webcam loop isn't running (stale/absent state) OR no face is
+  // detected, show the FULL graph — no dimming.
+  if (!a.live || (!a.person && !a.present)) {
+    gNodes.selectAll("g.node").classed("inactive", false);
+    gLinks.selectAll("line").classed("inactive", false);
+    return;
+  }
+  // Live + someone present: light the robot(+its capabilities) + the recognised
+  // person's own subgraph + their active culture; dim the rest. An UNKNOWN face
+  // (present but no recognised person) leaves only ChatBox + its capabilities lit.
+  const lit = computeLit();
+  gNodes.selectAll("g.node").classed("inactive", d => !lit.has(d.id));
+  gLinks.selectAll("line").classed("inactive",
+    d => !(lit.has(d.source.id) && lit.has(d.target.id)));
+}
+
+// ---- hover highlight ------------------------------------------------------
+function highlight(id) {
+  const connected = new Set([id]);
+  links.forEach(l => { if (l.source.id===id) connected.add(l.target.id);
+                       if (l.target.id===id) connected.add(l.source.id); });
+  gNodes.selectAll("g.node").classed("dim", d => !connected.has(d.id));
+  gLinks.selectAll("line").classed("dim", d => !(d.source.id===id || d.target.id===id));
+}
+function clearHighlight() {
+  gNodes.selectAll("g.node").classed("dim", false);
+  gLinks.selectAll("line").classed("dim", false);
+}
+
+// ---- conversation panel ---------------------------------------------------
+let selectedId = null;     // session (Event) node whose transcript is shown
+const convoEl   = document.getElementById("convo");
+const titleEl   = document.getElementById("convo-title");
+const bodyEl    = document.getElementById("convo-body");
+
+function openConvo(d) {
+  // Any node opens the panel: transcript/summaries (if any) + connections + delete.
+  selectedId = d.id;
+  gNodes.selectAll("g.node").classed("selected", n => n.id === d.id);
+  renderConvo();
+}
+function closeConvo() {
+  selectedId = null;
+  convoEl.style.display = "none";
+  gNodes.selectAll("g.node").classed("selected", false);
+}
+document.getElementById("convo-close").addEventListener("click", closeConvo);
+svg.on("click", closeConvo);   // click empty canvas to dismiss
+
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+function renderConvo() {
+  if (selectedId === null) return;
+  const node = nodeById.get(selectedId);
+  if (!node) { closeConvo(); return; }
+
+  let html = "";
+  if (node.turns) {                 // session node → transcript
+    const turns = node.turns;
+    html += `<div class="sec-title">transcript · ${turns.length} turn${turns.length===1?"":"s"}</div>`;
+    html += turns.length === 0
+      ? `<div class="convo-empty">No conversation recorded for this session.</div>`
+      : turns.map(t => {
+          const when = t.ts ? new Date(t.ts).toLocaleTimeString() : "";
+          const child = t.child ? `<div class="bubble child"><span class="who">child</span>${esc(t.child)}</div>` : "";
+          const reply = t.reply ? `<div class="bubble reply"><span class="who">${esc(t.robot || "robot")}</span>${esc(t.reply)}</div>` : "";
+          return `<div class="turn"><div class="meta">turn ${t.turn ?? "?"} · ${esc(t.emotion||"")} · ${when}</div>${child}${reply}</div>`;
+        }).join("");
+  } else if (node.notes) {          // topic node → conversation summaries
+    const notes = node.notes;
+    html += `<div class="sec-title">summaries · ${notes.length}</div>`;
+    html += notes.length === 0
+      ? `<div class="convo-empty">No conversation summaries about this topic yet.</div>`
+      : notes.map(n => {
+          const when = n.ts ? new Date(n.ts).toLocaleString() : "";
+          return `<div class="turn"><div class="meta">${esc(n.person||"")} · ${when}</div>`
+               + `<div class="bubble child">${esc(n.text||"")}</div></div>`;
+        }).join("");
+    // Conversation history for this topic — fetched from the transcript DB (RAG).
+    html += `<div class="sec-title">conversation history</div>`;
+    html += `<div id="topic-history" class="convo-empty">loading…</div>`;
+  }
+
+  // Culture-topic facts — what ChatBox knows and can share about this topic.
+  if (node.facts && node.facts.length) {
+    html += `<div class="sec-title">facts · ${node.facts.length}</div>`;
+    html += node.facts.map(f => `<div class="bubble child">${esc(f)}</div>`).join("");
+  }
+
+  // Connections — each deletable
+  const es = links.filter(l => l.source.id === node.id || l.target.id === node.id);
+  html += `<div class="sec-title">connections · ${es.length}</div>`;
+  html += es.length === 0
+    ? `<div class="convo-empty">No connections.</div>`
+    : es.map((l, i) => {
+        const out = l.source.id === node.id;
+        const other = out ? l.target : l.source;
+        const lab = l.elabel != null ? `${l.type} (${l.elabel})` : l.type;
+        return `<div class="conn"><span class="lbl">${out?"→":"←"} ${esc(lab)} <b>${esc(other.label)}</b></span>`
+             + `<span class="del" data-i="${i}" title="delete this edge">×</span></div>`;
+      }).join("");
+
+  html += `<button class="btn-danger" id="del-node">🗑 delete node + its ${es.length} edge${es.length===1?"":"s"}</button>`;
+
+  titleEl.innerHTML = `${esc(node.label)}<small>${esc(node.type||"")}</small>`;
+  bodyEl.innerHTML = html;
+  const delBtn = bodyEl.querySelector("#del-node");
+  if (delBtn) delBtn.onclick = () => deleteNode(node);
+  bodyEl.querySelectorAll(".conn .del").forEach(el => {
+    el.onclick = () => deleteEdge(es[+el.dataset.i]);
+  });
+  convoEl.style.display = "flex";
+
+  // Async: pull this topic's conversation history from the transcript DB (RAG).
+  if (node.type === "Topic") loadTopicHistory(node);
+}
+
+async function loadTopicHistory(node) {
+  const el = () => document.getElementById("topic-history");
+  const topic = node.topicLabel || node.label || "";
+  try {
+    const r = await fetch("/history?topic=" + encodeURIComponent(topic), { cache: "no-store" });
+    const j = await r.json();
+    if (selectedId !== node.id) return;           // panel changed while loading
+    const box = el(); if (!box) return;
+    const turns = j.turns || [];
+    if (turns.length === 0) {
+      box.className = "convo-empty";
+      box.textContent = "No conversation history for this topic yet.";
+      return;
+    }
+    box.className = "";
+    box.innerHTML = turns.map(t => {
+      const when = t.ts ? new Date(t.ts).toLocaleString() : "";
+      const who = t.person_id ? esc(t.person_id) : "child";
+      const child = t.child ? `<div class="bubble child"><span class="who">${who}</span>${esc(t.child)}</div>` : "";
+      const reply = t.reply ? `<div class="bubble reply"><span class="who">robot</span>${esc(t.reply)}</div>` : "";
+      return `<div class="turn"><div class="meta">${esc(t.emotion||"")} · ${when}</div>${child}${reply}</div>`;
+    }).join("");
+  } catch (e) {
+    const box = el(); if (box) { box.className = "convo-empty"; box.textContent = "History unavailable."; }
+  }
+}
+
+// ---- delete (writes back to kg_state.json via the server) -----------------
+async function postDelete(body) {
+  try {
+    const r = await fetch("/delete", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const j = await r.json();
+    if (!j.ok) { alert("Delete failed: " + (j.error || "unknown")); return false; }
+    return true;
+  } catch (e) { alert("Delete failed: " + e); return false; }
+}
+async function deleteNode(node) {
+  const es = links.filter(l => l.source.id === node.id || l.target.id === node.id);
+  if (!confirm(`Delete node "${node.label}" and its ${es.length} edge(s)?`)) return;
+  if (await postDelete({ kind: "node", id: node.id })) { closeConvo(); poll(); }
+}
+async function deleteEdge(l) {
+  if (!confirm(`Delete edge: ${l.source.id} —${l.type}→ ${l.target.id}?`)) return;
+  if (await postDelete({ kind: "edge", source: l.source.id, target: l.target.id, edge_type: l.type })) {
+    await poll();       // refresh graph + links
+    renderConvo();      // re-render panel with the edge gone
+  }
+}
+
+// ---- polling loop ---------------------------------------------------------
+const pulse = document.getElementById("pulse");
+let lastSig = "";
+async function poll() {
+  try {
+    const r = await fetch("/graph.json", { cache: "no-store" });
+    const g = await r.json();
+    const sig = JSON.stringify(g);
+    if (sig !== lastSig) {          // only re-diff when something actually changed
+      lastSig = sig;
+      update(g);
+      document.getElementById("ts").textContent = new Date().toLocaleTimeString();
+      pulse.classList.add("on"); setTimeout(() => pulse.classList.remove("on"), 250);
+      if (selectedId !== null) renderConvo();   // refresh open session live
+    }
+  } catch (_) { /* server not ready / transient — try again next tick */ }
+}
+poll();
+setInterval(poll, 1000);
+
+window.addEventListener("resize", () => {
+  width = window.innerWidth; height = window.innerHeight;
+  svg.attr("width", width).attr("height", height);
+  sim.force("center", d3.forceCenter(width/2, height/2));
+  sim.force("x").x(width/2);
+  sim.force("y").y(height/2);
+  sim.alpha(0.1).restart();
+});
+</script>
+</body>
+</html>

@@ -33,6 +33,7 @@ from flask import Flask
 from core.config import cfg
 from core.profiles import ProfileRegistry
 from core.rbac import BatchingAuditSink, GrantStore, RBACFilter
+from decision import BatchingDecisionSink, DecisionRecorder
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
 from gateway.delegation_handler import DelegationHandler
@@ -40,6 +41,7 @@ from gateway.http_gateway import create_http_gateway
 from gateway.persona_gateway import create_persona_gateway
 from gateway.demo_gateway import create_demo_gateway
 from gateway.project_gateway import create_project_gateway
+from gateway.kg_gateway import create_kg_gateway
 from demo.demo_orchestrator import DemoOrchestrator
 from demo.demo_script import DEMO_STEPS
 
@@ -84,6 +86,94 @@ def build_rbac() -> tuple[ProfileRegistry, RBACFilter, GrantStore]:
     return profiles, RBACFilter(audit_sink=audit), GrantStore()
 
 
+def build_decision_recorder() -> DecisionRecorder:
+    """
+    Build the sink that records demo decisions and supervisor corrections.
+
+    Best-effort for the same reason as the RBAC audit sink, and more so: this one
+    runs in front of visitors. If the database is unreachable the demo proceeds
+    with decisions unrecorded rather than failing.
+    """
+    try:
+        from data.demo_decision_repo import write_corrections, write_events
+        return DecisionRecorder(BatchingDecisionSink(
+            decision_writer=write_events,
+            correction_writer=write_corrections,
+        ))
+    except Exception as e:
+        print(f"[App] Decision sink unavailable, demo decisions will not be logged: {e}")
+        return DecisionRecorder()
+
+
+# How long a routing snapshot of the graph is reused before being refetched.
+# Routing happens per visitor turn; refetching the whole graph each time would
+# put a database round-trip on the path a question takes. Corrections land at
+# human speed, so a few seconds of staleness costs nothing.
+_KG_TTL_SEC = 10.0
+_kg_cache: dict = {"at": 0.0, "router": None}
+
+
+def build_kg_router():
+    """A KGRouter over the current graph, or None if the graph is unusable.
+
+    Returns None — meaning "fall back to the baseline" — when the vocabulary is
+    unseeded or the database is unreachable. Routing must never depend on the
+    graph being healthy.
+    """
+    import time as _time
+    if _time.time() - _kg_cache["at"] < _KG_TTL_SEC:
+        return _kg_cache["router"]
+    router = None
+    try:
+        from data import demo_kg_repo as repo
+        from decision.kg import RobotTopicEdge
+        from decision.kg_policy import KGRouter
+        topics = repo.all_topics()
+        if topics:
+            edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
+            links = [(l["topic_a"], l["topic_b"], float(l["weight"]))
+                     for l in repo.all_links()]
+            router = KGRouter(edges, links, topics)
+    except Exception as e:
+        print(f"[App] KG router unavailable, routing falls back to receiver: {e}")
+    _kg_cache.update(at=_time.time(), router=router)
+    return router
+
+
+def apply_kg_observations(observations) -> None:
+    """Persist outcome observations emitted when a Q&A window closes cleanly.
+
+    Best-effort, like every other write on a demo's critical path: a graph that
+    cannot be updated must not interrupt a tour. Also invalidates the routing
+    snapshot, so the next question routes against what was just learned rather
+    than a cache up to _KG_TTL_SEC stale.
+    """
+    try:
+        from data import demo_kg_repo as repo
+        from decision.kg_feedback import apply
+        apply(observations, repo)
+        _kg_cache["at"] = 0.0
+    except Exception as e:
+        print(f"[App] Could not record KG outcomes: {e}")
+
+
+def record_duration(kind: str, row: dict) -> None:
+    """Persist one timing row. Best-effort, like every write on a demo's path.
+
+    Scripted steps and Q&A windows go to SEPARATE tables and are never averaged
+    together — see data/migrations/008_demo_durations.sql for why mixing them
+    makes every step estimate worse as more data arrives.
+    """
+    try:
+        from data import demo_duration_repo as repo
+        if kind == "step":
+            repo.write_step_durations([row])
+        else:
+            repo.write_qa_durations([row])
+    except Exception as e:
+        print(f"[App] Could not record {kind} duration: {e}")
+
+
 def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     """
     Build and return the configured Flask app plus the gateway objects.
@@ -94,7 +184,10 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     # ── Core objects (order matters — registry first) ─────────────────────────
     registry   = RobotRegistry(rbac=rbac, grants=grants, profiles=profiles)
-    ws_gateway = WebSocketGateway(registry)
+    recorder   = build_decision_recorder()
+    ws_gateway = WebSocketGateway(registry, recorder=recorder,
+                                  kg_router_factory=build_kg_router,
+                                  kg_observer=apply_kg_observations)
 
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
@@ -112,7 +205,15 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     app.register_blueprint(persona_blueprint)
 
     # ── Demo orchestrator ─────────────────────────────────────────────────────
-    orchestrator = DemoOrchestrator(ws_gateway)
+    # The recorder is shared with the gateway so an operator's "Move On" is
+    # recorded as a correction *of* the decision the gateway just logged, rather
+    # than as an unattached row.
+    orchestrator = DemoOrchestrator(
+        ws_gateway,
+        recorder=recorder,
+        session_context=ws_gateway.session_context,
+        duration_sink=record_duration,
+    )
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 
@@ -121,6 +222,9 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     project_blueprint = create_project_gateway()
     app.register_blueprint(project_blueprint)
+
+    # Robot→topic competence graph (dashboard tab + /kg/observe).
+    app.register_blueprint(create_kg_gateway(registry, ws_gateway))
 
     return app, ws_gateway, registry
 
@@ -167,6 +271,11 @@ def main():
     print(f"    POST /demo/resume               resume")
     print(f"    POST /demo/next                 skip to next step (recovery)")
     print(f"    GET  /demo/status               current state + step info")
+    print()
+    print("  Knowledge graph:")
+    print(f"    GET  /kg/graph                  robot->topic competence")
+    print(f"    POST /kg/seed                   build the topic vocabulary")
+    print(f"    POST /kg/observe                fold in one observation")
     print()
     print(f"  Demo script: {len(DEMO_STEPS)} steps loaded")
     print()

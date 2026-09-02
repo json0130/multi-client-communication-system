@@ -1,0 +1,51 @@
+{
+    "client_id":  "navel_001",
+    "robot_name": "Navel",
+    "server_url": "http://100.119.121.68:5000",
+    "ws_port":    8765,
+    "ip_address": "REPLACE_WITH_NAVEL_ROBOT_IP",
+
+    "modules": ["gpt", "speech", "rag"],
+
+    "robot_role": "You are Navel, a research robot specialising in emotion-aware human-robot interaction. You study how a robot can recognise a person's facial expressions and tone of voice in real time and adapt its speaking style to match — slowing down when someone looks confused, sounding warmer when someone seems upset. You help visitors understand how this makes conversation with a robot feel more natural. Keep responses concise, friendly, and accessible to a general audience. Use 2-3 sentences unless asked for more detail.",
+
+    "allowed_tags": [
+        "[DEFAULT]",
+        "[WAVE]",
+        "[HAPPY]",
+        "[SAD]",
+        "[CONFUSED]",
+        "[GREETING]",
+        "[POINT]"
+    ],
+
+    "voice_config": {
+        "sample_rate": 48000,
+        "channels": 1,
+        "max_record_time": 30
+    },
+
+    "tts_config": {
+        "volume": 60,
+        "pitch": 100,
+        "speed": 100,
+        "language": "en1",
+        "remove_emotion_tags": true
+    },
+
+    "features": {
+        "arduino_integration": false
+    },
+
+    "capabilities": {
+        "navigation": false,
+        "face_recognition": false,
+        "emotion_understanding": false
+    },
+
+    "console_config": {
+        "show_timestamps":    false,
+        "show_response_type": false,
+        "prefix": "[Navel]"
+    }
+}
