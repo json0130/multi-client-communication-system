@@ -38,6 +38,7 @@ from decision.observation import looks_like_question
 
 class Mechanism:
     ADVANCE_PHRASE = "advance_phrase"       # user said something in _QA_ADVANCE_PHRASES
+    BARE_AFFIRMATION = "bare_affirmation"   # a lone "yes"/"sure"/etc — see BARE_AFFIRMATIONS
     CLOSING_PHRASE = "closing_phrase"       # robot said something in _QA_CLOSING_PHRASES
     QUESTION_HEURISTIC = "question_heuristic"
     LLM_CLASSIFIER = "llm_classifier"       # RobotInstance.classify_qa_intent
@@ -48,6 +49,35 @@ class Mechanism:
     SKIP_REQUEST = "skip_request"
     INTEREST_REQUEST = "interest_request"
     NO_REVISION = "no_revision"
+
+
+# ── Bare affirmations ─────────────────────────────────────────────────────────
+# The guide's canned Q&A prompt is a compound yes/no question: "do you have any
+# OTHER QUESTIONS, or SHALL WE CONTINUE?" A lone "yes" answers that ambiguously
+# — it could mean either clause — and one live run had the LLM classifier read
+# it as "yes, I have a question", staying in the loop, while a visitor saying a
+# bare "yes" to that framing overwhelmingly means "yes, let's continue": someone
+# who actually has a follow-up question almost always asks it directly rather
+# than replying with a bare affirmative.
+#
+# EXACT match, not substring — this list must NOT go into QA_ADVANCE_PHRASES,
+# which is matched with `phrase in text`. Substring-matching "yes" would wrongly
+# fire on "yes, what about the sensors?", a real follow-up question that happens
+# to contain the word. Deliberately excludes the negative family ("no"/"nope"):
+# a bare "no" answering "shall we continue?" would mean STAY, so guessing
+# advance there risks cutting off a visitor who wanted to keep going, which is a
+# worse failure than one extra classifier call.
+BARE_AFFIRMATIONS = {
+    "yes", "yeah", "yep", "yup", "sure", "correct", "exactly", "right",
+    "that's right", "ok", "okay", "alright", "definitely", "absolutely",
+}
+
+
+def _is_bare_affirmation(text: str) -> bool:
+    """True if `text`, stripped of surrounding whitespace/punctuation and
+    lowercased, IS one of BARE_AFFIRMATIONS — not merely contains one."""
+    t = (text or "").strip().lower().rstrip(".!?,;: ")
+    return t in BARE_AFFIRMATIONS
 
 
 # ── Phrase lists ──────────────────────────────────────────────────────────────
@@ -80,6 +110,9 @@ QA_ADVANCE_PHRASES = [
     "we're good",
     "i'm good",
     "im good",
+    "i am good",   # "no i am good" misclassified by the LLM as 'continue' in
+                   # a real run — "i'm good"/"im good" were already covered,
+                   # the un-contracted form was not
     "that's fine",
     "that's okay",
     "it's okay",
@@ -147,6 +180,14 @@ SKIP_PHRASES = [
     "let's skip",
     "not interested in this",
     "not interested in that",
+    # "can we skip chatbox" — the natural question form — missed every
+    # phrase above in a real run; only the declarative "we can skip" was
+    # covered, not visitors asking it as a question.
+    "can we skip",
+    "can you skip",
+    "could we skip",
+    "could you skip",
+    "please skip",
 ]
 
 INTEREST_PHRASES = [
@@ -273,10 +314,25 @@ class HeuristicPolicy:
         Robot turn — the two mechanisms that ran after a robot replied:
             closing phrase → advance
             otherwise → the guide's LLM moderator judgement
+
+        Stated time pressure ("we're running out of time, keep it short") is
+        checked here too, not just in PLAN_REVISE. A real run had it fall
+        through to the LLM classifier, which read it as 'continue' and left
+        the Q&A window open — the visitor had just said the opposite of "I
+        have more questions". PLAN_REVISE separately shortens what's left of
+        the tour; this is the same utterance answering a different question
+        ("should THIS window close?"), and an explicit time complaint outranks
+        a classifier guess exactly like an advance phrase does.
         """
         if obs.last_speaker_id == "visitor":
             if _matches(obs.user_utterance, QA_ADVANCE_PHRASES):
                 return PolicyResult(Action.advance(), Mechanism.ADVANCE_PHRASE)
+
+            if _is_bare_affirmation(obs.user_utterance):
+                return PolicyResult(Action.advance(), Mechanism.BARE_AFFIRMATION)
+
+            if _matches(obs.user_utterance, TIME_PRESSURE_PHRASES):
+                return PolicyResult(Action.advance(), Mechanism.TIME_PRESSURE)
 
             if looks_like_question(obs.user_utterance):
                 return PolicyResult(Action.stay(), Mechanism.QUESTION_HEURISTIC)

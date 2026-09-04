@@ -28,6 +28,8 @@ from decision import (
     PlanOpKind,
     QA_ADVANCE_PHRASES,
     QA_CLOSING_PHRASES,
+    SKIP_PHRASES,
+    TIME_PRESSURE_PHRASES,
 )
 
 GUIDE = "pepper_01"
@@ -136,6 +138,94 @@ class TestQuestionHeuristic:
             raise AssertionError("classifier must not run for an obvious question")
         r = decide(visitor_turn("what is RAG?"), intent_classifier=boom)
         assert r.action.kind is ActionKind.STAY
+
+
+class TestBareAffirmation:
+    """
+    Regression for a real misfire: a live run had the LLM classifier read a
+    bare "yes" — replying to the guide's compound question "any other
+    questions, or shall we continue?" — as "yes, I have a question", staying
+    in the loop when the visitor meant "yes, let's continue".
+
+    A short affirmative reply to that framing overwhelmingly means "continue":
+    someone with an actual follow-up almost always asks it directly rather than
+    replying with a bare "yes". Handled deterministically, before paying for an
+    LLM call, and with an EXACT match — not the substring match QA_ADVANCE_PHRASES
+    uses — specifically so it cannot fire on a real question that happens to
+    contain the word "yes".
+    """
+
+    @pytest.mark.parametrize("text", [
+        "yes", "Yes", "YES", "yeah", "yep", "yup", "sure", "correct",
+        "exactly", "right", "that's right", "ok", "okay", "alright",
+        "definitely", "absolutely", "yes.", "yes!", "  yes  ",
+    ])
+    def test_bare_affirmations_advance(self, text):
+        r = decide(visitor_turn(text))
+        assert r.action.kind is ActionKind.ADVANCE
+        assert r.mechanism == Mechanism.BARE_AFFIRMATION
+
+    def test_bare_affirmation_never_reaches_the_classifier(self):
+        def boom(_):
+            raise AssertionError("classifier must not run for a bare affirmation")
+        r = decide(visitor_turn("yes"), intent_classifier=boom)
+        assert r.action.kind is ActionKind.ADVANCE
+
+    @pytest.mark.parametrize("text", [
+        "yes, what about the sensors?",
+        "yes I have another question",
+        "yeah but how does it handle errors",
+        "well yes and no",
+    ])
+    def test_a_real_follow_up_containing_yes_is_not_caught(self, text):
+        # The precision guard: substring-matching "yes" would wrongly fire on
+        # a genuine question that happens to contain the word. These must fall
+        # through to the question heuristic or the classifier, not advance.
+        r = decide(visitor_turn(text))
+        assert r.mechanism != Mechanism.BARE_AFFIRMATION
+
+    def test_bare_negatives_are_not_treated_as_affirmations(self):
+        # Deliberately NOT auto-advanced: a bare "no" answering "shall we
+        # continue?" would mean STAY, so guessing advance risks cutting off a
+        # visitor who wanted to keep going — worse than one extra LLM call.
+        r = decide(visitor_turn("no"), intent_classifier=lambda _: "continue")
+        assert r.mechanism != Mechanism.BARE_AFFIRMATION
+
+    def test_advance_phrase_list_still_takes_precedence(self):
+        # "move on" also happens to be a case where BOTH could apply in
+        # principle; the substring list runs first and must still win.
+        r = decide(visitor_turn("move on"))
+        assert r.mechanism == Mechanism.ADVANCE_PHRASE
+
+
+class TestTimePressureAdvances:
+    """
+    Regression for a real misfire: a visitor said "i am running out of time
+    so keep the demo short pls" during a Q&A window. PLAN_REVISE correctly
+    read it as time pressure and shortened the tour, but QA_ADVANCE is a
+    separate decision — it fell through to the LLM classifier, which read
+    the same utterance as 'continue' and left the window open, so the
+    visitor had to repeat themselves to a different robot before anything
+    moved on. Stating time pressure is exactly the kind of explicit signal
+    an advance phrase already outranks the classifier with; it gets the
+    same treatment here.
+    """
+
+    @pytest.mark.parametrize("phrase", TIME_PRESSURE_PHRASES)
+    def test_every_time_pressure_phrase_advances(self, phrase):
+        r = decide(visitor_turn(phrase))
+        assert r.action.kind is ActionKind.ADVANCE
+        assert r.mechanism == Mechanism.TIME_PRESSURE
+
+    def test_time_pressure_never_reaches_the_classifier(self):
+        def boom(_):
+            raise AssertionError("classifier must not run when time pressure is stated")
+        r = decide(visitor_turn("we're running out of time"), intent_classifier=boom)
+        assert r.action.kind is ActionKind.ADVANCE
+
+    def test_advance_phrase_list_still_takes_precedence_over_time_pressure(self):
+        r = decide(visitor_turn("move on, we're running out of time"))
+        assert r.mechanism == Mechanism.ADVANCE_PHRASE
 
 
 class TestIntentClassifier:
@@ -289,6 +379,25 @@ class TestPlanRevision:
 
     def test_skip_request_without_a_name_targets_the_presenter(self):
         r = decide(visitor_turn("we can skip this one"), point=DecisionPoint.PLAN_REVISE)
+        assert r.action.ops[0].robot_id == ROBOT_A
+
+    @pytest.mark.parametrize("phrase", SKIP_PHRASES)
+    def test_every_skip_phrase_is_recognized(self, phrase):
+        # SKIP_PHRASES only had the declarative "we can skip" — a real visitor
+        # asking "can we skip chatbox" as a question matched none of them, so
+        # the request was silently dropped and that robot's block ran anyway.
+        r = decide(visitor_turn(f"{phrase} chatbox"), point=DecisionPoint.PLAN_REVISE)
+        assert r.mechanism == Mechanism.SKIP_REQUEST
+        assert r.action.ops[0].kind is PlanOpKind.SKIP
+        assert r.action.ops[0].robot_id == ROBOT_A
+
+    def test_can_we_skip_targets_the_named_robot(self):
+        r = decide(
+            visitor_turn("can we skip chatbox"),
+            point=DecisionPoint.PLAN_REVISE,
+        )
+        assert r.mechanism == Mechanism.SKIP_REQUEST
+        assert r.action.ops[0].kind is PlanOpKind.SKIP
         assert r.action.ops[0].robot_id == ROBOT_A
 
     def test_interest_request_extends_that_robots_qa(self):
