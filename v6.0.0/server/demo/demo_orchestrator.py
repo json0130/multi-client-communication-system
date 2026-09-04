@@ -120,6 +120,12 @@ class DemoOrchestrator:
     # more visible, so one stray "oh nice" should not be enough to trigger it.
     PRE_ENGAGED_COMPRESS_MIN_TURNS = 2
 
+    # A queued resume (see note_interrupted_step) is dropped rather than
+    # delivered once the ad-hoc Q&A it was queued behind has drifted this far
+    # from the moment it was cut off — either threshold is enough on its own.
+    RESUME_MAX_INTERVENING_TURNS = 2
+    RESUME_MAX_AGE_SEC = 90.0
+
     def __init__(
         self,
         ws_gateway: "WebSocketGateway",
@@ -173,6 +179,9 @@ class DemoOrchestrator:
         self._skip_next_qa   = False               # set by manual_next to skip upcoming qa_window
         self._qa_closed_by: Optional[str] = None   # who ended the current window
         self._last_block_robot_id: Optional[str] = None  # for detecting a new block's first step
+        # {"step_id", "queued_at", "turns_at_queue"} for at most one queued
+        # resume at a time — see note_interrupted_step / _drop_if_stale_resume.
+        self._pending_resume: Optional[dict] = None
 
         self._runner: Optional[threading.Thread] = None
 
@@ -245,6 +254,7 @@ class DemoOrchestrator:
             self._revisions          = []
             self._visitor_profile    = visitor_profile
             self._last_block_robot_id = None
+            self._pending_resume      = None
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -408,6 +418,12 @@ class DemoOrchestrator:
         A stale or out-of-order report — the demo has already moved past
         `step_id` by the time this arrives — is silently ignored rather than
         splicing into whatever happens to be current now.
+
+        Records queue-time turn count and timestamp so _drop_if_stale_resume
+        can later tell a quick clarifying question (finish the thought, it's
+        still relevant) from an ad-hoc Q&A that wandered somewhere else
+        entirely before finally closing (drop it — reciting a leftover
+        fragment at that point is a non sequitur, not a courtesy).
         """
         if not remaining_text or not remaining_text.strip():
             return
@@ -430,7 +446,63 @@ class DemoOrchestrator:
             self._script = (
                 self._script[: idx + 1] + [resume_step] + self._script[idx + 1:]
             )
+            self._pending_resume = {
+                "step_id": resume_step.step_id,
+                "queued_at": time.time(),
+                "turns_at_queue": self._engagement_turns(current.block_robot_id),
+            }
         logger.info(f"[Demo] Queued resume for '{step_id}' ({len(remaining_text)} chars).")
+
+    def _engagement_turns(self, robot_id: Optional[str]) -> int:
+        tracker = getattr(self._ws, "tracker", None)
+        if tracker is None or not robot_id:
+            return 0
+        return tracker.engagement_for(robot_id).get("turns", 0)
+
+    def _drop_if_stale_resume(self, step: DemoStep) -> Optional[DemoStep]:
+        """
+        Silently drop a queued resume if the ad-hoc Q&A it was queued behind
+        drifted too far from the moment it was cut off before finally closing.
+
+        Reported case: a barge-in mid-project-talk queued a resume, and the
+        ad-hoc Q&A that followed ranged over six unrelated exchanges (a
+        rerouted follow-up to another robot among them) before finally
+        closing — by which point the resume fired anyway, reciting a leftover
+        sentence fragment ("It matters because...") that connected to nothing
+        being discussed anymore, followed by yet another "any other
+        questions?" the visitor had already answered.
+
+        Treated the same as note_interrupted_step's own empty-remainder case:
+        no delivery, no filler line, and the run loop proceeds exactly as if
+        this step had never been queued. The two cases can't literally share
+        one call — one is decided at queue time, this one only resolves once
+        the window finally closes — but they converge on the same state
+        either way: the resume is simply absent from self._script, which is
+        the one thing the run loop actually checks, so it needs no separate
+        branch to handle "dropped" versus "never queued".
+
+        Returns `step` unchanged if it should still be sent (clearing the
+        pending-resume bookkeeping either way, since it has now resolved), or
+        None if it was dropped — the caller should skip it entirely.
+        """
+        pending = self._pending_resume
+        if pending is None or pending["step_id"] != step.step_id:
+            return step
+
+        with self._lock:
+            self._pending_resume = None
+
+        elapsed = time.time() - pending["queued_at"]
+        intervening = self._engagement_turns(step.block_robot_id) - pending["turns_at_queue"]
+        if (elapsed <= self.RESUME_MAX_AGE_SEC
+                and intervening <= self.RESUME_MAX_INTERVENING_TURNS):
+            return step
+
+        logger.info(f"[Demo] Dropping stale resume '{step.step_id}' "
+                   f"({elapsed:.0f}s, {intervening} intervening turn(s)).")
+        with self._lock:
+            self._script = [s for s in self._script if s is not step]
+        return None
 
     # ── Plan revision ─────────────────────────────────────────────────────────
 
@@ -903,6 +975,15 @@ class DemoOrchestrator:
             step = self._script[idx]
             logger.info(f"[Demo] Step {idx+1}/{len(self._script)}: "
                         f"'{step.step_id}' → {step.robot_id}")
+
+            # A queued resume reaching the front of the script — the one
+            # moment to ask "has this drifted too far to still make sense?"
+            # before it gets sent. Dropping it removes it from self._script,
+            # so looping back around picks up whatever is now at this same
+            # index instead of whatever this step used to be.
+            step = self._drop_if_stale_resume(step)
+            if step is None:
+                continue
 
             # A new block starting — the one moment to ask "did the visitor
             # already talk to this robot before its own turn came up?" before

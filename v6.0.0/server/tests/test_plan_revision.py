@@ -558,6 +558,144 @@ class TestInterruptionResume:
         assert o._script == before
 
 
+class _MutableFakeTracker:
+    """Unlike test_plan_revision.py's _FakeTracker (fixed at construction),
+    turn counts here can be bumped mid-test to simulate intervening Q&A
+    exchanges happening between when a resume is queued and when it fires."""
+
+    def __init__(self):
+        self._turns: dict = {}
+
+    def set_turns(self, robot_id: str, n: int) -> None:
+        self._turns[robot_id] = n
+
+    def engagement_for(self, robot_id: str) -> dict:
+        return {"turns": self._turns.get(robot_id, 0), "questions": 0}
+
+
+class TestStaleResumeDrop:
+    """
+    DemoOrchestrator._drop_if_stale_resume — regression for a real report: a
+    resume queued mid-project-talk fired anyway after the ad-hoc Q&A that
+    followed ranged over six unrelated exchanges (one of them rerouted to a
+    different robot) before finally closing — reciting a leftover sentence
+    fragment that connected to nothing still being discussed, followed by
+    another "any other questions?" the visitor had already answered.
+    """
+
+    @pytest.fixture
+    def orch_mid_project(self, gateway, sink):
+        o = DemoOrchestrator(
+            gateway,
+            recorder=DecisionRecorder(sink),
+            session_context=lambda: {"scenario_id": "lab_demo", "session_id": "sess-1"},
+        )
+        o.load_script(build_script(GUIDE, [A, B, C]))
+        o._state = DemoState.QA_WINDOW
+        o._idx = next(
+            i for i, s in enumerate(o._script)
+            if s.block_robot_id == A and s.role == StepRole.PROJECT
+        )
+        o._ws.tracker = _MutableFakeTracker()
+        return o
+
+    def _queue(self, o, remainder="the rest of it"):
+        interrupted = o._script[o._idx]
+        o.note_interrupted_step(interrupted.robot_id, interrupted.step_id, remainder)
+        return o._script[o._idx + 1], interrupted.block_robot_id
+
+    def test_resume_fires_normally_under_both_thresholds(self, orch_mid_project):
+        o = orch_mid_project
+        resume_step, block_robot_id = self._queue(o)
+        o._ws.tracker.set_turns(block_robot_id, 1)   # one intervening turn, well under budget
+
+        result = o._drop_if_stale_resume(resume_step)
+
+        assert result is resume_step
+        assert resume_step in o._script
+
+    def test_resume_drops_past_the_turn_threshold(self, orch_mid_project):
+        o = orch_mid_project
+        resume_step, block_robot_id = self._queue(o)
+        o._ws.tracker.set_turns(block_robot_id, o.RESUME_MAX_INTERVENING_TURNS + 1)
+
+        result = o._drop_if_stale_resume(resume_step)
+
+        assert result is None
+        assert resume_step not in o._script
+
+    def test_resume_drops_past_the_age_threshold(self, orch_mid_project, monkeypatch):
+        o = orch_mid_project
+        clock = [1_000_000.0]
+        monkeypatch.setattr("demo.demo_orchestrator.time.time", lambda: clock[0])
+
+        resume_step, _ = self._queue(o)
+        clock[0] += o.RESUME_MAX_AGE_SEC + 1
+
+        result = o._drop_if_stale_resume(resume_step)
+
+        assert result is None
+        assert resume_step not in o._script
+
+    def test_at_exactly_the_thresholds_the_resume_still_fires(self, orch_mid_project, monkeypatch):
+        # Boundary check: "more than" means strictly greater, not >=.
+        o = orch_mid_project
+        clock = [1_000_000.0]
+        monkeypatch.setattr("demo.demo_orchestrator.time.time", lambda: clock[0])
+
+        resume_step, block_robot_id = self._queue(o)
+        o._ws.tracker.set_turns(block_robot_id, o.RESUME_MAX_INTERVENING_TURNS)
+        clock[0] += o.RESUME_MAX_AGE_SEC
+
+        result = o._drop_if_stale_resume(resume_step)
+        assert result is resume_step
+
+    def test_dropping_clears_pending_state(self, orch_mid_project):
+        o = orch_mid_project
+        resume_step, block_robot_id = self._queue(o)
+        o._ws.tracker.set_turns(block_robot_id, o.RESUME_MAX_INTERVENING_TURNS + 1)
+
+        o._drop_if_stale_resume(resume_step)
+
+        assert o._pending_resume is None
+
+    def test_a_dropped_resumes_state_does_not_leak_into_a_later_one(self, orch_mid_project):
+        # No orphaned state: after a drop, a FRESH interruption on the same
+        # current step must get its own clean queue-time snapshot, not
+        # anything left over from the one that was just dropped.
+        o = orch_mid_project
+        first_resume, block_robot_id = self._queue(o, "first remainder")
+        o._ws.tracker.set_turns(block_robot_id, o.RESUME_MAX_INTERVENING_TURNS + 1)
+        o._drop_if_stale_resume(first_resume)
+        assert first_resume not in o._script
+
+        o._ws.tracker.set_turns(block_robot_id, 0)
+        second_resume, _ = self._queue(o, "second remainder")
+
+        assert o._pending_resume["step_id"] == second_resume.step_id
+        assert second_resume.text == "second remainder"
+        assert o._drop_if_stale_resume(second_resume) is second_resume
+
+    def test_a_step_that_was_never_queued_is_passed_through_untouched(self, orch_mid_project):
+        o = orch_mid_project
+        step = o._script[o._idx]
+        result = o._drop_if_stale_resume(step)
+        assert result is step
+        assert o._script[o._idx] is step
+
+    def test_note_interrupted_step_records_a_queue_time_snapshot(self, orch_mid_project):
+        o = orch_mid_project
+        interrupted = o._script[o._idx]
+        o._ws.tracker.set_turns(interrupted.block_robot_id, 4)
+
+        o.note_interrupted_step(interrupted.robot_id, interrupted.step_id, "the rest of it")
+
+        assert o._pending_resume is not None
+        assert o._pending_resume["step_id"] == f"{interrupted.step_id}_resume"
+        assert o._pending_resume["turns_at_queue"] == 4
+        assert isinstance(o._pending_resume["queued_at"], float)
+
+
 # ── The post-project grace pause ──────────────────────────────────────────────
 
 class TestPostStepDelay:
