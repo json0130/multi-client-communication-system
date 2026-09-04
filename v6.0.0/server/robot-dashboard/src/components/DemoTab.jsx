@@ -510,13 +510,29 @@ export default function DemoTab() {
   const currentRef   = useRef(null)
   const lastStepKey  = useRef(null)
 
-  // ── Load connected robots once ──────────────────────────────────────────────
+  // ── Poll connected robots ────────────────────────────────────────────────────
+  // Was a one-shot fetch on mount. That was fine when switching tabs remounted
+  // this component (a workaround, not a design) — every tab switch re-ran it.
+  // Demo/KG/Flow now stay mounted permanently across tab switches (so THEIR
+  // state survives), which means a one-shot fetch that ran before
+  // run_lab_test.py's robots finished connecting stayed empty for the rest of
+  // the session with no way to recover short of reloading the page. Polling
+  // matches the demo-status effect just below and self-heals as robots
+  // connect, disconnect, or reconnect during a session.
   useEffect(() => {
-    getRobots().then(data => {
-      const connected = (data.robots || []).filter(r => r.ws_connected)
-      setRobots(connected)
-      if (connected.length > 0) setTargetId(connected[0].client_id)
-    }).catch(() => {})
+    const poll = async () => {
+      try {
+        const data = await getRobots()
+        const connected = (data.robots || []).filter(r => r.ws_connected)
+        setRobots(connected)
+        setTargetId(prev => (prev && connected.some(r => r.client_id === prev))
+          ? prev
+          : (connected[0]?.client_id || ''))
+      } catch { /* transient — next poll retries */ }
+    }
+    poll()
+    const id = setInterval(poll, 3000)
+    return () => clearInterval(id)
   }, [])
 
   // ── Poll demo status ────────────────────────────────────────────────────────

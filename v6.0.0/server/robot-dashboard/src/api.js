@@ -91,3 +91,10 @@ export const getKgSummary = ()             => req('GET',  '/kg/summary')
 export const seedKg       = (dryRun = false) => req('POST', '/kg/seed', { dry_run: dryRun })
 export const observeKg    = (robotId, topicId, target, kind = 'supervisor') =>
   req('POST', '/kg/observe', { robot_id: robotId, topic_id: topicId, target, kind })
+
+// ── Flow graph / planner preview ─────────────────────────────────────────────
+// Read-only: neither call changes a running demo. Use reviseDemo() (already
+// above) or a live PLAN_REVISE trigger to actually apply a plan.
+export const getFlowStatus = () => req('GET', '/flow/status')
+export const previewFlowPlan = (budgetSec, interest = '', importance = {}) =>
+  req('POST', '/flow/plan', { budget_sec: budgetSec, interest, importance })

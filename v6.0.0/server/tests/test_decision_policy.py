@@ -440,6 +440,92 @@ class TestPlanRevision:
         assert r.action.kind is ActionKind.STAY
 
 
+# ── The real planner takes over PLAN_REVISE ───────────────────────────────────
+
+class TestFlowPlannerInjection:
+    """
+    The planner is what PLAN_REVISE actually calls once it is wired in.
+
+    The old ad hoc ladder (a fixed constant, no importance ordering, no Q&A
+    floor, no feasibility check) is left in only as a fallback for when no
+    planner is injected — see the module docstring. These tests pin the
+    handoff between the two, not the planner's own arithmetic, which
+    tests/test_flow_planner.py already covers.
+    """
+
+    def test_the_planners_ops_are_used_when_it_returns_some(self):
+        from decision.models import PlanOp, PlanOpKind
+        called_with = []
+
+        def planner(obs):
+            called_with.append(obs)
+            return {"ops": [PlanOp(PlanOpKind.SET_QA_BUDGET, robot_id=ROBOT_A,
+                                   seconds=45.0)],
+                   "feasible": True}
+
+        r = decide(visitor_turn("we are running out of time"),
+                  point=DecisionPoint.PLAN_REVISE, flow_planner=planner)
+        assert r.mechanism == Mechanism.FLOW_PLANNER
+        assert r.action.kind is ActionKind.REVISE
+        assert r.action.ops[0].kind is PlanOpKind.SET_QA_BUDGET
+        assert len(called_with) == 1   # the planner saw the real Observation
+
+    def test_a_planner_that_finds_nothing_to_change_stays(self):
+        # The tour already fits — a real, informative answer, not an error.
+        r = decide(visitor_turn("we are running out of time"),
+                  point=DecisionPoint.PLAN_REVISE,
+                  flow_planner=lambda obs: {"ops": [], "feasible": True,
+                                            "fits_already": True})
+        assert r.action.kind is ActionKind.STAY
+        assert r.mechanism == Mechanism.FLOW_PLANNER
+
+    def test_a_planner_returning_none_falls_back_to_the_old_ladder(self):
+        # None means "not applicable" (no time budget set, or nothing left to
+        # act on) — distinct from an error, and it must still respond somehow.
+        r = decide(visitor_turn("we are running out of time"),
+                  point=DecisionPoint.PLAN_REVISE, flow_planner=lambda obs: None)
+        assert r.mechanism == Mechanism.TIME_PRESSURE
+
+    def test_a_raising_planner_falls_back_rather_than_crashing_the_demo(self):
+        def boom(obs):
+            raise RuntimeError("duration repo unreachable")
+        r = decide(visitor_turn("we are running out of time"),
+                  point=DecisionPoint.PLAN_REVISE, flow_planner=boom)
+        assert r.mechanism == Mechanism.TIME_PRESSURE
+        assert r.action.kind is ActionKind.REVISE
+
+    def test_no_planner_injected_uses_the_old_ladder_unchanged(self):
+        # The default construction path — every existing TestPlanRevision case
+        # exercises exactly this, so this just pins the mechanism name.
+        r = decide(visitor_turn("we are running out of time"),
+                  point=DecisionPoint.PLAN_REVISE)
+        assert r.mechanism == Mechanism.TIME_PRESSURE
+
+    def test_the_planner_receives_the_observation_the_gateway_built(self):
+        # Not a stub Observation — the actual one carrying remaining_steps,
+        # engagement, budget. Wiring that loses fields would be invisible until
+        # the planner tried to read one that was never populated.
+        seen = {}
+
+        def planner(obs):
+            seen["remaining_steps"] = obs.remaining_steps
+            seen["time_budget_sec"] = obs.time_budget_sec
+            return None
+
+        obs = visitor_turn("we are running out of time", time_budget_sec=600.0)
+        decide(obs, point=DecisionPoint.PLAN_REVISE, flow_planner=planner)
+        assert seen["time_budget_sec"] == 600.0
+
+    def test_skip_request_still_bypasses_the_planner_entirely(self):
+        # An explicit named request is a direct instruction, not a budget-fit
+        # problem — the planner must not even be consulted for it.
+        def boom(obs):
+            raise AssertionError("planner must not run for an explicit skip")
+        r = decide(visitor_turn("let's skip the Navel part"),
+                  point=DecisionPoint.PLAN_REVISE, flow_planner=boom)
+        assert r.mechanism == Mechanism.SKIP_REQUEST
+
+
 # ── Reserved decision point ───────────────────────────────────────────────────
 
 class TestReservedPoints:
