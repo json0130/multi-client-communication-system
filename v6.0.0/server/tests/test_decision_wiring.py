@@ -149,6 +149,40 @@ class TestDecisionsAreRecorded:
         assert all(d.mechanism for d in sink.decisions)
 
 
+class TestEngagementTracksThePresentedBlock:
+    """
+    Regression: engagement used to be credited to whichever robot's mic
+    received the message, not the block actually being discussed. A visitor's
+    technical question about ChatBox's research, picked up by the guide's mic
+    — a real, reported case, and the reason route_question() exists — used to
+    register as the GUIDE'S engagement. _remaining_projects and the interest
+    extension logic both read engagement_by_robot to mean "this project
+    already drew visitor interest"; crediting the wrong robot silently breaks
+    both — a project that already had real Q&A could be offered up for
+    compression again, and a project that never did could look engaged.
+    """
+
+    def test_engagement_is_credited_to_the_presenter_not_the_receiver(self, wired, sink):
+        gw, _, registry = wired
+        # `wired` parks the play head at A's own Q&A step, but the message is
+        # handed to the GUIDE's instance — exactly what a guide-mic pickup of
+        # a question about a project it isn't presenting looks like.
+        gw.check_qa_advance_from_user(registry.get(GUIDE), "how does chatbox handle memory?")
+
+        engagement = sink.decisions[-1].observation["engagement_by_robot"]
+        assert A in engagement
+        assert GUIDE not in engagement
+
+    def test_a_decider_that_already_is_the_presenter_is_unaffected(self, wired, sink):
+        # The common case — decider and presenter are the same robot — must
+        # keep working exactly as before.
+        gw, _, registry = wired
+        gw.check_qa_advance_from_user(registry.get(A), "how does chatbox handle memory?")
+
+        engagement = sink.decisions[-1].observation["engagement_by_robot"]
+        assert A in engagement
+
+
 # ── Parity at the seam ────────────────────────────────────────────────────────
 
 class TestBehaviourParity:
@@ -267,6 +301,59 @@ class TestPlanRevisionWiring:
         before = [s.step_id for s in orch._script]
         gw.check_plan_revision(registry.get(A), "what is retrieval augmented generation?")
         assert [s.step_id for s in orch._script] == before
+
+    def test_plan_revision_still_fires_when_the_same_message_also_advances(self, sink):
+        """
+        Regression for a real bug: "we are running out of time" was, in one
+        observed run, classified by classify_qa_intent as "done" — a
+        perfectly reasonable reading, since the guide's canned question is
+        "any other questions, or shall we continue?" and this message doesn't
+        directly answer that either way. The gateway route used to call
+        check_plan_revision AFTER checking the advance decision, and an
+        LLM_CLASSIFIER-mechanism ADVANCE took an early return — so a message
+        that was BOTH "let's stop this Q&A" and "the tour needs to be shorter"
+        only ever got the first treatment. The tour never shortened, with no
+        error anywhere: correction data would have shown a normal-looking
+        ADVANCE decision and nothing to indicate revision was silently skipped.
+
+        This test simulates the CORRECTED call order the gateway routes now
+        use — check_plan_revision before the advance decision is acted on —
+        and asserts both fire independently from the one message.
+        """
+        registry = FakeRegistry([
+            FakeInstance(GUIDE, "Pepper", "Lab guide", AccessLevel.GLOBAL),
+            FakeInstance(A, "ChatBox", "RAG research", intent="done"),
+            FakeInstance(B, "Navel", "Emotion research", intent="done"),
+        ])
+        recorder = DecisionRecorder(sink)
+        gw = WebSocketGateway(registry, recorder=recorder)
+        orch = DemoOrchestrator(gw, recorder=recorder, session_context=gw.session_context)
+        orch.load_script(build_script(GUIDE, [A, B]))
+        gw.set_demo_orchestrator(orch)
+        orch._state = DemoState.QA_WINDOW
+        orch._idx = next(i for i, s in enumerate(orch._script)
+                         if s.block_robot_id == A and s.role == StepRole.QA)
+        gw.on_qa_window_open()
+        gw.send_to_robot = lambda cid, data: None
+
+        message = "we are running out of time"
+        before = len(orch._script)
+
+        # The corrected order: plan revision first, unconditionally.
+        changed = gw.check_plan_revision(registry.get(A), message)
+        advance = gw.check_qa_advance_from_user(registry.get(A), message)
+
+        assert advance is not None and advance.action.kind is ActionKind.ADVANCE
+        # "we are running out of time" is now caught deterministically by the
+        # TIME_PRESSURE rule in _decide_advance (a later fix — see
+        # TestTimePressureAdvances in test_decision_policy.py) and never even
+        # reaches FakeInstance's stubbed "done" classifier. The scenario this
+        # test guards — an early-returning ADVANCE swallowing the revision
+        # check — is unaffected either way, since the ordering fix it pins
+        # doesn't depend on which mechanism produced the advance.
+        assert advance.mechanism == Mechanism.TIME_PRESSURE
+        assert changed, "plan revision must still fire even though the turn also advances"
+        assert len(orch._script) < before
 
     def test_a_revision_is_logged_as_a_decision(self, wired, sink):
         gw, _, registry = wired

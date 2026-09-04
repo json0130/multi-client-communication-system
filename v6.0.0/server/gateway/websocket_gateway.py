@@ -48,6 +48,7 @@ from decision import (
     QA_CLOSING_PHRASES,
     build_decision,
     build_observation,
+    guide_and_presenter,
     looks_like_question,
 )
 
@@ -532,11 +533,22 @@ class WebSocketGateway:
         if not self._demo_orchestrator or not user_text:
             return None
 
+        # Engagement is tracked against the BLOCK the visitor is actually
+        # asking about, not whichever robot's mic happened to receive the
+        # audio. Those two used to always be the same robot, before
+        # route_question() could send a turn to a different robot than the
+        # receiver — and even without that, the guide's own mic can be what
+        # picks up a question about a project it isn't presenting. Getting
+        # this wrong silently corrupts _remaining_projects and the interest
+        # extension logic downstream, both of which read engagement_by_robot
+        # to mean "has this project already drawn visitor interest".
+        status = self._demo_orchestrator.get_status()
+        _, presenter_id = guide_and_presenter(status)
         self._tracker.note_visitor_turn(
-            getattr(decider, "client_id", None) or "unknown", user_text
+            presenter_id or getattr(decider, "client_id", None) or "unknown", user_text
         )
 
-        if self._demo_orchestrator.get_status().get("state") != "qa_window":
+        if status.get("state") != "qa_window":
             return None
 
         result = self._decide(DecisionPoint.QA_ADVANCE, decider, user_text)
@@ -570,6 +582,42 @@ class WebSocketGateway:
             action.ops, source="policy", reason=user_text[:200]
         )
         return bool(result.get("applied"))
+
+    def route_question(self, instance, message: str):
+        """
+        Decide who should actually answer, and hand off if it is not the
+        robot that heard the question.
+
+        QA_ROUTE used to be recorded and nothing else — the receiver always
+        answered regardless of what the competence graph thought, so a
+        visitor asking a deep technical follow-up about ChatBox's research
+        got that answer FROM Pepper, in Pepper's voice, purely because
+        Pepper's mic happened to pick up the question. This is what makes
+        the decision matter: when the graph is confident enough to name a
+        different, connected robot, that robot gets the question and
+        answers it in its own voice, and the receiving robot gets a one-line
+        handoff instead of improvising an answer about someone else's
+        research.
+
+        Returns (target_instance, target_client_id, handoff_text). handoff_text
+        is None whenever no reroute happened — the common case, and every
+        case where the graph has not learned enough yet to be confident, or
+        names a robot that is not actually connected.
+        """
+        receiver_id = getattr(instance, "client_id", None)
+        result = self._decide(DecisionPoint.QA_ROUTE, instance, message)
+        target_id = result.action.robot_id if result is not None else None
+        if (result is None or result.action.kind is not ActionKind.ROUTE_TO
+                or not target_id or target_id == receiver_id):
+            return instance, receiver_id, None
+
+        target = self._registry.get(target_id)
+        if target is None:
+            return instance, receiver_id, None
+
+        target_name = getattr(target, "robot_name", None) or target_id
+        handoff = f"{target_name} can tell you more about that — let's hear from them!"
+        return target, target_id, handoff
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -695,6 +743,17 @@ class WebSocketGateway:
                     # question-heuristic/classifier chain). The precedence and
                     # the outcomes are identical — see HeuristicPolicy.
                     result = self.check_qa_advance_from_user(instance, message)
+
+                    # PLAN_REVISE first, unconditionally. It used to sit after
+                    # the classifier's early return below, which meant a message
+                    # classified as "done" (closing THIS window) skipped plan
+                    # revision entirely — so "we're running out of time" could
+                    # get read as "no more questions" and the tour never
+                    # shortened, because the request `return`ed before revision
+                    # was ever asked for. The two decisions are independent and
+                    # both must get a chance to fire from the same message.
+                    self.check_plan_revision(instance, message)
+
                     if result is not None and result.action.kind is ActionKind.ADVANCE:
                         if result.mechanism == Mechanism.LLM_CLASSIFIER:
                             # Classifier path: acknowledge and end the turn. A
@@ -708,31 +767,36 @@ class WebSocketGateway:
                             })
                             return
 
-                    # Should the rest of the tour change? Only acts on an explicit
-                    # request, or on the clock when the run was started with a
-                    # time budget — without one this is always a no-op.
-                    self.check_plan_revision(instance, message)
-
-                    # Who answers. The baseline routes to whoever heard the
-                    # question, so this changes nothing yet; it exists so the
-                    # choice is on the record and can be compared against.
-                    self._decide(DecisionPoint.QA_ROUTE, instance, message)
+                    # Who actually answers. A confident competence-graph read
+                    # can name a DIFFERENT connected robot than the one that
+                    # received this message — the receiver gets a one-line
+                    # handoff and the named robot answers in its own voice,
+                    # instead of the receiver improvising an answer about
+                    # someone else's research just because its mic heard the
+                    # question first.
+                    target_instance, target_id, handoff = self.route_question(instance, message)
+                    if handoff:
+                        self.send_to_robot(client_id, {
+                            "event": "chat_sentence",
+                            "text": handoff,
+                            "emotion_tag": "DEFAULT",
+                        })
 
                     def _on_sentence(clean_text, emotion_tag):
                         if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
                             return
-                        self.send_to_robot(client_id, {
+                        self.send_to_robot(target_id, {
                             "event": "chat_sentence",
                             "text": clean_text,
                             "emotion_tag": emotion_tag,
                         })
 
-                    result = instance.process_chat_stream(message, _on_sentence)
+                    result = target_instance.process_chat_stream(message, _on_sentence)
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler
                         handler = DelegationHandler(self._registry, self)
-                        handler.handle(client_id, result.response)
+                        handler.handle(target_id, result.response)
 
             elif msg_type == "speech":
                 audio_b64 = data.get("audio", "")
@@ -768,6 +832,12 @@ class WebSocketGateway:
                             "emotion_tag": ack_tag,
                             "clean_text":  ack_text,
                         })
+                        # This is the barge-in fast path for a raw ADVANCE_PHRASE
+                        # match on the transcription — it can fire on a message
+                        # that ALSO states time pressure ("let's move on, we're
+                        # running out of time"), so plan revision gets the same
+                        # chance here as everywhere else before the early return.
+                        self.check_plan_revision(instance, result.transcription)
                         self.check_qa_advance_from_user(instance, result.transcription)
                         return
 
@@ -817,6 +887,17 @@ class WebSocketGateway:
                 else:
                     print(f"[WS Gateway] ACK from {client_id}: step_id='{step_id}' "
                           "(no orchestrator running)")
+
+            elif msg_type == "tts_interrupted":
+                # A barge-in cut a demo step off mid-speech — the client reports
+                # back whatever it never got to say, so it can be resumed
+                # instead of silently skipped once the interruption resolves.
+                step_id = data.get("step_id")
+                remaining = data.get("remaining_text", "")
+                if self._demo_orchestrator and step_id and remaining:
+                    self._demo_orchestrator.note_interrupted_step(
+                        client_id, step_id, remaining
+                    )
 
             else:
                 print(f"[WS Gateway] Unknown message type '{msg_type}' "

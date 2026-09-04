@@ -108,6 +108,16 @@ class DemoRunTracker:
             self._last_speaker_id = robot_id
             self._last_robot_utterance = text or ""
 
+    def engagement_for(self, robot_id: str) -> dict:
+        """
+        {"turns": n, "questions": n} for one robot, or zeros if it has drawn
+        none yet. Lets a caller ask "has this block already had real Q&A"
+        without reading the whole engagement map.
+        """
+        with self._lock:
+            entry = self._engagement.get(robot_id)
+            return dict(entry) if entry else {"turns": 0, "questions": 0}
+
     # ── Read ──────────────────────────────────────────────────────────────────
 
     def seconds_in_window(self) -> float:
@@ -149,7 +159,7 @@ def _access_level_str(value: object) -> Optional[str]:
         return str(value)
 
 
-def _guide_and_presenter(status: dict) -> tuple[Optional[str], Optional[str]]:
+def guide_and_presenter(status: dict) -> tuple[Optional[str], Optional[str]]:
     """
     Work out who is hosting and who is currently presenting.
 
@@ -205,7 +215,7 @@ def build_observation(
     what makes "did this policy widen context exposure?" a query.
     """
     snap = tracker.snapshot()
-    guide_id, presenter_id = _guide_and_presenter(status)
+    guide_id, presenter_id = guide_and_presenter(status)
 
     total = int(status.get("total") or 0)
     idx = int(status.get("step_idx") or 0)

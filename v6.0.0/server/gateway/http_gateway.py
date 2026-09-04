@@ -24,7 +24,7 @@ from flask import Flask, request, jsonify, Blueprint
 
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
-from decision import ActionKind, DecisionPoint, Mechanism
+from decision import ActionKind, Mechanism
 from data import robot_repo
 
 
@@ -253,7 +253,19 @@ def create_http_gateway(
         # same decision layer, so a dashboard-typed question and a spoken one
         # are judged by the same rules and land in the same log.
         decision = ws_gateway.check_qa_advance_from_user(instance, message)
-        if decision is not None and decision.action.kind is ActionKind.ADVANCE:
+        advancing = decision is not None and decision.action.kind is ActionKind.ADVANCE
+
+        # PLAN_REVISE must run BEFORE the classifier's early return below, not
+        # after. "We're running out of time" can be classified by the SAME
+        # message as satisfying "any other questions?" (-> done -> advance) —
+        # the two decisions are about different things, but the early return a
+        # few lines down used to fire first and `return` out of this request
+        # entirely, so the revision was never even asked for. A visitor stating
+        # time pressure must get a shorter tour whether or not the current
+        # window also happens to close.
+        ws_gateway.check_plan_revision(instance, message)
+
+        if advancing:
             if decision.mechanism == Mechanism.LLM_CLASSIFIER:
                 ws_gateway.send_to_robot(client_id, {
                     "event": "demo_step",
@@ -270,31 +282,39 @@ def create_http_gateway(
                     "delegation_target": None,
                 })
 
-        ws_gateway.check_plan_revision(instance, message)
-        ws_gateway._decide(DecisionPoint.QA_ROUTE, instance, message)
+        # Who actually answers. A confident competence-graph read can name a
+        # DIFFERENT connected robot than the one that received this message —
+        # e.g. a technical follow-up about ChatBox's own research, asked
+        # while Pepper's mic is the one listening. The baseline (no reroute)
+        # is silent here; a reroute gets a one-line handoff spoken by the
+        # original receiver first.
+        target_instance, target_id, handoff = ws_gateway.route_question(instance, message)
+        if handoff:
+            ws_gateway.send_to_robot(client_id, {
+                "event": "chat_sentence",
+                "text": handoff,
+                "emotion_tag": "DEFAULT",
+            })
 
         def _on_sentence(clean_text, emotion_tag):
             if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
                 return
-            ws_gateway.send_to_robot(client_id, {
+            ws_gateway.send_to_robot(target_id, {
                 "event": "chat_sentence",
                 "text": clean_text,
                 "emotion_tag": emotion_tag,
             })
 
-        result = instance.process_chat_stream(message, _on_sentence)
+        result = target_instance.process_chat_stream(message, _on_sentence)
 
-        # Send "more questions?" if still in QA window after response
-        if ws_gateway._demo_orchestrator:
-            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
-                ws_gateway.send_to_robot(client_id, {
-                    "event": "demo_step",
-                    "step_id": "_qa_more_questions",
-                    "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
-                    "require_ack": False,
-                })
-
-        # Handle delegation — run synchronously so the browser gets the target's answer
+        # Handle delegation — run synchronously so the browser gets the
+        # target's answer. Must run BEFORE the "more questions?" resend below,
+        # not after: a real run had the resend fire while Navel's delegated
+        # answer was still being generated, sent to Pepper — the wrong robot,
+        # before the visitor had even heard the answer. DelegationHandler
+        # sends its own follow-up prompt once the delegated reply actually
+        # lands (see execute_sync -> _prompt_for_more_questions), so the
+        # resend below is skipped entirely when this turn delegated.
         delegation_result = None
         if result.is_delegation and result.delegation_target:
             from gateway.delegation_handler import DelegationHandler
@@ -302,6 +322,29 @@ def create_http_gateway(
             target_id_del, task_del = handler._extract(result.response)
             if target_id_del and task_del:
                 delegation_result = handler.execute_sync(client_id, target_id_del, task_del)
+
+        # Send "more questions?" if still in QA window after response, from
+        # whichever robot just answered — the target if this turn rerouted.
+        #
+        # `advancing` is checked here, not just the orchestrator's live state:
+        # check_qa_advance_from_user() above already called qa_end() when
+        # advancing is True, but qa_end() only sets an event — the run loop's
+        # background thread flips the state later (after recording the
+        # window's duration, which can hit real network I/O). This request's
+        # own process_chat_stream() call above can easily finish first, so a
+        # state check alone can read a stale "qa_window" and re-ask "any
+        # other questions?" right after the visitor was just told the window
+        # was closing. A real run had exactly this: the same "lets move on"
+        # phrase needed saying twice for one robot and once for another —
+        # not a per-robot difference, a race the faster reply happened to lose.
+        if ws_gateway._demo_orchestrator and not advancing and not delegation_result:
+            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
+                ws_gateway.send_to_robot(target_id, {
+                    "event": "demo_step",
+                    "step_id": "_qa_more_questions",
+                    "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
+                    "require_ack": False,
+                })
 
         # Strip internal ```json delegation block from what the browser displays
         clean_for_browser = re.sub(r'```(?:json)?\s*[\s\S]*?```', '', result.clean_text or '').strip()

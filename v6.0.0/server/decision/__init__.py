@@ -43,7 +43,12 @@ from decision.models import (
 )
 from decision.flow import Block, FlowGraph, StepRef
 from decision.planner import block_importance, plan_for_budget
-from decision.observation import DemoRunTracker, build_observation, looks_like_question
+from decision.observation import (
+    DemoRunTracker,
+    build_observation,
+    guide_and_presenter,
+    looks_like_question,
+)
 from decision.policy import (
     HeuristicPolicy,
     Mechanism,
@@ -94,5 +99,6 @@ __all__ = [
     "build_correction",
     "build_decision",
     "build_observation",
+    "guide_and_presenter",
     "looks_like_question",
 ]
