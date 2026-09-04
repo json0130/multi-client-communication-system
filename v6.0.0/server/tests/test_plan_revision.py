@@ -177,6 +177,26 @@ class TestCompress:
         kept = {s.role for s in orch._script if s.block_robot_id == B}
         assert not (kept & StepRole.COMPRESSIBLE)
 
+    def test_handoff_survives_compression(self, orch):
+        """
+        Regression for a reported bug: HANDOFF used to be compressible, so a
+        compressed block dropped INTRO+HANDOFF+GREETING+PROMPT together,
+        leaving PROJECT as the first thing spoken in that block — a robot
+        launching into its talk with no one having said its name. HANDOFF is
+        the one line ("let's hear from ChatBox") that makes PROJECT read as a
+        response to something, so it must survive every compression.
+        """
+        orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])
+        kept = [s.role for s in orch._script if s.block_robot_id == B]
+        assert StepRole.HANDOFF in kept
+
+    def test_a_compressed_blocks_project_step_is_preceded_by_its_handoff(self, orch):
+        orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])
+        block = [s for s in orch._script if s.block_robot_id == B]
+        roles = [s.role for s in block]
+        # HANDOFF must still come before PROJECT — order, not just presence.
+        assert roles.index(StepRole.HANDOFF) < roles.index(StepRole.PROJECT)
+
     def test_leaves_other_blocks_alone(self, orch):
         before = [s.step_id for s in orch._script if s.block_robot_id == C]
         orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])

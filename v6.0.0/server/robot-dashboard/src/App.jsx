@@ -6,6 +6,7 @@ import PersonaCard from './components/PersonaCard'
 import PersonaModal from './components/PersonaModal'
 import DemoTab from './components/DemoTab'
 import KGTab from './components/KGTab'
+import FlowTab from './components/FlowTab'
 import { ToastContainer } from './components/Toast'
 
 const REFRESH_INTERVAL = 5000
@@ -114,6 +115,9 @@ export default function App() {
           </button>
           <button className={`nav-tab ${tab === 'kg' ? 'active' : ''}`} onClick={() => setTab('kg')}>
             Knowledge Graph
+          </button>
+          <button className={`nav-tab ${tab === 'flow' ? 'active' : ''}`} onClick={() => setTab('flow')}>
+            Flow Plan
           </button>
         </nav>
         <div className="header-right">
@@ -294,9 +298,22 @@ export default function App() {
             </div>
           </>
         )}
-        {/* ── Demo tab ── */}
-        {tab === 'demo' && <DemoTab />}
-        {tab === 'kg'   && <KGTab />}
+        {/* ── Demo / KG / Flow tabs ──────────────────────────────────────────
+            Always mounted, hidden with CSS rather than conditionally rendered.
+            These three keep local state a user builds up during a session —
+            the demo chat feed, which KG cell is selected, a flow-plan preview
+            — and `{cond && <X/>}` unmounts the component on every tab switch,
+            wiping that state. display:none keeps the component (and its
+            polling effects) alive underneath instead. */}
+        <div style={{ display: tab === 'demo' ? 'block' : 'none', height: '100%' }}>
+          <DemoTab />
+        </div>
+        <div style={{ display: tab === 'kg' ? 'block' : 'none', height: '100%' }}>
+          <KGTab />
+        </div>
+        <div style={{ display: tab === 'flow' ? 'block' : 'none', height: '100%' }}>
+          <FlowTab />
+        </div>
 
       </main>
 

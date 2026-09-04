@@ -43,7 +43,8 @@ class Mechanism:
     LLM_CLASSIFIER = "llm_classifier"       # RobotInstance.classify_qa_intent
     LLM_MODERATOR = "llm_moderator"         # the guide's wrap-up judgement
     RECEIVER = "receiver"                   # whoever heard the audio answers
-    TIME_PRESSURE = "time_pressure"
+    TIME_PRESSURE = "time_pressure"       # old ad hoc ladder (fallback only)
+    FLOW_PLANNER = "flow_planner"          # decision.planner.plan_for_budget
     SKIP_REQUEST = "skip_request"
     INTEREST_REQUEST = "interest_request"
     NO_REVISION = "no_revision"
@@ -223,6 +224,12 @@ class HeuristicPolicy:
     `intent_classifier` and `wrap_up_judge` are injected rather than imported so
     this package stays free of robot/ and gateway/ — the same reason core/rbac
     takes a writer callable. The simulator will pass stubs for both.
+
+    `flow_planner` is the same idea for PLAN_REVISE: decision.planner is pure
+    and could be called directly, but choosing a real budget needs measured step
+    durations and competence-graph-derived importance, both of which live in
+    data/ and cannot be imported here. The gateway assembles those and hands
+    back a ready result; this class only decides what to do with it.
     """
 
     name = "heuristic_v1"
@@ -231,9 +238,11 @@ class HeuristicPolicy:
         self,
         intent_classifier: Optional[Callable[[str], str]] = None,
         wrap_up_judge: Optional[Callable[[Observation], bool]] = None,
+        flow_planner: Optional[Callable[[Observation], Optional[dict]]] = None,
     ):
         self._classify = intent_classifier
         self._wrap_up = wrap_up_judge
+        self._flow_planner = flow_planner
 
     # ── Entry point ───────────────────────────────────────────────────────────
 
@@ -343,6 +352,32 @@ class HeuristicPolicy:
         overrun = obs.projected_overrun_sec
 
         if stated_time_pressure or (overrun is not None and overrun > 0):
+            # The real planner is tried first. It is the thing PLAN_REVISE is
+            # meant to call: it knows the actual remaining structure (from
+            # obs.remaining_steps), measured step durations, and per-visitor
+            # block importance, and it orders cuts by what a visitor notices
+            # rather than by a fixed constant. It returns None — not an
+            # exception — when it has nothing to work with: no time budget was
+            # ever set for this run, or the remaining script has no project
+            # blocks left to act on. Either is a normal "not applicable", not a
+            # failure.
+            if self._flow_planner is not None:
+                plan = None
+                try:
+                    plan = self._flow_planner(obs)
+                except Exception as e:
+                    print(f"[decision.policy] flow planner failed: {e}")
+                if plan is not None:
+                    ops = plan.get("ops") or []
+                    action = Action.revise(ops) if ops else Action.stay()
+                    return PolicyResult(action, Mechanism.FLOW_PLANNER)
+
+            # Fallback: no planner wired in, or it declined. This is the ORIGINAL
+            # ad hoc ladder — a fixed constant instead of measured durations, no
+            # importance ordering, no Q&A floor, no feasibility check. Kept only
+            # so a demo running without duration/KG infrastructure (an early
+            # deployment, a test, the harness before it wires one in) still
+            # responds to a stated time problem instead of doing nothing.
             budget = obs.time_budget_sec
             severe = (
                 overrun is not None
@@ -359,10 +394,6 @@ class HeuristicPolicy:
 
             remaining = self._remaining_projects(obs)
             if remaining:
-                # Rungs 1 and 2 together, in that order: budget every upcoming
-                # Q&A window first, then trim the scaffolding around the talks.
-                # Applied to EVERY remaining block rather than one, so no project
-                # is silently cut for being late in the running order.
                 ops = [PlanOp(PlanOpKind.SET_QA_BUDGET, robot_id=r,
                               seconds=QA_BUDGET_TIGHT_SEC) for r in remaining]
                 ops += [PlanOp(PlanOpKind.COMPRESS, robot_id=r) for r in remaining]

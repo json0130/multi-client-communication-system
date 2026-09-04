@@ -28,6 +28,8 @@ import signal
 import sys
 import logging
 
+from typing import Optional
+
 from flask import Flask
 
 from core.config import cfg
@@ -42,6 +44,7 @@ from gateway.persona_gateway import create_persona_gateway
 from gateway.demo_gateway import create_demo_gateway
 from gateway.project_gateway import create_project_gateway
 from gateway.kg_gateway import create_kg_gateway
+from gateway.flow_gateway import create_flow_gateway
 from demo.demo_orchestrator import DemoOrchestrator
 from demo.demo_script import DEMO_STEPS
 
@@ -105,12 +108,46 @@ def build_decision_recorder() -> DecisionRecorder:
         return DecisionRecorder()
 
 
-# How long a routing snapshot of the graph is reused before being refetched.
-# Routing happens per visitor turn; refetching the whole graph each time would
-# put a database round-trip on the path a question takes. Corrections land at
-# human speed, so a few seconds of staleness costs nothing.
-_KG_TTL_SEC = 10.0
-_kg_cache: dict = {"at": 0.0, "router": None}
+# How long a graph/duration snapshot is reused before being refetched. Routing
+# and revision-planning both happen per visitor turn; refetching from Supabase
+# on every turn would put a database round-trip on the path a question takes.
+# Corrections and duration writes land at human speed, so a few seconds of
+# staleness costs nothing either reads.
+_SNAPSHOT_TTL_SEC = 10.0
+_kg_cache: dict = {"at": 0.0, "topics": [], "edges": [], "links": []}
+_duration_cache: dict = {"at": 0.0, "durations": {}}
+
+# build_flow_plan needs the orchestrator's standing visitor_profile, but it is
+# constructed as a module-level function referenced by name (passed into
+# WebSocketGateway BEFORE the orchestrator exists — the orchestrator wraps the
+# gateway, so the dependency runs the other way). Same fix as the caches above:
+# a mutable cell set once create_app() has built the orchestrator.
+_orchestrator_ref: dict = {"o": None}
+
+
+def _kg_snapshot():
+    """(topics, edges, links) from the current competence graph.
+
+    Shared by routing (build_kg_router) and revision planning (build_flow_plan)
+    so both act on the same view of the graph within one TTL window, and so
+    adding a second reader did not mean a second set of Supabase calls.
+    """
+    import time as _time
+    if _time.time() - _kg_cache["at"] < _SNAPSHOT_TTL_SEC:
+        return _kg_cache["topics"], _kg_cache["edges"], _kg_cache["links"]
+    topics, edges, links = [], [], []
+    try:
+        from data import demo_kg_repo as repo
+        from decision.kg import RobotTopicEdge
+        topics = repo.all_topics()
+        if topics:
+            edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
+            links = [(l["topic_a"], l["topic_b"], float(l["weight"]))
+                     for l in repo.all_links()]
+    except Exception as e:
+        print(f"[App] KG snapshot unavailable: {e}")
+    _kg_cache.update(at=_time.time(), topics=topics, edges=edges, links=links)
+    return topics, edges, links
 
 
 def build_kg_router():
@@ -120,33 +157,21 @@ def build_kg_router():
     unseeded or the database is unreachable. Routing must never depend on the
     graph being healthy.
     """
-    import time as _time
-    if _time.time() - _kg_cache["at"] < _KG_TTL_SEC:
-        return _kg_cache["router"]
-    router = None
-    try:
-        from data import demo_kg_repo as repo
-        from decision.kg import RobotTopicEdge
-        from decision.kg_policy import KGRouter
-        topics = repo.all_topics()
-        if topics:
-            edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
-            links = [(l["topic_a"], l["topic_b"], float(l["weight"]))
-                     for l in repo.all_links()]
-            router = KGRouter(edges, links, topics)
-    except Exception as e:
-        print(f"[App] KG router unavailable, routing falls back to receiver: {e}")
-    _kg_cache.update(at=_time.time(), router=router)
-    return router
+    from decision.kg_policy import KGRouter
+    topics, edges, links = _kg_snapshot()
+    if not topics:
+        return None
+    return KGRouter(edges, links, topics)
 
 
 def apply_kg_observations(observations) -> None:
     """Persist outcome observations emitted when a Q&A window closes cleanly.
 
     Best-effort, like every other write on a demo's critical path: a graph that
-    cannot be updated must not interrupt a tour. Also invalidates the routing
-    snapshot, so the next question routes against what was just learned rather
-    than a cache up to _KG_TTL_SEC stale.
+    cannot be updated must not interrupt a tour. Also invalidates the graph
+    snapshot, so the next question routes — and the next revision plans —
+    against what was just learned rather than a cache up to
+    _SNAPSHOT_TTL_SEC stale.
     """
     try:
         from data import demo_kg_repo as repo
@@ -170,8 +195,91 @@ def record_duration(kind: str, row: dict) -> None:
             repo.write_step_durations([row])
         else:
             repo.write_qa_durations([row])
+        # A new step timing changes what the planner should predict next turn;
+        # invalidate rather than wait out the TTL mid-demo.
+        _duration_cache["at"] = 0.0
     except Exception as e:
         print(f"[App] Could not record {kind} duration: {e}")
+
+
+def _step_durations() -> dict:
+    """{step_id: mean_sec} from every run logged so far.
+
+    Read fresh at most once per _SNAPSHOT_TTL_SEC — the same reasoning as the KG
+    snapshot. Early in a campaign this is mostly empty and FlowGraph.estimate()
+    falls back to DEFAULT_STEP_SEC per step; measured_coverage on the planner's
+    result says how much of an estimate is actually earned versus guessed.
+    """
+    import time as _time
+    if _time.time() - _duration_cache["at"] < _SNAPSHOT_TTL_SEC:
+        return _duration_cache["durations"]
+    durations = {}
+    try:
+        from data.demo_duration_repo import step_stats
+        durations = {r["step_id"]: float(r["mean_sec"])
+                    for r in step_stats() if r.get("mean_sec") is not None}
+    except Exception as e:
+        print(f"[App] step duration stats unavailable, planning from defaults: {e}")
+    _duration_cache.update(at=_time.time(), durations=durations)
+    return durations
+
+
+def build_flow_plan(obs) -> Optional[dict]:
+    """
+    PLAN_REVISE's real implementation — decision.planner fed real data.
+
+    Returns None — "not applicable", never an error — in the two cases where
+    there is nothing to plan against: no time budget was set for this run (the
+    operator never opted into clock-driven revision, so there is no target to
+    fit), or the remaining script has no project blocks left to act on (e.g.
+    only the closing remains). HeuristicPolicy degrades to its own thin
+    fallback ladder in either case, and on any exception raised here.
+
+    A visitor's stated interest, if this turn resolved to one, feeds
+    block_importance's visitor-derived layer — the same topic resolution
+    QA_ROUTE uses, read from the same graph snapshot QA_ROUTE reads, so a
+    stated interest shapes both which robot answers and what survives a cut.
+    """
+    if not obs.time_budget_sec or not obs.remaining_steps:
+        return None
+
+    from decision.flow import FlowGraph
+    from decision.planner import block_importance, plan_for_budget, resolve_emphasis
+
+    graph = FlowGraph.from_script(obs.remaining_steps)
+    if not graph.blocks:
+        return None
+
+    remaining_budget = max(0.0, obs.time_budget_sec - obs.elapsed_sec)
+    durations = _step_durations()
+    topics, edges, links = _kg_snapshot()
+
+    # EXPLICIT trigger-type ordering, made a named sequence rather than
+    # implicit in what happened to be computed here:
+    #   1. a freshly stated interest THIS TURN
+    #   2. the pre-demo visitor profile's standing interest
+    #   3. neither — layer-1 hand-set defaults apply alone (defaults={} below;
+    #      there is no per-project config surface for those yet)
+    utterance_topics = None
+    if topics and obs.user_utterance:
+        from decision.kg_policy import KGRouter
+        tid = KGRouter([], [], topics).resolve_topic(obs.user_utterance)
+        if tid:
+            utterance_topics = [tid]
+
+    profile = _orchestrator_ref["o"].visitor_profile if _orchestrator_ref["o"] else None
+    profile_topics = list(profile.topics) if profile and profile.topics else None
+
+    visitor_topics, emphasis_source = resolve_emphasis(utterance_topics, profile_topics)
+    if visitor_topics:
+        print(f"[App] PLAN_REVISE emphasis source: {emphasis_source} ({visitor_topics})")
+
+    importance = block_importance(graph, defaults={},
+                                  visitor_topics=visitor_topics or None,
+                                  kg_edges=edges, kg_links=links)
+
+    return plan_for_budget(graph, remaining_budget, durations=durations,
+                           importance=importance)
 
 
 def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
@@ -187,7 +295,8 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     recorder   = build_decision_recorder()
     ws_gateway = WebSocketGateway(registry, recorder=recorder,
                                   kg_router_factory=build_kg_router,
-                                  kg_observer=apply_kg_observations)
+                                  kg_observer=apply_kg_observations,
+                                  flow_planner=build_flow_plan)
 
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
@@ -214,6 +323,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         session_context=ws_gateway.session_context,
         duration_sink=record_duration,
     )
+    _orchestrator_ref["o"] = orchestrator
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 
@@ -225,6 +335,9 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     # Robot→topic competence graph (dashboard tab + /kg/observe).
     app.register_blueprint(create_kg_gateway(registry, ws_gateway))
+
+    # Flow graph + planner preview (dashboard tab + /flow/plan).
+    app.register_blueprint(create_flow_gateway(orchestrator))
 
     return app, ws_gateway, registry
 

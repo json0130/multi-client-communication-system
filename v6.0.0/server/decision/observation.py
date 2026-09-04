@@ -25,6 +25,7 @@ import threading
 import time
 from typing import Any, Optional
 
+from decision.flow import StepRef
 from decision.models import Observation
 
 # Prefixes and marks that make a visitor turn a question. Shared with
@@ -229,6 +230,20 @@ def build_observation(
         # A registry hiccup must not stop a decision from being made or logged.
         print(f"[decision.observation] peer snapshot failed: {e}")
 
+    # Steps ahead of the play head, as StepRef — the same invariant
+    # revise_script() enforces on the write side (only steps after the current
+    # index may ever be touched), read here for FlowGraph.from_script().
+    remaining = tuple(
+        StepRef(
+            step_id=s.get("step_id") or "",
+            robot_id=s.get("robot_id") or "",
+            role=s.get("role") or "",
+            qa_window=bool(s.get("qa_window")),
+            block_robot_id=s.get("block_robot_id"),
+        )
+        for s in (status.get("steps") or [])[idx + 1:]
+    )
+
     identity = getattr(decider, "identity", None)
 
     return Observation(
@@ -253,6 +268,7 @@ def build_observation(
         connected_peers=tuple(peers),
         guide_robot_id=guide_id,
         presenting_robot_id=presenter_id,
+        remaining_steps=remaining,
 
         decider_robot_id=getattr(decider, "client_id", None),
         decider_access_level=_access_level_str(getattr(decider, "access_level", None)),

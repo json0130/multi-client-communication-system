@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
 import { getKgGraph, getKgTopics, getKgSummary, seedKg, observeKg, getRobots } from '../api'
+import KGGraphView from './KGGraphView'
 
 /**
  * The robot→topic competence graph.
@@ -48,6 +49,7 @@ export default function KGTab() {
   const [busy,     setBusy]     = useState(false)
   const [error,    setError]    = useState('')
   const [showAll,  setShowAll]  = useState(false)  // include never-observed edges
+  const [view,     setView]     = useState('matrix')  // 'matrix' | 'graph'
 
   const load = useCallback(async () => {
     setError('')
@@ -72,11 +74,21 @@ export default function KGTab() {
     try { await fn(); await load() } catch (e) { setError(e.message) } finally { setBusy(false) }
   }
 
-  // Robots that actually have edges, plus any connected robot, so a robot with
-  // no evidence yet still appears rather than silently vanishing.
+  // Robots that actually have edges, plus any CURRENTLY CONNECTED robot, so a
+  // robot with no evidence yet still appears rather than silently vanishing.
+  //
+  // This used to add every row in `robots` unconditionally — every registered
+  // robot, connected or not. This project has accumulated several dead
+  // duplicate rows for the same physical robot under different client_ids
+  // (chatbox_01 / chatbox_jetson_001, navel_001 / navel_01 / Navel_001,
+  // pepper_01 / pepper_001) from re-registration over time, and the matrix/
+  // graph showed all of them as separate nodes regardless of whether anything
+  // was ever connected under that id. Filtering to ws_connected (plus anything
+  // with real edges, even if it has since disconnected) shows the robots that
+  // are actually part of THIS deployment.
   const robotIds = useMemo(() => {
     const ids = new Set(edges.map(e => e.robot_id))
-    robots.forEach(r => ids.add(r.client_id))
+    robots.filter(r => r.ws_connected).forEach(r => ids.add(r.client_id))
     return [...ids].sort()
   }, [edges, robots])
 
@@ -113,6 +125,14 @@ export default function KGTab() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: 2, background: 'var(--bg)', borderRadius: 6, padding: 2 }}>
+            <button className={`nav-tab ${view === 'matrix' ? 'active' : ''}`}
+                    style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+                    onClick={() => setView('matrix')}>Matrix</button>
+            <button className={`nav-tab ${view === 'graph' ? 'active' : ''}`}
+                    style={{ padding: '4px 10px', fontSize: '0.74rem' }}
+                    onClick={() => setView('graph')}>Graph</button>
+          </div>
           <label className="muted" style={{ fontSize: '0.74rem', display: 'flex', gap: 5, alignItems: 'center' }}>
             <input type="checkbox" checked={showAll} onChange={e => setShowAll(e.target.checked)} />
             show unobserved
@@ -153,6 +173,19 @@ export default function KGTab() {
       {/* ── Matrix ─────────────────────────────────────────────────────── */}
       {visibleTopics.length > 0 && (
         <div className="kg-body">
+          {view === 'graph' ? (
+            <div className="kg-matrix-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <KGGraphView
+                topics={visibleTopics}
+                links={links}
+                edges={edges}
+                robots={robots}
+                robotIds={robotIds}
+                selected={selected}
+                onSelect={setSelected}
+              />
+            </div>
+          ) : (
           <div className="kg-matrix-wrap">
             <table className="kg-matrix">
               <thead>
@@ -192,6 +225,7 @@ export default function KGTab() {
               </tbody>
             </table>
           </div>
+          )}
 
           {/* ── Detail ───────────────────────────────────────────────── */}
           <div className="kg-detail">

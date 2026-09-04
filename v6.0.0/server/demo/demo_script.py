@@ -60,6 +60,8 @@ DEMO_STEPS = [
                       "you are excited to show them around today. Keep it to 2 sentences. Start with [GREETING].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = None,
+        role           = StepRole.OPENING,
     ),
 
     DemoStep(
@@ -70,6 +72,8 @@ DEMO_STEPS = [
                       "people in real-world environments. Keep it to 2-3 sentences. Start with [WAVE].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = None,
+        role           = StepRole.OPENING,
     ),
 
     DemoStep(
@@ -80,6 +84,8 @@ DEMO_STEPS = [
                       "to ask questions. Keep it to 2 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = None,
+        role           = StepRole.OPENING,
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -94,6 +100,8 @@ DEMO_STEPS = [
                       "by combining language models with a knowledge base. Keep it to 2 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = CHATBOX,
+        role           = StepRole.INTRO,
     ),
 
     DemoStep(
@@ -104,6 +112,8 @@ DEMO_STEPS = [
                       "1-2 sentences. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = CHATBOX,
+        role           = StepRole.HANDOFF,
     ),
 
     DemoStep(
@@ -114,6 +124,8 @@ DEMO_STEPS = [
                       "2 sentences. Start with [WAVE].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = CHATBOX,
+        role           = StepRole.GREETING,
     ),
 
     DemoStep(
@@ -123,6 +135,8 @@ DEMO_STEPS = [
                       "1 sentence. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 40,
+        block_robot_id = CHATBOX,
+        role           = StepRole.PROMPT,
     ),
 
     DemoStep(
@@ -134,6 +148,8 @@ DEMO_STEPS = [
                       "Make it engaging and accessible. 3-4 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
+        block_robot_id = CHATBOX,
+        role           = StepRole.PROJECT,
     ),
 
     # Q&A window — visitors can speak to ChatBox or any robot
@@ -148,6 +164,8 @@ DEMO_STEPS = [
         timeout_sec = 60,
         qa_window   = True,
         qa_timeout  = 0,    # manual advance only — operator clicks Move On
+        block_robot_id = CHATBOX,
+        role           = StepRole.QA,
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -162,6 +180,8 @@ DEMO_STEPS = [
                       "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = CHATBOX,
+        role           = StepRole.TRANSITION,
     ),
 
     DemoStep(
@@ -172,6 +192,8 @@ DEMO_STEPS = [
                       "and adapt their communication style accordingly. 2 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = NAVEL,
+        role           = StepRole.INTRO,
     ),
 
     DemoStep(
@@ -182,6 +204,8 @@ DEMO_STEPS = [
                       "1-2 sentences. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = NAVEL,
+        role           = StepRole.HANDOFF,
     ),
 
     DemoStep(
@@ -192,6 +216,8 @@ DEMO_STEPS = [
                       "2 sentences. Start with [WAVE].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = NAVEL,
+        role           = StepRole.GREETING,
     ),
 
     DemoStep(
@@ -201,6 +227,8 @@ DEMO_STEPS = [
                       "1 sentence. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 40,
+        block_robot_id = NAVEL,
+        role           = StepRole.PROMPT,
     ),
 
     DemoStep(
@@ -214,6 +242,8 @@ DEMO_STEPS = [
                       "3-4 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
+        block_robot_id = NAVEL,
+        role           = StepRole.PROJECT,
     ),
 
     # Q&A window
@@ -228,6 +258,8 @@ DEMO_STEPS = [
         timeout_sec = 60,
         qa_window   = True,
         qa_timeout  = 0,    # manual advance only — operator clicks Move On
+        block_robot_id = NAVEL,
+        role           = StepRole.QA,
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -242,6 +274,8 @@ DEMO_STEPS = [
                       "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = NAVEL,
+        role           = StepRole.TRANSITION,
     ),
 
     DemoStep(
@@ -253,6 +287,8 @@ DEMO_STEPS = [
                       "2 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = SILBOT,
+        role           = StepRole.INTRO,
     ),
 
     DemoStep(
@@ -263,6 +299,8 @@ DEMO_STEPS = [
                       "1-2 sentences. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = SILBOT,
+        role           = StepRole.HANDOFF,
     ),
 
     DemoStep(
@@ -273,6 +311,8 @@ DEMO_STEPS = [
                       "2 sentences. Start with [WAVE].",
         generate    = True,
         timeout_sec = 50,
+        block_robot_id = SILBOT,
+        role           = StepRole.GREETING,
     ),
 
     DemoStep(
@@ -282,6 +322,8 @@ DEMO_STEPS = [
                       "1 sentence. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 40,
+        block_robot_id = SILBOT,
+        role           = StepRole.PROMPT,
     ),
 
     DemoStep(
@@ -295,6 +337,8 @@ DEMO_STEPS = [
                       "3-4 sentences. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
+        block_robot_id = SILBOT,
+        role           = StepRole.PROJECT,
     ),
 
     # Q&A window
@@ -310,6 +354,8 @@ DEMO_STEPS = [
         timeout_sec = 60,
         qa_window   = True,
         qa_timeout  = 0,    # manual advance only — operator clicks Move On
+        block_robot_id = SILBOT,
+        role           = StepRole.QA,
     ),
 
     # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -325,6 +371,8 @@ DEMO_STEPS = [
                       "2-3 sentences. Use [HAPPY].",
         generate    = True,
         timeout_sec = 60,
+        block_robot_id = None,
+        role           = StepRole.CLOSING,
     ),
 
     DemoStep(
@@ -338,6 +386,8 @@ DEMO_STEPS = [
         timeout_sec = 60,
         qa_window   = True,
         qa_timeout  = 0,    # manual close — operator ends open floor via dashboard
+        block_robot_id = None,
+        role           = StepRole.CLOSING,
     ),
 
 ]

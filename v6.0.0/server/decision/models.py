@@ -67,6 +67,38 @@ class PlanOpKind(str, Enum):
     SET_QA_BUDGET = "set_qa_budget"
 
 
+class StepRole:
+    """
+    What a step is for. Plain string constants rather than an Enum so an
+    untagged script (role="") stays valid and comparisons never raise.
+
+    COMPRESS drops INTRO/GREETING/PROMPT and keeps HANDOFF/PROJECT/QA — the
+    research content survives, the social scaffolding is what gets trimmed.
+
+    HANDOFF is deliberately NOT compressible, though it looks like scaffolding
+    too. It was in the compressible set originally, and compressing a block
+    then dropped INTRO+HANDOFF+GREETING+PROMPT together, leaving PROJECT as the
+    very first thing spoken in that block — a robot launching into its talk
+    with no one having said its name, addressed by nobody. HANDOFF is the one
+    line ("let's hear from ChatBox") that makes PROJECT read as a response to
+    something rather than a non sequitur, so it survives every compression a
+    block goes through.
+    """
+
+    OPENING    = "opening"      # greeting, lab_intro, overview
+    INTRO      = "intro"        # guide introduces the project concept
+    HANDOFF    = "handoff"      # guide points at the robot — never trimmed, see above
+    GREETING   = "greeting"     # robot says hello
+    PROMPT     = "prompt"       # guide asks the robot to present
+    PROJECT    = "project"      # the robot presents — never trimmed
+    QA         = "qa"           # Q&A window
+    TRANSITION = "transition"   # guide signs off, moves on
+    CLOSING    = "closing"      # wrap_up, open_floor — survives DROP_REMAINING
+
+    # Dropped by COMPRESS. HANDOFF, PROJECT and QA are deliberately absent.
+    COMPRESSIBLE = frozenset({INTRO, GREETING, PROMPT})
+
+
 @dataclass(frozen=True)
 class PlanOp:
     """
@@ -207,6 +239,13 @@ class Observation:
     grounds to fire. Without a declared budget a visitor saying "we're running
     out of time" is unfalsifiable, so the budget is an input to the run, not a
     guess made at decision time.
+
+    `remaining_steps` is what lets PLAN_REVISE consult the flow graph without
+    decision/ importing demo/: it is a tuple of decision.flow.StepRef built from
+    whatever the orchestrator reports as not-yet-run, so
+    FlowGraph.from_script(obs.remaining_steps) reconstructs exactly the part of
+    the tour a plan revision is allowed to touch — the same invariant
+    revise_script() enforces on the write side.
     """
 
     # Position in the script
@@ -236,6 +275,9 @@ class Observation:
     guide_robot_id: Optional[str] = None
     presenting_robot_id: Optional[str] = None
 
+    # The tour ahead of the play head — see the docstring above.
+    remaining_steps: tuple = ()
+
     # RBAC context — same identifiers as rbac_audit_log so the tables join
     decider_robot_id: Optional[str] = None
     decider_access_level: Optional[str] = None
@@ -263,6 +305,13 @@ class Observation:
             ),
             "engagement_by_robot": dict(self.engagement_by_robot),
             "connected_peers": [dict(p) for p in self.connected_peers],
+            # Compact — just enough to reconstruct the FlowGraph a planner saw,
+            # for offline replay. Not the full DemoStep (no text, no timeout).
+            "remaining_steps": [
+                {"step_id": s.step_id, "robot_id": s.robot_id, "role": s.role,
+                 "qa_window": s.qa_window, "block_robot_id": s.block_robot_id}
+                for s in self.remaining_steps
+            ],
             "guide_robot_id": self.guide_robot_id,
             "presenting_robot_id": self.presenting_robot_id,
             "decider_robot_id": self.decider_robot_id,

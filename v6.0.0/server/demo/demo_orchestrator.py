@@ -33,6 +33,7 @@ from decision.models import (
     DecisionPoint,
     PlanOp,
     PlanOpKind,
+    StepRole,
     build_correction,
 )
 
@@ -91,27 +92,8 @@ class DemoStep:
     role:           str = ""
 
 
-class StepRole:
-    """
-    What a step is for. Plain string constants rather than an Enum so an
-    untagged script (role="") stays valid and comparisons never raise.
-
-    COMPRESS drops INTRO/HANDOFF/GREETING/PROMPT and keeps PROJECT/QA — the
-    research content survives, the social scaffolding is what gets trimmed.
-    """
-
-    OPENING    = "opening"      # greeting, lab_intro, overview
-    INTRO      = "intro"        # guide introduces the project concept
-    HANDOFF    = "handoff"      # guide points at the robot
-    GREETING   = "greeting"     # robot says hello
-    PROMPT     = "prompt"       # guide asks the robot to present
-    PROJECT    = "project"      # the robot presents — never trimmed
-    QA         = "qa"           # Q&A window
-    TRANSITION = "transition"   # guide signs off, moves on
-    CLOSING    = "closing"      # wrap_up, open_floor — survives DROP_REMAINING
-
-    # Dropped by COMPRESS. PROJECT and QA are deliberately absent.
-    COMPRESSIBLE = frozenset({INTRO, HANDOFF, GREETING, PROMPT})
+# StepRole moved to decision/models.py — the planner and the orchestrator both
+# need it, and decision/ must not import demo/. Re-exported above for callers.
 
 
 # ── Orchestrator ──────────────────────────────────────────────────────────────

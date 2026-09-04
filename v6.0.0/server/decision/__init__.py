@@ -37,9 +37,12 @@ from decision.models import (
     Observation,
     PlanOp,
     PlanOpKind,
+    StepRole,
     build_correction,
     build_decision,
 )
+from decision.flow import Block, FlowGraph, StepRef
+from decision.planner import block_importance, plan_for_budget
 from decision.observation import DemoRunTracker, build_observation, looks_like_question
 from decision.policy import (
     HeuristicPolicy,
@@ -66,7 +69,12 @@ __all__ = [
     "DecisionPoint",
     "DecisionRecorder",
     "DecisionSink",
+    "Block",
     "DemoRunTracker",
+    "FlowGraph",
+    "StepRef",
+    "block_importance",
+    "plan_for_budget",
     "HeuristicPolicy",
     "Mechanism",
     "MemoryDecisionSink",
@@ -74,6 +82,7 @@ __all__ = [
     "Observation",
     "PlanOp",
     "PlanOpKind",
+    "StepRole",
     "Policy",
     "PolicyResult",
     "QA_ADVANCE_PHRASES",

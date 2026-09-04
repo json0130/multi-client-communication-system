@@ -178,7 +178,7 @@ class WebSocketGateway:
     """
 
     def __init__(self, registry: "RobotRegistry", recorder=None, policy=None,
-                 kg_router_factory=None, kg_observer=None):
+                 kg_router_factory=None, kg_observer=None, flow_planner=None):
         self._registry = registry
         self._connections: dict[str, RobotConnection] = {}
         self._lock = threading.Lock()
@@ -194,6 +194,7 @@ class WebSocketGateway:
         self._policy = policy if policy is not None else HeuristicPolicy(
             intent_classifier=self._classify_intent,
             wrap_up_judge=self._judge_wrap_up,
+            flow_planner=flow_planner,
         )
         # Optional KG-backed routing. A factory rather than a router, because the
         # graph changes as corrections land and a snapshot captured at boot would

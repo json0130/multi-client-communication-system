@@ -217,6 +217,7 @@ class Harness:
         self.args = args
         self.run_id = uuid.uuid4().hex[:12]
         self.decisions: list = []
+        self.durations = Counter()
         self.rng = random.Random(args.seed)
         self.eval_mode = args.mode == "eval"
 
@@ -261,7 +262,8 @@ class Harness:
         self.orch = DemoOrchestrator(self.gw,
                                      transition_delay=1.2 if args.pace == "realistic" else 0.0,
                                      recorder=recorder,
-                                     session_context=self.gw.session_context)
+                                     session_context=self.gw.session_context,
+                                     duration_sink=self._record_duration)
         self.gw.set_demo_orchestrator(self.orch)
         self.registry = registry
         self.before = snapshot_graph()
@@ -289,6 +291,37 @@ class Harness:
                  for l in self.repo.all_links()]
         self._edges, self._links = edges, links
         return KGRouter(edges, links, self.topics, explore=self.args.explore)
+
+    def _record_duration(self, kind: str, row: dict) -> None:
+        """Persist one timing row, tagged with this run.
+
+        Only meaningful timings are kept. An instant-pace collection run
+        advances every step in milliseconds because nothing is being spoken, and
+        writing those would drag every step average toward zero — the campaign
+        would poison the very estimates the flow graph depends on. So durations
+        are recorded when the run is paced realistically, or when generation is
+        on and the numbers therefore reflect real speech.
+        """
+        if not (self.args.pace == "realistic" or self.args.generate):
+            return
+        # Q&A length is BY DEFINITION operator-driven — that is the whole reason
+        # it is measured separately. A stub operator closes every window the
+        # instant the question is answered, producing sub-second rows that would
+        # then be averaged into the figure the planner uses to choose a budget.
+        # Scripted steps are unaffected: their length is a property of the
+        # content, which a stub does not change.
+        if kind == "qa" and self.args.auto != "off":
+            return
+        row = dict(row, run_id=self.run_id)
+        self.durations[kind] += 1
+        try:
+            from data import demo_duration_repo as repo
+            if kind == "step":
+                repo.write_step_durations([row])
+            else:
+                repo.write_qa_durations([row])
+        except Exception as e:
+            print(f"    ! {kind} duration not recorded: {str(e)[:60]}")
 
     def _observe(self, observations) -> None:
         """Persist outcome observations — unless this is an evaluation session.
@@ -574,6 +607,17 @@ class Harness:
         print(f"  {'mechanism':20} {'decisions':>10} {'corrected':>10} {'rate':>7}")
         for m, n in by_mech.most_common():
             print(f"  {m:20} {n:>10} {corr_by_mech[m]:>10} {corr_by_mech[m]/n:>6.0%}")
+
+        if self.durations:
+            print()
+            print(f"  timings recorded: {self.durations['step']} step(s), "
+                  f"{self.durations['qa']} Q&A window(s)")
+        elif self.args.pace != "realistic" and not self.args.generate:
+            print()
+            print("  timings NOT recorded — instant pace with no generation "
+                  "measures nothing.")
+            print("  Use --pace realistic or --generate for runs that should "
+                  "feed the flow graph.")
 
         s = self.repo.summary()
         print()
