@@ -150,6 +150,18 @@ deliberately poor answers in front of visitors. Exploration is for cases where
 the graph genuinely cannot tell; a 0.37 gap is not one of those."""
 
 
+def _ineligible(edges: list, topic_id: str) -> set:
+    """
+    Robot ids explicitly excluded from `topic_id`.
+
+    Opt-out, not opt-in: absence of an edge, or an edge nobody has marked
+    ineligible, keeps a robot in the running. Only an edge that exists AND is
+    explicitly eligible=False excludes it — a hard capability fact, never a
+    weight of 0.0, which is a competence claim and a very different thing.
+    """
+    return {e.robot_id for e in edges if e.topic_id == topic_id and not e.eligible}
+
+
 def route(
     edges: Iterable[RobotTopicEdge],
     links: Iterable[tuple],
@@ -159,6 +171,13 @@ def route(
 ) -> tuple:
     """
     Pick a robot for a question about `topic_id`. Returns (robot_id, reason).
+
+    Ineligible robots are filtered out of the candidate list BEFORE ranking,
+    not after — they never enter rank_robots/infer at all, so an excluded
+    robot cannot win by score and cannot be picked by the exploration rules
+    below either. A candidate list of fewer than two after filtering behaves
+    exactly like any other case with nothing to choose between: "no robots"
+    or a single-candidate argmax.
 
     WHY NOT ARGMAX
     Routing to the best-scoring robot every time starves the graph. Whichever
@@ -191,6 +210,8 @@ def route(
     """
     edges = list(edges)
     links = list(links)
+    excluded = _ineligible(edges, topic_id)
+    robot_ids = [r for r in robot_ids if r not in excluded]
     ranked = rank_robots(edges, links, topic_id, robot_ids)
     if not ranked:
         return None, "no robots"

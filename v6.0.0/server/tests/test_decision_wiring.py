@@ -546,6 +546,25 @@ class TestKGRouting:
         ])
         assert router.resolve_topic("tell me about emotion") is None
 
+    def test_the_guide_is_never_routed_to_even_with_its_own_eligible_edge(self, sink):
+        # Confirms EXISTING behaviour is unaffected by eligibility rows like
+        # 009_kg_role_seed.sql's pepper_01/human-pose-estimation: build_script
+        # already excludes the guide from project_ids, and _kg_route's peer
+        # list already excludes obs.guide_robot_id. A guide asking about its
+        # own topic must still never route to itself, no matter how
+        # confidently the graph would otherwise rank it.
+        from decision.kg import Evidence, RobotTopicEdge
+        e = RobotTopicEdge(robot_id=GUIDE, topic_id="topic:pose")
+        for _ in range(10):
+            e = e.update(1.0, Evidence.SUPERVISOR)
+        router = self._router(edges=[e], topics=[
+            {"id": "topic:pose", "label": "human pose estimation"},
+        ])
+        gw, registry = self._wire(sink, router)
+        result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(A),
+                            "how does human pose estimation work")
+        assert result.action.robot_id != GUIDE
+
 
 class TestOutcomeEmission:
     """

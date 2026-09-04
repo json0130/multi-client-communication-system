@@ -17,7 +17,7 @@ from __future__ import annotations
 import pytest
 
 from decision.kg import Evidence, PRIOR, RobotTopicEdge
-from decision.kg_infer import infer, rank_robots
+from decision.kg_infer import infer, rank_robots, route
 
 R = "robot_a"
 OTHER = "robot_b"
@@ -408,3 +408,63 @@ class TestStemming:
         from decision.kg_policy import _stem
         for word in ("ss", "sss", "ies", "es", "s", "e", "aaa"):
             assert len(_stem(word)) >= 1
+
+
+class TestEligibility:
+    """
+    eligible is a hard routing filter, never a competence seed (see
+    data/migrations/009_kg_role_seed.sql). False must exclude a robot from the
+    candidate list BEFORE ranking — unreachable by outscoring, not merely
+    outranked — because the whole point is that no accumulation of evidence
+    should ever be able to override it.
+    """
+
+    def test_an_ineligible_robot_never_wins_even_with_a_perfect_weight(self):
+        edges = [
+            RobotTopicEdge(robot_id=R, topic_id=A, weight=1.0,
+                           n_supervisor=5, eligible=False),
+            RobotTopicEdge(robot_id=OTHER, topic_id=A, weight=0.1, n_supervisor=5),
+        ]
+        picked, _ = route(edges, [], A, [R, OTHER], explore=False)
+        assert picked == OTHER
+
+    def test_the_only_candidate_being_ineligible_leaves_no_robots(self):
+        edges = [RobotTopicEdge(robot_id=R, topic_id=A, weight=1.0,
+                                n_supervisor=5, eligible=False)]
+        picked, reason = route(edges, [], A, [R], explore=False)
+        assert picked is None
+        assert reason == "no robots"
+
+    def test_eligibility_is_per_topic_not_per_robot(self):
+        edges = [
+            RobotTopicEdge(robot_id=R, topic_id=A, weight=0.9,
+                           n_supervisor=5, eligible=False),
+            RobotTopicEdge(robot_id=R, topic_id=B, weight=0.9,
+                           n_supervisor=5, eligible=True),
+        ]
+        picked_a, _ = route(edges, [], A, [R, OTHER], explore=False)
+        picked_b, _ = route(edges, [], B, [R, OTHER], explore=False)
+        assert picked_a == OTHER    # excluded on A
+        assert picked_b == R       # still eligible on B, and scores higher there
+
+    def test_absence_of_an_edge_means_eligible(self):
+        # OTHER has no edge for this topic at all — must still be a candidate.
+        edges = [RobotTopicEdge(robot_id=R, topic_id=A, weight=0.5, eligible=False)]
+        picked, _ = route(edges, [], A, [R, OTHER], explore=False)
+        assert picked == OTHER
+
+    def test_update_preserves_eligibility(self):
+        e = RobotTopicEdge(robot_id=R, topic_id=A, eligible=False)
+        updated = e.update(1.0, Evidence.SUPERVISOR)
+        assert updated.eligible is False
+
+    def test_as_row_and_from_row_round_trip_eligibility(self):
+        e = RobotTopicEdge(robot_id=R, topic_id=A, eligible=False)
+        restored = RobotTopicEdge.from_row(e.as_row())
+        assert restored.eligible is False
+
+    def test_from_row_defaults_missing_eligible_to_true(self):
+        # A row written before the eligible column existed — must default
+        # open, matching the column's own DEFAULT true.
+        restored = RobotTopicEdge.from_row({"robot_id": R, "topic_id": A, "weight": 0.5})
+        assert restored.eligible is True

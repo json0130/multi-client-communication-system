@@ -43,6 +43,7 @@ CHECKS = [
     ("007_kg_displaced", "demo_robot_topic", ["n_displaced"]),
     ("008_demo_durations", "demo_step_durations", []),
     ("008_demo_durations", "demo_qa_durations", []),
+    ("009_kg_role_seed", "demo_robot_topic", ["eligible"]),
 ]
 
 # Tables the server must be able to INSERT into, with a minimal valid row.

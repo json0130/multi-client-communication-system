@@ -168,6 +168,14 @@ class RobotTopicEdge:
     n_outcome: int = 0
     n_displaced: int = 0
     last_updated: Optional[datetime] = None
+    # Hard routing filter, never a competence seed. False means this robot is
+    # structurally excluded from being routed to on this topic, regardless of
+    # weight — a capability fact, not a learned quality. Default True means
+    # absence of an edge, or an edge nobody has restricted, keeps a robot in
+    # the running; this is an opt-out filter, not an opt-in one, so a sparse
+    # seed set never has to enumerate every robot for every topic just to
+    # keep them all eligible. See decision/kg_infer.py::route.
+    eligible: bool = True
 
     @property
     def n_obs(self) -> int:
@@ -234,6 +242,7 @@ class RobotTopicEdge:
             n_outcome=self.n_outcome + (1 if kind is Evidence.OUTCOME else 0),
             n_displaced=self.n_displaced + (1 if kind is Evidence.DISPLACED else 0),
             last_updated=now or datetime.now(timezone.utc),
+            eligible=self.eligible,   # a hard exclusion is permanent; learning never lifts it
         )
 
     def as_row(self) -> dict:
@@ -245,6 +254,7 @@ class RobotTopicEdge:
             "n_outcome": self.n_outcome,
             "n_displaced": self.n_displaced,
             "last_updated": (self.last_updated or datetime.now(timezone.utc)).isoformat(),
+            "eligible": self.eligible,
         }
 
     @classmethod
@@ -258,6 +268,7 @@ class RobotTopicEdge:
             n_outcome=int(row.get("n_outcome", 0) or 0),
             n_displaced=int(row.get("n_displaced", 0) or 0),
             last_updated=ts,
+            eligible=bool(row.get("eligible", True)),
         )
 
 
