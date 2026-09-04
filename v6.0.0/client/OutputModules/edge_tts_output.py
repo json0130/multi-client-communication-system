@@ -44,6 +44,16 @@ class EdgeTTSOutputModule(OutputModule):
         self._aplay_lock  = threading.Lock()
         self._sim_speed   = self.config.get('sim_speed', 1.0)
 
+        # Sentence-level progress for the utterance currently playing, so
+        # interrupt() can report exactly what was never said — not just that
+        # something was cut off. _current_has_callback distinguishes a demo
+        # step (worth resuming) from a plain chat_sentence (not — a casual
+        # reply losing its tail mid-conversation is normal).
+        self._progress_lock = threading.Lock()
+        self._current_sentences: list = []
+        self._current_idx = -1
+        self._current_has_callback = False
+
     # ── BaseModule interface ───────────────────────────────────────────────────
 
     def initialize(self) -> bool:
@@ -98,9 +108,20 @@ class EdgeTTSOutputModule(OutputModule):
             callback()
         return False
 
-    def interrupt(self):
-        """Drain the queue and stop after current sentence finishes — no mid-word cutoff."""
+    def interrupt(self) -> str:
+        """
+        Drain the queue and stop after current sentence finishes — no
+        mid-word cutoff. Returns whatever sentences after the one in
+        progress were never spoken (joined back into text), or "" if nothing
+        was left, if the queue was empty, or if what was interrupted was a
+        plain chat_sentence rather than a demo step worth resuming.
+        """
         self._interrupt_event.set()
+        with self._progress_lock:
+            if self._current_has_callback and self._current_sentences:
+                remainder = ' '.join(self._current_sentences[self._current_idx + 1:])
+            else:
+                remainder = ''
         # Don't kill aplay — let the current sentence finish naturally, matching Navel behaviour.
         while True:
             try:
@@ -108,6 +129,7 @@ class EdgeTTSOutputModule(OutputModule):
                 self.tts_queue.task_done()
             except queue.Empty:
                 break
+        return remainder
 
     def clear_non_callback_items(self):
         """Remove pending chat_sentence items (no callback) from queue.
@@ -169,7 +191,7 @@ class EdgeTTSOutputModule(OutputModule):
             # Items are always (text, callback) tuples
             text, callback = item if isinstance(item, tuple) else (item, None)
             try:
-                self._speak_text(text)
+                self._speak_text(text, has_callback=callback is not None)
             except Exception as e:
                 logger.error(f"[TTS] Playback error: {e}")
             finally:
@@ -181,7 +203,7 @@ class EdgeTTSOutputModule(OutputModule):
                     except Exception as e:
                         logger.error(f"[TTS] Callback error: {e}")
 
-    def _speak_text(self, text: str):
+    def _speak_text(self, text: str, has_callback: bool = False):
         self._interrupt_event.clear()
         with self._voice_lock:
             language = self._language
@@ -189,6 +211,11 @@ class EdgeTTSOutputModule(OutputModule):
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text.strip()) if s.strip()]
         if not sentences:
             return
+
+        with self._progress_lock:
+            self._current_sentences = sentences
+            self._current_idx = -1
+            self._current_has_callback = has_callback
 
         if self.client:
             if not hasattr(self.client, 'is_speaking'):
@@ -208,6 +235,8 @@ class EdgeTTSOutputModule(OutputModule):
             for i, (sentence, (mp3, wav)) in enumerate(zip(sentences, audio_paths)):
                 if self._interrupt_event.is_set():
                     break
+                with self._progress_lock:
+                    self._current_idx = i
                 self._play_audio(sentence, mp3, wav)
                 audio_paths[i] = (None, None)  # consumed by _play_audio
                 if not self._interrupt_event.is_set() and i < len(sentences) - 1:
@@ -220,6 +249,10 @@ class EdgeTTSOutputModule(OutputModule):
             if self.client and hasattr(self.client, 'is_speaking'):
                 self.client.is_speaking.clear()
             logger.debug("[TTS] is_speaking cleared")
+            with self._progress_lock:
+                self._current_sentences = []
+                self._current_idx = -1
+                self._current_has_callback = False
             for mp3, wav in audio_paths:
                 for f in [mp3, wav]:
                     if f and os.path.exists(f):

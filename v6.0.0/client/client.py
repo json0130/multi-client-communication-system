@@ -396,6 +396,12 @@ class BasicClient:
         self.is_speaking       = threading.Event()
         self.tts_started_event = threading.Event()
 
+        # step_id currently being spoken via speak_with_callback(), or None
+        # between steps / during a plain chat_sentence. Lets _on_tts_stop know
+        # what a barge-in actually interrupted, so a cut-off demo step can be
+        # reported back and resumed instead of silently dropped.
+        self._speaking_step_id: Optional[str] = None
+
         logger.info(f"[Client] {self.config.get('robot_name', 'Robot')} initialising")
         logger.info(f"         ID      : {self.config.get('client_id')}")
         logger.info(f"         Server  : {server_url}")
@@ -458,6 +464,13 @@ class BasicClient:
             logger.info(f"[Demo] TTS completed for '{step_id}'")
             tts_done.set()
 
+        # Recorded so a barge-in mid-speech (_on_tts_stop) knows which step it
+        # cut off and can report the unspoken remainder back for resumption.
+        # Only for require_ack steps — a fire-and-forget step isn't something
+        # the orchestrator is paused waiting on, so there's nothing to resume.
+        if need_ack:
+            self._speaking_step_id = step_id
+
         # Route to the FIRST TTS output module only — break after the first speak
         # to prevent any second module from speaking the same text again.
         spoken = False
@@ -478,6 +491,7 @@ class BasicClient:
 
         if not spoken:
             logger.warning(f"[Demo] No TTS module for step '{step_id}' — ACK now")
+            self._speaking_step_id = None
             self.send_ack(step_id)
             return
 
@@ -486,6 +500,7 @@ class BasicClient:
         if not completed:
             logger.warning(f"[Demo] TTS wait timed out for '{step_id}' — ACK anyway")
 
+        self._speaking_step_id = None
         self.send_ack(step_id)
 
     def _on_chat_sentence(self, data: dict):
@@ -502,10 +517,34 @@ class BasicClient:
                     logger.error(f"[Modules] chat_sentence output error: {e}")
 
     def _on_tts_stop(self, _data: dict):
-        """Stop in-progress TTS immediately — called by server during QA interrupt."""
+        """
+        Stop in-progress TTS immediately — called by server during QA interrupt.
+
+        interrupt() lets the sentence in progress finish naturally (no
+        mid-word cutoff) and returns whatever sentences after it were never
+        spoken. If this was a scripted demo step (not a casual chat reply —
+        losing the tail of a conversational aside is normal, resuming a
+        half-given research explanation is not), report the remainder back so
+        the server can resume it instead of moving straight to the next step.
+        """
+        step_id = self._speaking_step_id
+        remainder = ""
         for module in self.output_modules.values():
             if hasattr(module, "interrupt"):
-                module.interrupt()
+                try:
+                    result = module.interrupt()
+                    if result:
+                        remainder = result
+                except Exception as e:
+                    logger.error(f"[Demo] interrupt() error: {e}")
+
+        if step_id and remainder.strip():
+            self.server_connection.send({
+                "type": "tts_interrupted",
+                "step_id": step_id,
+                "remaining_text": remainder,
+            })
+            logger.info(f"[Demo] Reported interrupted remainder for '{step_id}'.")
 
     def send_ack(self, step_id: str):
         """Send an ACK packet to the server for the given demo step."""

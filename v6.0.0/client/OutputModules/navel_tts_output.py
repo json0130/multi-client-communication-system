@@ -84,8 +84,13 @@ class NavelTTSOutputModule(OutputModule):
                     except Exception as e:
                         logger.error(f"[NavelTTS] Callback error: {e}")
 
-    def interrupt(self):
-        """Drain pending TTS queue. Current utterance will finish (Navel SDK limitation)."""
+    def interrupt(self) -> str:
+        """
+        Drain pending TTS queue. Current utterance will finish (Navel SDK
+        limitation) — always returns "", since nothing is actually cut off:
+        whatever is playing right now completes on its own regardless, there
+        is nothing here for the caller to resume.
+        """
         if self._text_queue and self._loop:
             async def _drain():
                 while not self._text_queue.empty():
@@ -94,6 +99,7 @@ class NavelTTSOutputModule(OutputModule):
                     except Exception:
                         break
             asyncio.run_coroutine_threadsafe(_drain(), self._loop)
+        return ""
 
     def clear_non_callback_items(self):
         """Remove pending chat_sentence items (no callback) from asyncio queue.

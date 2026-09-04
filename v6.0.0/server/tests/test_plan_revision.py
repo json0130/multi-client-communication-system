@@ -476,3 +476,109 @@ class TestCompressionLadder:
                         projected_overrun_sec=400.0)
         r = HeuristicPolicy().decide(DecisionPoint.PLAN_REVISE, obs)
         assert [o.kind for o in r.action.ops] == [PlanOpKind.DROP_REMAINING]
+
+
+# ── Resuming a barge-in mid-speech ────────────────────────────────────────────
+
+class TestInterruptionResume:
+    """
+    DemoOrchestrator.note_interrupted_step — regression for a real report: a
+    visitor's question mid-project-talk cut a robot off, and once the ensuing
+    Q&A resolved, the demo moved straight to the next scripted step. The rest
+    of that explanation was never heard. See client.py's _on_tts_stop and
+    edge_tts_output.py's interrupt() for where the unspoken remainder is
+    measured and reported back.
+    """
+
+    @pytest.fixture
+    def orch_mid_project(self, gateway, sink):
+        """Parked mid-A's PROJECT step, as if a barge-in just interrupted it."""
+        o = DemoOrchestrator(
+            gateway,
+            recorder=DecisionRecorder(sink),
+            session_context=lambda: {"scenario_id": "lab_demo", "session_id": "sess-1"},
+        )
+        o.load_script(build_script(GUIDE, [A, B, C]))
+        o._state = DemoState.QA_WINDOW   # the ad-hoc window the barge-in opened
+        o._idx = next(
+            i for i, s in enumerate(o._script)
+            if s.block_robot_id == A and s.role == StepRole.PROJECT
+        )
+        return o
+
+    def test_splices_the_remainder_right_after_the_interrupted_step(self, orch_mid_project):
+        o = orch_mid_project
+        interrupted = o._script[o._idx]
+        o.note_interrupted_step(interrupted.robot_id, interrupted.step_id,
+                                 "...and that's how we handle noisy sensor data.")
+        assert o._script[o._idx + 1].text == "...and that's how we handle noisy sensor data."
+        assert o._script[o._idx + 1].robot_id == interrupted.robot_id
+        assert o._script[o._idx + 1].block_robot_id == interrupted.block_robot_id
+
+    def test_current_step_object_is_unmoved(self, orch_mid_project):
+        o = orch_mid_project
+        current = o._script[o._idx]
+        o.note_interrupted_step(current.robot_id, current.step_id, "the rest of it")
+        assert o._script[o._idx] is current
+
+    def test_resume_step_is_spoken_verbatim_not_regenerated(self, orch_mid_project):
+        # The remainder is already-real content the robot started saying —
+        # running it back through the LLM could change or drop it.
+        o = orch_mid_project
+        current = o._script[o._idx]
+        o.note_interrupted_step(current.robot_id, current.step_id, "the rest of it")
+        assert o._script[o._idx + 1].generate is False
+
+    def test_resume_step_requires_ack_like_any_spoken_step(self, orch_mid_project):
+        o = orch_mid_project
+        current = o._script[o._idx]
+        o.note_interrupted_step(current.robot_id, current.step_id, "the rest of it")
+        assert o._script[o._idx + 1].require_ack is True
+
+    def test_a_stale_report_for_a_step_already_left_behind_is_ignored(self, orch_mid_project):
+        o = orch_mid_project
+        before = list(o._script)
+        o.note_interrupted_step(A, "some_step_from_earlier", "leftover text")
+        assert o._script == before
+
+    def test_a_report_naming_the_wrong_robot_is_ignored(self, orch_mid_project):
+        # Guards against a late-arriving report from a robot that is no
+        # longer the one at the play head splicing into the wrong block.
+        o = orch_mid_project
+        current = o._script[o._idx]
+        before = list(o._script)
+        o.note_interrupted_step(B, current.step_id, "leftover text")
+        assert o._script == before
+
+    def test_empty_remainder_is_a_no_op(self, orch_mid_project):
+        o = orch_mid_project
+        current = o._script[o._idx]
+        before = list(o._script)
+        o.note_interrupted_step(current.robot_id, current.step_id, "   ")
+        assert o._script == before
+
+
+# ── The post-project grace pause ──────────────────────────────────────────────
+
+class TestPostStepDelay:
+    """
+    DemoOrchestrator._post_step_delay — regression for a real request: give
+    visitors a real moment of silence to jump in with a question right after
+    a robot's project talk, without stretching every other step-to-step gap
+    in the tour the same way.
+    """
+
+    def test_project_step_gets_the_grace_period(self, orch):
+        step = next(s for s in orch._script if s.role == StepRole.PROJECT)
+        assert orch._post_step_delay(step) == orch.POST_PROJECT_GRACE_SEC
+
+    def test_non_project_steps_keep_the_ordinary_transition_delay(self, orch):
+        step = next(s for s in orch._script if s.role == StepRole.QA)
+        assert orch._post_step_delay(step) == orch._transition_delay
+
+    def test_grace_period_never_shortens_an_already_longer_transition_delay(self, orch):
+        orch._transition_delay = orch.POST_PROJECT_GRACE_SEC + 10.0
+        step = next(s for s in orch._script if s.role == StepRole.PROJECT)
+        assert orch._post_step_delay(step) == orch._transition_delay
+
+

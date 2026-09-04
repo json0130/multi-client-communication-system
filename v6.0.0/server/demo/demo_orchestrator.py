@@ -103,6 +103,11 @@ class DemoOrchestrator:
     Drives the demo step by step. All public methods are thread-safe.
     """
 
+    # A visitor needs real silence to start talking into, not just the
+    # ordinary settle gap, before the guide launches into "any questions?"
+    # right after a robot's own project talk.
+    POST_PROJECT_GRACE_SEC = 5.0
+
     def __init__(
         self,
         ws_gateway: "WebSocketGateway",
@@ -367,6 +372,51 @@ class DemoOrchestrator:
         else:
             logger.debug(f"[Demo] Ignored ACK '{step_id}' "
                          f"(expected '{current.step_id if current else None}').")
+
+    def note_interrupted_step(self, robot_id: str, step_id: str, remaining_text: str):
+        """
+        A visitor barged in mid-speech and cut `step_id` off before it finished.
+
+        Without this, the unspoken remainder was gone for good: the TTS client
+        stops after the sentence in progress (never mid-word) and drops
+        whatever was still queued, then once the resulting ad-hoc Q&A closes,
+        the run loop simply advances past the interrupted step to whatever
+        comes next — so a robot asked a question mid-explanation would never
+        finish that explanation, only start the next scripted thing as if
+        nothing had been cut off.
+
+        Splices a synthetic step carrying just the unspoken remainder right
+        after the interrupted one, so the run loop picks it up as the very
+        next thing to send — same head/tail splice discipline as
+        revise_script(), so the invariant (only steps after the current index
+        are ever touched, `_idx` re-derived by identity) holds here too.
+
+        A stale or out-of-order report — the demo has already moved past
+        `step_id` by the time this arrives — is silently ignored rather than
+        splicing into whatever happens to be current now.
+        """
+        if not remaining_text or not remaining_text.strip():
+            return
+        with self._lock:
+            if self._state in (DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR):
+                return
+            idx = self._idx
+            current = self._script[idx] if idx < len(self._script) else None
+            if current is None or current.step_id != step_id or current.robot_id != robot_id:
+                logger.debug(f"[Demo] Ignoring stale interruption report for '{step_id}'.")
+                return
+
+            resume_step = replace(
+                current,
+                step_id=f"{step_id}_resume",
+                text=remaining_text,
+                generate=False,   # already-spoken content — repeat verbatim, don't regenerate
+                qa_window=False,  # the block's own Q&A step is still later in the tail
+            )
+            self._script = (
+                self._script[: idx + 1] + [resume_step] + self._script[idx + 1:]
+            )
+        logger.info(f"[Demo] Queued resume for '{step_id}' ({len(remaining_text)} chars).")
 
     # ── Plan revision ─────────────────────────────────────────────────────────
 
@@ -880,9 +930,27 @@ class DemoOrchestrator:
 
             # Pause between steps so TTS/hardware settle before the next cue.
             # Skipped immediately if stop() or manual_next() or qa_interrupt() fires.
-            if self._transition_delay > 0:
+            delay = self._post_step_delay(step)
+            if delay > 0:
                 self._advance_event.clear()
-                self._advance_event.wait(timeout=self._transition_delay)
+                self._advance_event.wait(timeout=delay)
+
+    def _post_step_delay(self, step: DemoStep) -> float:
+        """
+        How long to pause after `step` before sending the next one.
+
+        A robot's PROJECT talk gets a longer pause than the rest of the tour:
+        the very next scripted step is the guide inviting questions, and a
+        visitor who wants to ask something right away needs a moment of
+        actual silence to speak into before the guide starts talking over
+        them. Every other step-to-step gap keeps the ordinary short settle
+        time — stretching it everywhere would make the whole tour feel
+        sluggish for no benefit.
+        """
+        delay = self._transition_delay
+        if step.role == StepRole.PROJECT:
+            delay = max(delay, self.POST_PROJECT_GRACE_SEC)
+        return delay
 
     def _send_step(self, step: DemoStep):
         text = step.text
