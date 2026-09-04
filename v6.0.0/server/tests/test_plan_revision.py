@@ -582,3 +582,126 @@ class TestPostStepDelay:
         assert orch._post_step_delay(step) == orch._transition_delay
 
 
+# ── Skipping a redundant scripted Q&A after ad-hoc Q&A already happened ───────
+
+class _FakeTracker:
+    def __init__(self, engagement=None):
+        self._engagement = engagement or {}
+
+    def engagement_for(self, robot_id):
+        return dict(self._engagement.get(robot_id, {"turns": 0, "questions": 0}))
+
+
+class TestAlreadyEngagedQAShrink:
+    """
+    DemoOrchestrator._shrink_if_already_engaged — regression for a real
+    report: a visitor satisfied ChatBox's Q&A through ad-hoc barge-in during
+    the project talk, said "no that's good thank you", and got asked "any
+    other questions?" again moments later by the scripted qa_invite step,
+    which has no way to know the ad-hoc round already happened.
+    """
+
+    def _qa_step(self, orch, robot_id):
+        return next(s for s in orch._script
+                    if s.block_robot_id == robot_id and s.role == StepRole.QA)
+
+    def test_a_block_with_no_engagement_is_unchanged(self, orch):
+        orch._ws.tracker = _FakeTracker()
+        step = self._qa_step(orch, A)
+        result = orch._shrink_if_already_engaged(step)
+        assert result.qa_timeout == step.qa_timeout
+
+    def test_a_block_that_already_drew_turns_gets_shortened(self, orch):
+        orch._ws.tracker = _FakeTracker({A: {"turns": 2, "questions": 1}})
+        step = self._qa_step(orch, A)
+        result = orch._shrink_if_already_engaged(step)
+        assert result.qa_timeout == orch.ALREADY_ENGAGED_QA_SEC
+
+    def test_only_the_engaged_blocks_own_qa_step_is_touched(self, orch):
+        orch._ws.tracker = _FakeTracker({A: {"turns": 2, "questions": 1}})
+        step_b = self._qa_step(orch, B)
+        result = orch._shrink_if_already_engaged(step_b)
+        assert result.qa_timeout == step_b.qa_timeout
+
+    def test_shrinking_does_not_touch_anything_else_about_the_step(self, orch):
+        orch._ws.tracker = _FakeTracker({A: {"turns": 1, "questions": 1}})
+        step = self._qa_step(orch, A)
+        result = orch._shrink_if_already_engaged(step)
+        assert result.step_id == step.step_id
+        assert result.text == step.text
+        assert result.qa_window == step.qa_window
+        assert result.robot_id == step.robot_id
+
+    def test_no_tracker_on_the_gateway_is_a_safe_no_op(self, orch):
+        # StubGateway has no .tracker at all — duck-typed, must not crash.
+        step = self._qa_step(orch, A)
+        result = orch._shrink_if_already_engaged(step)
+        assert result.qa_timeout == step.qa_timeout
+
+
+# ── Compressing a block the visitor already talked to before its own turn ────
+
+class TestPreEngagedBlockCompression:
+    """
+    DemoOrchestrator._maybe_compress_pre_engaged_block — regression for a
+    real report: a visitor typed straight into Silbot's chat panel and had
+    four rounds of substantial ad-hoc conversation — navigation, social
+    robotics, specific model names — all before the run loop ever reached
+    Silbot's own scripted intro/greeting/prompt. None of that was visible to
+    the scripted flow, which introduced Silbot and re-explained the same
+    ground again immediately after, as if the ad-hoc exchange never happened.
+    """
+
+    def _block_step_ids(self, orch, robot_id):
+        return [s.step_id for s in orch._script if s.block_robot_id == robot_id]
+
+    def test_no_tracker_is_a_safe_no_op(self, orch):
+        before = self._block_step_ids(orch, B)
+        orch._maybe_compress_pre_engaged_block(B)
+        assert self._block_step_ids(orch, B) == before
+
+    def test_below_the_turn_threshold_does_nothing(self, orch):
+        orch._ws.tracker = _FakeTracker({B: {"turns": 1, "questions": 1}})
+        before = self._block_step_ids(orch, B)
+        orch._maybe_compress_pre_engaged_block(B)
+        assert self._block_step_ids(orch, B) == before
+
+    def test_at_the_threshold_compresses_the_block(self, orch):
+        orch._ws.tracker = _FakeTracker(
+            {B: {"turns": orch.PRE_ENGAGED_COMPRESS_MIN_TURNS, "questions": 2}})
+        orch._maybe_compress_pre_engaged_block(B)
+        roles = [s.role for s in orch._script if s.block_robot_id == B]
+        assert StepRole.GREETING not in roles
+        assert StepRole.PROMPT not in roles
+
+    def test_handoff_and_project_survive(self, orch):
+        # Same protections as any other COMPRESS — a robot never starts
+        # talking with no one having introduced it, and the research content
+        # is never dropped just because some of it came up ad-hoc already.
+        orch._ws.tracker = _FakeTracker({B: {"turns": 3, "questions": 2}})
+        orch._maybe_compress_pre_engaged_block(B)
+        roles = [s.role for s in orch._script if s.block_robot_id == B]
+        assert StepRole.HANDOFF in roles
+        assert StepRole.PROJECT in roles
+        assert StepRole.QA in roles
+
+    def test_only_the_named_block_is_compressed(self, orch):
+        orch._ws.tracker = _FakeTracker({B: {"turns": 5, "questions": 3}})
+        before_c = self._block_step_ids(orch, C)
+        orch._maybe_compress_pre_engaged_block(B)
+        assert self._block_step_ids(orch, C) == before_c
+
+    def test_calling_it_twice_is_idempotent(self, orch):
+        orch._ws.tracker = _FakeTracker({B: {"turns": 4, "questions": 2}})
+        orch._maybe_compress_pre_engaged_block(B)
+        once = self._block_step_ids(orch, B)
+        orch._maybe_compress_pre_engaged_block(B)
+        assert self._block_step_ids(orch, B) == once
+
+    def test_the_current_step_is_never_disturbed(self, orch):
+        # orch is parked on A's own Q&A step — compressing B's upcoming
+        # block must not touch the step the run loop is currently on.
+        current = orch._script[orch._idx]
+        orch._ws.tracker = _FakeTracker({B: {"turns": 4, "questions": 2}})
+        orch._maybe_compress_pre_engaged_block(B)
+        assert orch._script[orch._idx] is current

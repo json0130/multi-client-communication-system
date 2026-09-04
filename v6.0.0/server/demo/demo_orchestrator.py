@@ -108,6 +108,18 @@ class DemoOrchestrator:
     # right after a robot's own project talk.
     POST_PROJECT_GRACE_SEC = 5.0
 
+    # A block's scripted Q&A invite shrinks to this instead of waiting
+    # indefinitely (manual-advance-only) when ad-hoc Q&A already satisfied
+    # the visitor before the run loop got here.
+    ALREADY_ENGAGED_QA_SEC = 5.0
+
+    # How many ad-hoc turns with a block's own robot, before that block's own
+    # scripted turn starts, are enough to compress its greeting/prompt
+    # scaffolding automatically. Higher than the Q&A-invite threshold above —
+    # skipping a WAIT is low-stakes; skipping a robot's own introduction is
+    # more visible, so one stray "oh nice" should not be enough to trigger it.
+    PRE_ENGAGED_COMPRESS_MIN_TURNS = 2
+
     def __init__(
         self,
         ws_gateway: "WebSocketGateway",
@@ -160,6 +172,7 @@ class DemoOrchestrator:
         self._advance_event  = threading.Event()   # set by stop/manual_next to skip transition delay
         self._skip_next_qa   = False               # set by manual_next to skip upcoming qa_window
         self._qa_closed_by: Optional[str] = None   # who ended the current window
+        self._last_block_robot_id: Optional[str] = None  # for detecting a new block's first step
 
         self._runner: Optional[threading.Thread] = None
 
@@ -231,6 +244,7 @@ class DemoOrchestrator:
             self._run_id             = f"run-{int(self._started_at)}"
             self._revisions          = []
             self._visitor_profile    = visitor_profile
+            self._last_block_robot_id = None
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -890,6 +904,13 @@ class DemoOrchestrator:
             logger.info(f"[Demo] Step {idx+1}/{len(self._script)}: "
                         f"'{step.step_id}' → {step.robot_id}")
 
+            # A new block starting — the one moment to ask "did the visitor
+            # already talk to this robot before its own turn came up?" before
+            # any of its scaffolding is sent.
+            if step.block_robot_id and step.block_robot_id != self._last_block_robot_id:
+                self._maybe_compress_pre_engaged_block(step.block_robot_id)
+                self._last_block_robot_id = step.block_robot_id
+
             self._send_step(step)
 
             if step.require_ack:
@@ -920,7 +941,7 @@ class DemoOrchestrator:
 
             # Q&A window configured on this step (scripted pause)
             if step.qa_window:
-                self._open_qa_window(step)
+                self._open_qa_window(self._shrink_if_already_engaged(step))
 
             with self._lock:
                 if self._state == DemoState.IDLE:
@@ -934,6 +955,83 @@ class DemoOrchestrator:
             if delay > 0:
                 self._advance_event.clear()
                 self._advance_event.wait(timeout=delay)
+
+    def _shrink_if_already_engaged(self, step: DemoStep) -> DemoStep:
+        """
+        Skip re-asking "any other questions?" at full length when the
+        visitor already asked them.
+
+        Barge-in during a project's own talk can open an ad-hoc Q&A window
+        (see WebSocketGateway.route_question and check_qa_advance_from_user)
+        that closes with the visitor satisfied, BEFORE the run loop ever
+        reaches this block's own SCRIPTED qa_invite step. That scripted step
+        does not know any of that happened — it still opens a full,
+        manual-advance-only window and asks again, right after the visitor
+        just said they were done. Reported as: a visitor answers ChatBox's
+        Q&A invite with "no that's good thank you" and gets asked "any other
+        questions?" again moments later.
+
+        engagement_by_robot is keyed by the block actually being discussed
+        (see check_qa_advance_from_user), not by whichever robot's mic
+        received the audio, so it reliably answers "did THIS block already
+        get real Q&A" regardless of who fielded it.
+
+        Only ever shortens `qa_timeout` — never removes the step outright.
+        The block still gets an acknowledgment before moving on rather than
+        being cut off with no closing beat, which was the earlier, separate
+        complaint about COMPRESS trimming scaffolding too eagerly.
+        """
+        tracker = getattr(self._ws, "tracker", None)
+        if tracker is None or not step.block_robot_id:
+            return step
+        engagement = tracker.engagement_for(step.block_robot_id)
+        if engagement.get("turns", 0) > 0:
+            logger.info(f"[Demo] '{step.block_robot_id}' already had ad-hoc Q&A — "
+                       f"shortening '{step.step_id}' to {self.ALREADY_ENGAGED_QA_SEC:.0f}s.")
+            return replace(step, qa_timeout=self.ALREADY_ENGAGED_QA_SEC)
+        return step
+
+    def _maybe_compress_pre_engaged_block(self, block_robot_id: str) -> None:
+        """
+        Skip a block's greeting/prompt scaffolding when the visitor already
+        had a real back-and-forth with that robot before its own scripted
+        turn started.
+
+        Reported case: a visitor typed straight into Silbot's chat panel and
+        had four rounds of ad-hoc conversation — navigation, social robotics,
+        specific model names — all before the run loop ever reached
+        intro_project_c/introduce_silbot_01/silbot_01_greeting. None of that
+        was visible to the scripted flow, which went ahead and had Silbot
+        introduce itself ("Hello there! I'm Silbot...") and re-explain the
+        same ground from scratch immediately after.
+
+        Reuses the SAME COMPRESS op revise_script() applies under time
+        pressure — same protections apply here for the same reasons:
+        INTRO/GREETING/PROMPT are scaffolding, HANDOFF still happens (a robot
+        never starts talking with no one having introduced it — see
+        StepRole's COMPRESSIBLE docstring), and PROJECT is never dropped. A
+        single stray remark should not trigger this — see
+        PRE_ENGAGED_COMPRESS_MIN_TURNS — an ad-hoc exchange substantial
+        enough to make a from-scratch greeting feel redundant is a higher bar
+        than "any engagement at all", which is all shortening a wait needs.
+
+        Idempotent: revise_script's COMPRESS is a no-op once a block is
+        already compressed, so calling this more than once for the same
+        block costs nothing beyond a wasted check.
+        """
+        tracker = getattr(self._ws, "tracker", None)
+        if tracker is None:
+            return
+        engagement = tracker.engagement_for(block_robot_id)
+        if engagement.get("turns", 0) < self.PRE_ENGAGED_COMPRESS_MIN_TURNS:
+            return
+        result = self.revise_script(
+            [PlanOp(PlanOpKind.COMPRESS, robot_id=block_robot_id)],
+            source="auto", reason="ad-hoc engagement before this block's own turn",
+        )
+        if result.get("applied"):
+            logger.info(f"[Demo] '{block_robot_id}' already engaged ad-hoc "
+                       f"({engagement['turns']} turns) — compressed its scripted intro.")
 
     def _post_step_delay(self, step: DemoStep) -> float:
         """
