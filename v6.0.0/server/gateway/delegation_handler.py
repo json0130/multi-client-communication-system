@@ -116,11 +116,15 @@ class DelegationHandler:
             # ── Context Serialization ─────────────────────────────────────────
             snippets = self._serialize_context(source_id, target_id, task, task_id)
 
-            # Verbal handoff: source robot (Pepper) addresses the target out loud
-            verbal_address = f"{robot_name}, {task}"
+            # Verbal handoff: source robot (Pepper) addresses the target out
+            # loud. Deliberately generic rather than echoing `task` verbatim —
+            # task is LLM-generated and can come out stilted ("Navel, Please
+            # explain more about your research project."); a fixed natural
+            # phrase reads the same way every time. Navel still gets the real
+            # `task` text below for what it actually answers.
             self._ws.send_to_robot(source_id, {
                 "event": "chat_sentence",
-                "text": verbal_address,
+                "text": f"{robot_name}, can you tell us more about that?",
                 "emotion_tag": "[DEFAULT]",
             })
 
@@ -137,6 +141,7 @@ class DelegationHandler:
                 "emotion_tag": result.emotion_tag,
                 "clean_text": result.clean_text,
             })
+            self._prompt_for_more_questions(target_id)
             return {
                 "robot_name": robot_name,
                 "clean_text": result.clean_text or result.response,
@@ -148,6 +153,34 @@ class DelegationHandler:
             # Revoke on task completion, success or failure. Grants also carry
             # their own expiry, so a crash between here and there still closes.
             self._revoke(task_id)
+
+    def _prompt_for_more_questions(self, target_id: str) -> None:
+        """
+        Ask "any other questions?" from whoever actually just answered, once
+        their delegated reply has actually been sent — not from the source
+        robot right after it kicks the delegation off.
+
+        execute_sync() runs synchronously for one caller (http_gateway.py)
+        and in a background thread for the other (websocket_gateway.py, via
+        handle()/_execute()) — a caller-side "resend if still in qa_window"
+        check fires BEFORE this method's caller even starts in the async
+        case, and in the sync case it used to run earlier in the function,
+        before delegation had even been dispatched. A real run had exactly
+        this: Pepper got asked "any other questions?" again while Navel's
+        answer was still being generated, sent to the wrong robot, before
+        the visitor had even heard what they asked for. Living here instead
+        means it fires at the one moment that is actually correct regardless
+        of which caller invoked it.
+        """
+        orch = getattr(self._ws, "_demo_orchestrator", None)
+        if orch is None or orch.get_status().get("state") != "qa_window":
+            return
+        self._ws.send_to_robot(target_id, {
+            "event": "demo_step",
+            "step_id": "_qa_more_questions",
+            "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
+            "require_ack": False,
+        })
 
     # ── Context Serialization ─────────────────────────────────────────────────
 
