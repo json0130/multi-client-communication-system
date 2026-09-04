@@ -45,14 +45,20 @@ export const deletePersona  = (id)       => req('DELETE', `/personas/${id}`)
 // decision/ on the server. Leaving it blank is fine: the timestamp and step
 // already say what was wrong, and an operator mid-demo has no time to type.
 export const getDemoStatus = ()              => req('GET',  '/demo/status')
-export const startDemo     = (robotIds = [], timeBudgetSec = null) => req(
+export const startDemo     = (robotIds = [], timeBudgetSec = null,
+                              visitorInterest = '', visitorStyle = 'general') => req(
   'POST', '/demo/start',
-  (robotIds.length || timeBudgetSec)
+  (robotIds.length || timeBudgetSec || visitorInterest || (visitorStyle && visitorStyle !== 'general'))
     ? {
         ...(robotIds.length  ? { robot_ids: robotIds }          : {}),
         // Without a budget the tour has nothing to run late against, so the
         // server never trims the script on its own.
         ...(timeBudgetSec    ? { time_budget_sec: timeBudgetSec } : {}),
+        // The pre-demo standing baseline — sets every robot's style framing
+        // and the planner's importance baseline until a visitor states
+        // something more specific mid-tour. Both optional.
+        ...(visitorInterest  ? { visitor_interest: visitorInterest } : {}),
+        ...(visitorStyle && visitorStyle !== 'general' ? { visitor_style: visitorStyle } : {}),
       }
     : null,
 )

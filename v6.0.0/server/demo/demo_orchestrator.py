@@ -139,6 +139,7 @@ class DemoOrchestrator:
         self._duration_sink = duration_sink
         self._run_id: Optional[str] = None
         self._step_started_at: Optional[float] = None
+        self._visitor_profile = None   # decision.visitor_profile.VisitorProfile | None
 
         # Run clock. Started by start(), read by get_status() so Observation has
         # a real budget rather than an estimate made at decision time.
@@ -161,6 +162,14 @@ class DemoOrchestrator:
         # for display in get_status and as what's actually sent to the robot).
         self._current_step_text: Optional[str] = None
 
+    @property
+    def visitor_profile(self):
+        """The profile set for the current run, or None. Read by
+        app.py::build_flow_plan to fall back to the pre-demo standing interest
+        when a live utterance states none — see decision.planner.resolve_emphasis."""
+        with self._lock:
+            return self._visitor_profile
+
     # ── Script ────────────────────────────────────────────────────────────────
 
     def load_script(self, steps: list[DemoStep]):
@@ -174,7 +183,8 @@ class DemoOrchestrator:
 
     # ── Controls ──────────────────────────────────────────────────────────────
 
-    def start(self, robot_ids: list = None, time_budget_sec: Optional[float] = None):
+    def start(self, robot_ids: list = None, time_budget_sec: Optional[float] = None,
+              visitor_profile=None):
         """
         Start the demo.  If *robot_ids* is provided (non-empty list), a script is
         built dynamically: first entry is the guide/host, the rest are project
@@ -184,6 +194,15 @@ class DemoOrchestrator:
         optional, and without it PLAN_REVISE can still act on an explicit visitor
         request but never on the clock — an inferred "we are running late" needs
         something to be late against.
+
+        *visitor_profile* is a decision.visitor_profile.VisitorProfile, set once
+        for the whole run from whatever was known before the tour started (a
+        stated interest, a presentation style). Immutable for the run: a
+        mid-tour interest is a fresh utterance, handled separately by
+        PLAN_REVISE, never by mutating this. Its style framing is appended to
+        every generated step's instruction in _send_step; its topics feed
+        block_importance as the standing baseline until a fresh utterance
+        supersedes them — see decision.planner.resolve_emphasis.
         """
         with self._lock:
             if self._state == DemoState.RUNNING:
@@ -206,6 +225,7 @@ class DemoOrchestrator:
             self._time_budget_sec    = time_budget_sec
             self._run_id             = f"run-{int(self._started_at)}"
             self._revisions          = []
+            self._visitor_profile    = visitor_profile
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -216,6 +236,10 @@ class DemoOrchestrator:
         logger.info(
             f"[Demo] Started."
             + (f" Budget: {time_budget_sec:.0f}s." if time_budget_sec else "")
+            + (f" Style: {visitor_profile.style}."
+               if visitor_profile and visitor_profile.style != "general" else "")
+            + (f" Interest: {visitor_profile.topics}."
+               if visitor_profile and visitor_profile.topics else "")
         )
 
     def stop(self):
@@ -863,14 +887,32 @@ class DemoOrchestrator:
     def _send_step(self, step: DemoStep):
         text = step.text
         if step.generate:
+            # Style framing, if a visitor profile set one — appended to the
+            # INSTRUCTION the robot generates from, not to already-spoken text,
+            # so it steers HOW the robot talks without becoming something it
+            # reads aloud. Applies uniformly to every robot's every step: style
+            # is a property of the visitor, not of any one robot.
+            with self._lock:
+                profile = self._visitor_profile
+            instruction = step.text + (profile.framing if profile else "")
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
-            generated = self._ws.generate_demo_step(step.robot_id, step.text)
-            if generated and generated != step.text:
+            generated = self._ws.generate_demo_step(step.robot_id, instruction)
+            # Compare against INSTRUCTION, not step.text: generate_demo_step's
+            # own fallback echoes back whatever it was GIVEN, which is now
+            # instruction (text + framing), not the bare step.text. Comparing
+            # against step.text here would treat every fallback as a success
+            # whenever framing was non-empty, and — worse — the visible fallback
+            # branch below would never fire, so on a real generation failure the
+            # robot would speak the raw framing directive text aloud instead of
+            # silently falling back to the plain instruction.
+            if generated and generated != instruction:
                 text = generated
                 logger.info(f"[Demo] Generated text ready for '{step.step_id}'")
             else:
                 logger.warning(f"[Demo] Generation returned fallback for '{step.step_id}' "
                                f"— speaking instruction as-is")
+                text = step.text   # the fallback speaks the PLAIN instruction,
+                                   # never the framing directive verbatim
         with self._lock:
             self._current_step_text = text
             self._step_started_at = time.time()

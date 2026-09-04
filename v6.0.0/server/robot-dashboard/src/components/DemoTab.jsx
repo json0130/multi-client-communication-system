@@ -179,6 +179,14 @@ function RobotSelectorModal({ onClose, onStart }) {
   // no budget the server never trims the script on its own, so leaving this
   // empty is how you opt out of clock-driven plan revision entirely.
   const [budgetMin,   setBudgetMin]   = useState('')
+  // What is known about the visitor before the tour starts. Both optional —
+  // blank interest / 'general' style behave exactly like no profile at all.
+  // Sets the STANDING baseline for the whole run: every robot's generated
+  // speech gets the style framing, and the stated interest weights which
+  // project the planner protects first if time runs short — until a visitor
+  // states something more specific mid-tour, which always takes precedence.
+  const [visitorInterest, setVisitorInterest] = useState('')
+  const [visitorStyle,    setVisitorStyle]    = useState('general')
 
   useEffect(() => {
     getRobots()
@@ -339,6 +347,33 @@ function RobotSelectorModal({ onClose, onStart }) {
               )}
             </div>
 
+            {/* ── Visitor profile ── */}
+            <div style={{ marginBottom: 24 }}>
+              <div className="demo-section-title" style={{ marginBottom: 6 }}>
+                Visitor
+                <span className="muted" style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.75rem' }}>
+                  optional — sets the baseline for every robot's presentation
+                </span>
+              </div>
+              <input
+                className="form-input"
+                placeholder={'stated interest, e.g. "emotion recognition" — leave blank if none'}
+                value={visitorInterest}
+                onChange={e => setVisitorInterest(e.target.value)}
+                style={{ marginBottom: 8, fontSize: '0.85rem' }}
+              />
+              <select
+                className="form-select"
+                value={visitorStyle}
+                onChange={e => setVisitorStyle(e.target.value)}
+              >
+                <option value="general">General audience (no framing change)</option>
+                <option value="technical">Technical — precise terminology, implementation detail</option>
+                <option value="business">Business — practical value, avoid jargon</option>
+                <option value="interactive">Interactive — hands-on, conversational</option>
+              </select>
+            </div>
+
             {/* ── Time budget ── */}
             <div style={{ marginBottom: 24 }}>
               <div className="demo-section-title" style={{ marginBottom: 6 }}>
@@ -372,6 +407,8 @@ function RobotSelectorModal({ onClose, onStart }) {
                 onClick={() => onStart(
                   selectedIds,
                   Number(budgetMin) > 0 ? Number(budgetMin) * 60 : null,
+                  visitorInterest,
+                  visitorStyle,
                 )}
               >
                 Start Demo →
@@ -860,9 +897,9 @@ export default function DemoTab() {
       {showSelector && (
         <RobotSelectorModal
           onClose={() => setShowSelector(false)}
-          onStart={(robotIds, timeBudgetSec) => {
+          onStart={(robotIds, timeBudgetSec, visitorInterest, visitorStyle) => {
             setShowSelector(false)
-            run(() => startDemo(robotIds, timeBudgetSec))
+            run(() => startDemo(robotIds, timeBudgetSec, visitorInterest, visitorStyle))
           }}
         />
       )}

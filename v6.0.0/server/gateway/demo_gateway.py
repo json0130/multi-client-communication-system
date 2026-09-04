@@ -26,6 +26,7 @@ timestamp and step say what was wrong with the timing.
 from flask import Blueprint, jsonify, request
 
 from decision.models import PlanOp
+from decision.visitor_profile import STYLE_FRAMING, VisitorProfile
 
 
 def _reason(data: dict) -> str:
@@ -55,11 +56,45 @@ def create_demo_gateway(orchestrator) -> Blueprint:
         if budget is not None and budget <= 0:
             return jsonify({"error": "time_budget_sec must be positive."}), 400
 
+        # What was known about the visitor BEFORE the tour starts. Both
+        # optional — an empty profile behaves exactly like no profile at all.
+        style = str(data.get("visitor_style") or "general").strip().lower()
+        if style not in STYLE_FRAMING:
+            return jsonify({
+                "error": f"visitor_style must be one of: {', '.join(STYLE_FRAMING)}",
+            }), 400
+        interest = str(data.get("visitor_interest") or "").strip()
+
+        topics = ()
+        if interest:
+            # Resolved ONCE here, not re-resolved every turn — see
+            # decision.visitor_profile's module docstring. Best-effort: an
+            # unresolvable interest or an unreachable graph still starts the
+            # demo, just without a standing topic baseline.
+            try:
+                from decision.kg_policy import KGRouter
+                from data.demo_kg_repo import all_topics
+                all_t = all_topics()
+                if all_t:
+                    tid = KGRouter([], [], all_t).resolve_topic(interest)
+                    if tid:
+                        topics = (tid,)
+            except Exception as e:
+                print(f"[demo_gateway] could not resolve visitor interest: {e}")
+
+        profile = VisitorProfile(interest_text=interest, style=style, topics=topics) \
+            if (interest or style != "general") else None
+
         orchestrator.start(
             robot_ids=robot_ids if robot_ids else None,
             time_budget_sec=budget,
+            visitor_profile=profile,
         )
-        return jsonify({"message": "Demo started.", **orchestrator.get_status()})
+        return jsonify({
+            "message": "Demo started.",
+            "visitor_profile": profile.as_dict() if profile else None,
+            **orchestrator.get_status(),
+        })
 
     @bp.route("/demo/stop", methods=["POST"])
     def stop():
