@@ -47,7 +47,7 @@ from typing import Callable, Optional
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from decision.flow import FlowGraph                              # noqa: E402
+from decision.flow import DEFAULT_QA_BUDGET_SEC, FlowGraph                              # noqa: E402
 from decision.kg import Evidence, RobotTopicEdge                 # noqa: E402
 from decision.kg_feedback import Segment                         # noqa: E402
 from decision.kg_policy import KGRouter                          # noqa: E402
@@ -96,6 +96,22 @@ FIXED_DURATIONS = {
 
 QA_FLOOR = 45.0
 
+# The lab's hand-set per-project priorities — importance layer 1, the value
+# a deployment configures when no visitor has said anything.
+#
+# The SPREAD matters, not just the values. With all three equal, the
+# planner's (importance, robot_id) sort falls through to the alphabet, and a
+# scenario whose expected answer is the alphabetically-first block passes
+# whether importance worked or was ignored entirely. Distinct defaults mean
+# robot_id is never consulted, so the block that gets cut is evidence about
+# importance and nothing else.
+#
+# chatbox_01 is deliberately LOWEST. A stated interest only ever raises the
+# robot that owns the topic, so if the interest target already ranked above
+# someone, the bump changes nothing about which block is cheapest to cut.
+# Starting it at the bottom is what makes S2's contrast possible at all.
+DEFAULTS = {CHATBOX: 0.3, NAVEL: 0.5, SILBOT: 0.7}
+
 
 def _edge(robot: str, topic: str, n: int = 8, target: float = 1.0) -> RobotTopicEdge:
     e = RobotTopicEdge(robot_id=robot, topic_id=topic)
@@ -121,6 +137,11 @@ class ExpectedPlan:
     max_qa_budget_sec: Optional[float] = None   # every surviving window at most this
     min_qa_budget_sec: Optional[float] = None   # ...and at least this
     compressed_blocks: Optional[frozenset] = None   # None = don't assert
+    compressed_count: Optional[int] = None      # when WHICH block is incidental
+    # Surviving set the same scenario must produce WITHOUT the stated
+    # interest. Asserting the two differ is what proves the interest changed
+    # the outcome, rather than the outcome merely happening to look right.
+    differs_without_interest: Optional[tuple] = None
 
 
 @dataclass(frozen=True)
@@ -141,12 +162,14 @@ class Scenario:
 
 # ── Scenario runners ──────────────────────────────────────────────────────────
 
-def _plan(budget_sec: float, visitor_topics=None) -> dict:
+def _plan(budget_sec: float, visitor_topics=None, projects=None,
+          defaults=None) -> dict:
     """The real planner over the real script, with fixed durations."""
-    graph = FlowGraph.from_script(build_script(GUIDE, PROJECTS))
+    projects = projects or PROJECTS
+    graph = FlowGraph.from_script(build_script(GUIDE, projects))
     importance = block_importance(
-        graph, defaults={}, visitor_topics=visitor_topics,
-        kg_edges=EDGES, kg_links=[],
+        graph, defaults=DEFAULTS if defaults is None else defaults,
+        visitor_topics=visitor_topics, kg_edges=EDGES, kg_links=[],
     )
     result = plan_for_budget(graph, budget_sec, durations=FIXED_DURATIONS,
                              importance=importance)
@@ -154,9 +177,14 @@ def _plan(budget_sec: float, visitor_topics=None) -> dict:
     return result
 
 
-def _outcome(plan: dict) -> dict:
-    """Reduce a plan to what a visitor would experience."""
+def _outcome(plan: dict, projects=None) -> dict:
+    """Reduce a plan to what a visitor would experience.
+
+    `projects` must be the robot set this plan was built for — reading the
+    module-level PROJECTS instead reports blocks that were never in the tour
+    whenever a scenario uses a smaller fleet."""
     from decision.models import PlanOpKind
+    projects = projects or PROJECTS
     skipped, compressed, qa_budgets = set(), set(), []
     dropped_all = False
     for op in plan["ops"]:
@@ -169,7 +197,7 @@ def _outcome(plan: dict) -> dict:
         elif op.kind is PlanOpKind.DROP_REMAINING:
             dropped_all = True
     surviving = () if dropped_all else tuple(
-        r for r in PROJECTS if r not in skipped)
+        r for r in projects if r not in skipped)
     return {
         "surviving_blocks": surviving,
         "compressed_blocks": frozenset(compressed),
@@ -205,20 +233,23 @@ def _route(utterance: str, absent=(), remaining_blocks=None) -> dict:
 
 SCENARIOS = [
     Scenario(
-        id="S1-rushed-general",
+        id="S1-rung-order",
         description=(
             "A general-audience group, no stated interest, 5m30s for a tour "
             "that would take 7m47s at full length. Every robot present."
         ),
         rationale=(
-            "467s of tour into a 330s budget. The ladder's first rung tightens "
-            "Q&A, and Q&A alone can absorb it: three windows dropping from 90s "
-            "to the 45s floor recovers 135s, landing at 332s. That is 2s over, "
-            "so rung 2 must also compress ONE block (the least important; all "
-            "are equal here so the tie breaks alphabetically to chatbox_01), "
-            "reaching 313s. No robot is skipped. This is the case the ladder's "
-            "ordering exists for: a visitor notices a missing robot and does "
-            "not notice a shorter question round, so all three still present."
+            "467s of tour into a 330s budget. This scenario is about the "
+            "ladder's ORDER, not about importance. Rung 1 tightens Q&A, and "
+            "Q&A alone nearly absorbs it: three windows dropping from 90s to "
+            "the 45s floor recovers 135s, landing at 332s — 2s over. So rung 2 "
+            "must compress exactly ONE block to reach 313s, and rung 3 is "
+            "never entered: no robot is skipped. That is the property worth "
+            "pinning, because it is the reason the rungs are in this order at "
+            "all — a visitor notices a missing robot and does not notice a "
+            "shorter question round. WHICH block gets compressed is incidental "
+            "here and deliberately not asserted; S2 is the scenario that tests "
+            "importance, and asserting it here too would just duplicate it."
         ),
         run=lambda: _outcome(_plan(330)),
         expected=ExpectedPlan(
@@ -226,36 +257,51 @@ SCENARIOS = [
             feasible=True,
             max_qa_budget_sec=QA_FLOOR,
             min_qa_budget_sec=QA_FLOOR,
-            compressed_blocks=frozenset({CHATBOX}),
+            compressed_count=1,
         ),
     ),
 
     Scenario(
         id="S2-stated-interest-protects",
         description=(
-            "Same 4m10s budget, tight enough that one project must be cut. "
-            "Visitor stated an interest in retrieval-augmented generation, "
-            "which chatbox_01 owns."
+            "A 4m10s budget, tight enough that one project must be cut "
+            "outright. Visitor stated an interest in retrieval-augmented "
+            "generation, which chatbox_01 owns — and chatbox_01 is the block "
+            "the lab's own priorities rank LOWEST."
         ),
         rationale=(
-            "250s budget. Q&A to the floor gives 332s, compressing all three "
+            "250s budget. Q&A to the floor gives 332s; compressing all three "
             "gives 275s, still over — so rung 3 must skip exactly one block, "
             "and 199s afterwards is comfortably inside. WHICH block is the "
-            "whole point: block_importance blends a 0.5 default with the "
-            "visitor's topic coverage (0.35/0.65), so chatbox_01 rises to "
-            "~0.73 while navel_01 and silbot_01 stay at 0.5. Least-important "
-            "goes first and the 0.5 tie breaks alphabetically, so navel_01 is "
-            "cut and the project the visitor actually asked about survives. "
-            "Contrast with S1's alphabetical tie-break: the stated interest is "
-            "the ONLY difference, so a run that cuts chatbox_01 here means "
-            "importance never reached the planner."
+            "entire point.\n"
+            "  Hand-set defaults are chatbox 0.3, navel 0.5, silbot 0.7. With "
+            "no stated interest the cheapest block to cut is chatbox_01, and "
+            "the tour keeps navel and silbot.\n"
+            "  A stated RAG interest resolves to chatbox_01's topic, whose "
+            "graph coverage is 0.848; block_importance blends 0.35*0.3 + "
+            "0.65*0.848 = 0.656. navel and silbot have no coverage for that "
+            "topic so they sit at 0.35*default + 0.65*0.5, giving 0.500 and "
+            "0.570. The ordering INVERTS: navel_01 is now cheapest and gets "
+            "cut, and the project the visitor asked about survives.\n"
+            "  Two properties make this a real test rather than a coincidence. "
+            "All three importances are distinct (0.656/0.500/0.570), so the "
+            "planner's (importance, robot_id) sort never reaches the "
+            "tie-break and the alphabet plays no part. And the alphabet would "
+            "give a DIFFERENT answer — chatbox_01 is alphabetically first, so "
+            "an implementation that ignored importance entirely would cut it "
+            "and produce (navel, silbot), which is exactly the surviving set "
+            "asserted as the no-interest control below."
         ),
-        run=lambda: _outcome(_plan(250, visitor_topics=[RAG])),
+        run=lambda: {
+            **_outcome(_plan(250, visitor_topics=[RAG])),
+            "without_interest": _outcome(_plan(250))["surviving_blocks"],
+        },
         expected=ExpectedPlan(
             surviving_blocks=(CHATBOX, SILBOT),
             feasible=True,
             max_qa_budget_sec=QA_FLOOR,
             compressed_blocks=frozenset({CHATBOX, NAVEL, SILBOT}),
+            differs_without_interest=(NAVEL, SILBOT),
         ),
     ),
 
@@ -331,8 +377,145 @@ def score(scenario: Scenario, actual: dict) -> list:
             out.append(("compressed_blocks",
                         actual["compressed_blocks"] == e.compressed_blocks,
                         f"{set(actual['compressed_blocks'])} vs {set(e.compressed_blocks)}"))
+        if e.compressed_count is not None:
+            out.append(("compressed_count",
+                        len(actual["compressed_blocks"]) == e.compressed_count,
+                        f"{len(actual['compressed_blocks'])} vs {e.compressed_count}"))
+        if e.differs_without_interest is not None:
+            got = actual.get("without_interest")
+            out.append(("no-interest control",
+                        got == e.differs_without_interest,
+                        f"{got} vs {e.differs_without_interest}"))
+            # The discrimination itself: if the stated interest changed
+            # nothing, importance never reached the planner.
+            out.append(("interest changed the cut",
+                        got != actual["surviving_blocks"],
+                        f"with={actual['surviving_blocks']} without={got}"))
 
     elif isinstance(e, ExpectedRoute):
+        out.append(("answering_robot",
+                    actual["answering_robot"] == e.answering_robot,
+                    f"{actual['answering_robot']} vs {e.answering_robot}"))
+        out.append(("deferred_to", actual["deferred_to"] == e.deferred_to,
+                    f"{actual['deferred_to']} vs {e.deferred_to}"))
+        out.append(("observations_written",
+                    actual["observations_written"] == e.observations_written,
+                    f"{actual['observations_written']} vs {e.observations_written}"))
+    return out
+
+
+# ── Generated scenarios ───────────────────────────────────────────────────────
+# Inputs generated automatically; expected outputs derived from the documented
+# rules by tools/eval_oracle.py, never read off what the planner produced.
+#
+# Importance here comes from hand-set defaults ALONE — no visitor interest.
+# That keeps the oracle's importance trivially checkable (importance ==
+# defaults) rather than requiring it to reimplement competence propagation,
+# which has its own tests in test_kg_infer.py and would be a different thing
+# to measure. The visitor-interest path is covered by hand-derived S2, where
+# the blend is worked out explicitly.
+
+ROBOT_SETS = [
+    [CHATBOX, NAVEL],
+    [CHATBOX, NAVEL, SILBOT],
+]
+
+# Budgets spanning every rung: comfortably fits, Q&A-only, Q&A+compress,
+# one skip, several skips, and impossible.
+#
+# 40s is below the 53s opening-plus-closing floor, so it is the only budget
+# here that reaches rung 4 AND comes back infeasible — dropping every project
+# still leaves a tour that cannot fit. Without it the grid never exercised
+# the "the budget cannot be met" branch at all, which
+# test_the_generated_grid_is_actually_broad caught.
+BUDGET_GRID = [520, 400, 340, 300, 270, 240, 190, 120, 40]
+
+# Distinct orderings, so the planner's (importance, robot_id) sort never
+# falls through to the alphabet in a generated case either.
+DEFAULT_PROFILES = {
+    "ascending":  {CHATBOX: 0.3, NAVEL: 0.5, SILBOT: 0.7},
+    "descending": {CHATBOX: 0.8, NAVEL: 0.55, SILBOT: 0.2},
+    "middle-out": {CHATBOX: 0.45, NAVEL: 0.9, SILBOT: 0.6},
+}
+
+TOPIC_OWNER = {RAG: CHATBOX, NVI: NAVEL, NAV: SILBOT}
+TOPIC_UTTERANCE = {
+    RAG: "how does retrieval augmented generation work",
+    NVI: "tell me about non verbal interaction",
+    NAV: "how does social robot navigation work",
+}
+
+
+def _generated_plan_cases():
+    from tools.eval_oracle import block_facts_from_script, derive_plan
+
+    for projects in ROBOT_SETS:
+        steps = build_script(GUIDE, projects)
+        for profile_name, profile in DEFAULT_PROFILES.items():
+            defaults = {r: profile[r] for r in projects}
+            fixed, blocks = block_facts_from_script(steps, FIXED_DURATIONS, defaults)
+            for budget in BUDGET_GRID:
+                expected = derive_plan(budget, fixed, blocks)
+                yield {
+                    "id": f"G-plan-{len(projects)}r-{profile_name}-{budget}s",
+                    "kind": "plan",
+                    "projects": tuple(projects),
+                    "defaults": defaults,
+                    "budget": budget,
+                    "expected": expected,
+                }
+
+
+def _generated_route_cases():
+    from tools.eval_oracle import derive_route
+
+    for topic, owner in TOPIC_OWNER.items():
+        for label, absent, remaining in (
+            ("present", (), tuple(PROJECTS)),
+            ("absent-block-ahead", (owner,), tuple(PROJECTS)),
+            ("absent-block-cut", (owner,),
+             tuple(r for r in PROJECTS if r != owner)),
+        ):
+            yield {
+                "id": f"G-route-{owner}-{label}",
+                "kind": "route",
+                "utterance": TOPIC_UTTERANCE[topic],
+                "absent": absent,
+                "remaining": remaining,
+                "expected": derive_route(owner, absent, remaining, GUIDE),
+            }
+
+
+def generated_cases() -> list:
+    return list(_generated_plan_cases()) + list(_generated_route_cases())
+
+
+def run_generated(case: dict) -> list:
+    """[(assertion, passed, detail)] for one generated case."""
+    e = case["expected"]
+    out = []
+
+    if case["kind"] == "plan":
+        actual = _outcome(_plan(case["budget"], projects=list(case["projects"]),
+                                defaults=case["defaults"]),
+                          projects=list(case["projects"]))
+        out.append(("surviving_blocks",
+                    actual["surviving_blocks"] == e.surviving_blocks,
+                    f"{actual['surviving_blocks']} vs {e.surviving_blocks}"))
+        out.append(("compressed_blocks",
+                    actual["compressed_blocks"] == e.compressed_blocks,
+                    f"{set(actual['compressed_blocks'])} vs {set(e.compressed_blocks)}"))
+        out.append(("feasible", actual["feasible"] == e.feasible,
+                    f"{actual['feasible']} vs {e.feasible}"))
+        # The planner emits a rounded integer per window; no ops at all means
+        # Q&A was never tightened and stays at the default.
+        got_qa = (actual["qa_budgets"][0] if actual["qa_budgets"]
+                  else DEFAULT_QA_BUDGET_SEC)
+        out.append(("qa_budget", got_qa == round(e.qa_budget_sec),
+                    f"{got_qa} vs {round(e.qa_budget_sec)}"))
+    else:
+        actual = _route(case["utterance"], absent=case["absent"],
+                        remaining_blocks=case["remaining"])
         out.append(("answering_robot",
                     actual["answering_robot"] == e.answering_robot,
                     f"{actual['answering_robot']} vs {e.answering_robot}"))
@@ -349,11 +532,13 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--verbose", action="store_true",
                     help="also print the rationale and the raw outcome")
+    ap.add_argument("--generated", action="store_true",
+                    help="also run the rule-derived generated scenarios")
     args = ap.parse_args()
 
     total = passed = 0
     print("=" * 78)
-    print("  Objective evaluation scenarios — expectations pre-registered")
+    print("  Hand-derived scenarios — expectations reasoned out, not read off")
     print("=" * 78)
     for sc in SCENARIOS:
         actual = sc.run()
@@ -367,11 +552,40 @@ def main() -> int:
             print(f"      rationale: {sc.rationale}")
             print(f"      actual:    {actual}")
         for name, p, detail in results:
-            print(f"      {'ok ' if p else 'XX '} {name:<22} {detail}")
+            print(f"      {'ok ' if p else 'XX '} {name:<24} {detail}")
 
     print("\n" + "=" * 78)
-    print(f"  {passed}/{total} assertions passed across {len(SCENARIOS)} scenarios")
+    print(f"  {passed}/{total} assertions passed across {len(SCENARIOS)} "
+          f"hand-derived scenarios")
     print("=" * 78)
+
+    if args.generated:
+        cases = generated_cases()
+        g_total = g_passed = 0
+        failures = []
+        for case in cases:
+            results = run_generated(case)
+            g_total += len(results)
+            g_passed += sum(1 for _, p, _ in results if p)
+            bad = [f"{n}: {d}" for n, p, d in results if not p]
+            if bad:
+                failures.append((case["id"], bad))
+        print()
+        print("=" * 78)
+        print("  Generated scenarios — inputs generated, answers derived by rule")
+        print("=" * 78)
+        print(f"  {len(cases)} cases "
+              f"({sum(1 for c in cases if c['kind'] == 'plan')} plan, "
+              f"{sum(1 for c in cases if c['kind'] == 'route')} routing)")
+        for cid, bad in failures:
+            print(f"  FAIL {cid}")
+            for b in bad:
+                print(f"        {b}")
+        print(f"  {g_passed}/{g_total} assertions passed")
+        print("=" * 78)
+        total += g_total
+        passed += g_passed
+
     return 0 if passed == total else 1
 
 
