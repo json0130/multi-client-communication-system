@@ -216,8 +216,20 @@ def _step_durations() -> dict:
     durations = {}
     try:
         from data.demo_duration_repo import step_stats
-        durations = {r["step_id"]: float(r["mean_sec"])
-                    for r in step_stats() if r.get("mean_sec") is not None}
+        from decision.flow import MIN_RUNS_TO_TRUST
+        rows = step_stats()
+        # A mean from too few runs is dropped rather than down-weighted, so
+        # the planner falls back to DEFAULT_STEP_SEC and measured_coverage
+        # keeps meaning "backed by data worth trusting". See
+        # decision/flow.py::MIN_RUNS_TO_TRUST for why n=1 is the real hazard.
+        durations = {r["step_id"]: float(r["mean_sec"]) for r in rows
+                     if r.get("mean_sec") is not None
+                     and int(r.get("runs") or 0) >= MIN_RUNS_TO_TRUST}
+        untrusted = sum(1 for r in rows if r.get("mean_sec") is not None
+                        and int(r.get("runs") or 0) < MIN_RUNS_TO_TRUST)
+        if untrusted:
+            print(f"[App] {len(durations)} step timing(s) trusted, {untrusted} below "
+                  f"{MIN_RUNS_TO_TRUST} runs — planning those from defaults")
     except Exception as e:
         print(f"[App] step duration stats unavailable, planning from defaults: {e}")
     _duration_cache.update(at=_time.time(), durations=durations)

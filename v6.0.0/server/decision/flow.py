@@ -49,6 +49,36 @@ from decision.models import PlanOp, PlanOpKind, StepRole
 # worse than one that trimmed a step it did not need to.
 DEFAULT_STEP_SEC = 12.0
 
+MIN_RUNS_TO_TRUST = 3
+"""How many timings a step needs before its mean is used instead of
+DEFAULT_STEP_SEC.
+
+The point is NOT variance reduction. Measured against 49 real step rows, the
+median relative standard error of the trusted set barely moves between a
+threshold of 2 and 6 (~12% throughout) — scripted speech genuinely varies
+that much, and no amount of averaging makes a 19s talk predictable to the
+second.
+
+The point is that at n=1 there is no spread to measure at all. A single run
+that stalled on an ACK, or caught a robot mid-reconnect, IS the estimate, and
+nothing in the data distinguishes it from a clean one. 23 of those 49 rows
+are n=1. Feeding them to the planner means a step's whole contribution to the
+budget can hinge on one bad recording, and — because the planner's rungs are
+threshold-based — that is exactly the input that flips "compress" into "skip
+a project" for reasons no one can see afterwards. tools/plan_replay_harness.py
+was built to demonstrate that mechanism; this is the mitigation.
+
+3 rather than 2 because it matches decision.kg.CONFIDENCE_HALFLIFE, which
+answers the same question ("when is accumulated evidence worth believing?")
+for the competence graph. Two systems, one answer, is worth more than either
+being individually tuned.
+
+Steps below the threshold are omitted from the durations map entirely rather
+than down-weighted, so FlowGraph.measured_coverage() keeps meaning exactly
+what it says: the fraction of the estimate backed by data worth trusting.
+Coverage DROPS when this lands — that is the honest number, not a regression.
+"""
+
 DEFAULT_QA_BUDGET_SEC = 90.0
 """What a Q&A window is assumed to take when no budget is stated. Not a
 prediction — a stated default, so a caller that forgets to allocate gets a
