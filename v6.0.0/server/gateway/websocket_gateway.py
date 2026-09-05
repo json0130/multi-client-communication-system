@@ -210,6 +210,13 @@ class WebSocketGateway:
         from decision.kg_feedback import Segment
         self._segment = Segment()
 
+        # Where each robot is, and who is close enough to take a question.
+        # Owned here rather than passed in because it is live runtime state a
+        # ROS2 subscriber will write into continuously — see
+        # decision/presence.py for why it is pose-shaped and not persisted.
+        from decision.presence import PresenceTracker
+        self._presence = PresenceTracker()
+
         # Per-decision scratch space. Thread-local because every robot's
         # connection dispatches messages on its own reader thread, so two
         # visitors talking to two robots at once would otherwise interleave
@@ -236,6 +243,11 @@ class WebSocketGateway:
     @property
     def tracker(self) -> DemoRunTracker:
         return self._tracker
+
+    @property
+    def presence(self):
+        """Robot locations and derived in_conversation. See decision/presence.py."""
+        return self._presence
 
     def session_context(self) -> dict:
         """
@@ -325,6 +337,10 @@ class WebSocketGateway:
         # them, so the robot they should speak as travels out of band.
         self._scratch.decider_id = getattr(decider, "client_id", None)
         self._scratch.wrap_up_text = None
+        # Cleared per decision, not just set on the defer path: _scratch is
+        # thread-local and a Flask worker handles many turns, so a defer on
+        # one turn would otherwise still be readable on the next one.
+        self._scratch.deferred_to = None
         result = self._policy.decide(point, obs)
 
         # QA_ROUTE only: let the competence graph override the baseline, which
@@ -365,7 +381,22 @@ class WebSocketGateway:
                 return None
             peers = [p["client_id"] for p in obs.connected_peers
                      if p.get("client_id") and p["client_id"] != obs.guide_robot_id]
-            decision = router.decide(obs.user_utterance, peers)
+            # Blocks still ahead of the play head — what a defer is allowed to
+            # promise. See KGRouter._handle_absent.
+            remaining_blocks = {s.block_robot_id for s in obs.remaining_steps
+                                if s.block_robot_id}
+            # Who is too far from the group to take a question. The group's
+            # position is the presenting robot's — see PresenceTracker.
+            # Empty with no poses and no overrides, which is the fail-open
+            # default: presence never removes a candidate until something
+            # actually says where the robots are.
+            absent = self._presence.absent(peers, obs.presenting_robot_id)
+            decision = router.decide(
+                obs.user_utterance, peers,
+                remaining_block_ids=remaining_blocks,
+                guide_robot_id=obs.guide_robot_id,
+                absent_robot_ids=absent,
+            )
             if decision is None:
                 return None
             from decision.models import Action
@@ -374,8 +405,33 @@ class WebSocketGateway:
                 f"-> {decision.robot_id} ({decision.reason}, {decision.score})")
             # The mechanism records WHICH rule fired, so an exploration pick is
             # distinguishable from a confident one in the correction-rate view.
-            mechanism = ("kg_explore" if decision.reason.startswith("explore")
-                         else "kg_argmax")
+            # The two presence outcomes are named separately for the same
+            # reason: "the graph picked this robot" and "the graph's pick had
+            # walked away" are different events and must not be averaged.
+            if decision.is_deferred:
+                mechanism = "kg_defer"
+            elif decision.reason.startswith("guide answers"):
+                mechanism = "kg_guide_answers"
+            elif decision.reason.startswith("explore"):
+                mechanism = "kg_explore"
+            else:
+                mechanism = "kg_argmax"
+
+            if decision.is_deferred:
+                # NOTHING is recorded. No robot answered, and the absent one
+                # was never judged — writing an observation here would credit
+                # or blame an edge for a turn nobody took. Same discipline as
+                # the unresolved-topic path in Segment.note_routed, and the
+                # silence rule it exists to protect (decision/kg_feedback.py).
+                #
+                # Which robot is being deferred TO travels out of band, the
+                # same way decider_id and wrap_up_text do: Action carries a
+                # robot_id for who acts, and here that is the guide, not the
+                # robot the visitor is being promised.
+                self._scratch.deferred_to = decision.deferred_to
+                return PolicyResult(Action.guide_interject(obs.guide_robot_id),
+                                    mechanism)
+
             # Only a question that actually resolved to a topic is recorded, so
             # the segment can never credit an edge for a turn it did not handle.
             self._segment.note_routed(decision.robot_id, decision.topic_id)
@@ -603,11 +659,33 @@ class WebSocketGateway:
         is None whenever no reroute happened — the common case, and every
         case where the graph has not learned enough yet to be confident, or
         names a robot that is not actually connected.
+
+        A DEFER (the best robot for this topic is not in the conversation and
+        its station is still ahead) returns target_instance=None: nobody
+        answers this turn, and the caller speaks `handoff_text` from the guide
+        instead of generating a reply. See decision/kg_policy.py's
+        ABSENT_ROBOT_POLICY.
         """
         receiver_id = getattr(instance, "client_id", None)
         result = self._decide(DecisionPoint.QA_ROUTE, instance, message)
-        target_id = result.action.robot_id if result is not None else None
-        if (result is None or result.action.kind is not ActionKind.ROUTE_TO
+        if result is None:
+            return instance, receiver_id, None
+
+        # Deferred: the guide takes the floor to say the topic is coming up,
+        # and no robot generates an answer at all.
+        if result.action.kind is ActionKind.GUIDE_INTERJECT:
+            deferred_to = getattr(self._scratch, "deferred_to", None)
+            target_name = deferred_to or "that robot"
+            target_inst = self._registry.get(deferred_to) if deferred_to else None
+            if target_inst is not None:
+                target_name = getattr(target_inst, "robot_name", None) or deferred_to
+            return None, result.action.robot_id or receiver_id, (
+                f"That's {target_name}'s area — we'll cover it properly when we "
+                f"get to their station."
+            )
+
+        target_id = result.action.robot_id
+        if (result.action.kind is not ActionKind.ROUTE_TO
                 or not target_id or target_id == receiver_id):
             return instance, receiver_id, None
 
@@ -781,6 +859,14 @@ class WebSocketGateway:
                             "text": handoff,
                             "emotion_tag": "DEFAULT",
                         })
+
+                    # Deferred: the guide has just promised the topic will be
+                    # covered at that robot's station, so nobody answers now.
+                    # Returning before process_chat_stream is the point —
+                    # generating a reply here would be the improvised answer
+                    # deferring exists to avoid.
+                    if target_instance is None:
+                        return
 
                     def _on_sentence(clean_text, emotion_tag):
                         if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON

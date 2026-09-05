@@ -168,6 +168,7 @@ def route(
     topic_id: str,
     robot_ids: Iterable[str],
     explore: bool = True,
+    absent: Optional[Iterable[str]] = None,
 ) -> tuple:
     """
     Pick a robot for a question about `topic_id`. Returns (robot_id, reason).
@@ -178,6 +179,15 @@ def route(
     below either. A candidate list of fewer than two after filtering behaves
     exactly like any other case with nothing to choose between: "no robots"
     or a single-candidate argmax.
+
+    `absent` — robots not currently in the conversation, from
+    decision.presence — is filtered at the SAME point and for the same
+    reason. A robot that has walked away cannot answer no matter how well
+    the graph rates it, so letting it rank and then discarding the winner
+    would mean the runner-up gets picked by an exploration rule written for
+    a completely different situation. Absence is a fact about the room, not
+    a competence claim, so it is never written back to the graph — see
+    decision/presence.py.
 
     WHY NOT ARGMAX
     Routing to the best-scoring robot every time starves the graph. Whichever
@@ -210,7 +220,7 @@ def route(
     """
     edges = list(edges)
     links = list(links)
-    excluded = _ineligible(edges, topic_id)
+    excluded = _ineligible(edges, topic_id) | set(absent or ())
     robot_ids = [r for r in robot_ids if r not in excluded]
     ranked = rank_robots(edges, links, topic_id, robot_ids)
     if not ranked:

@@ -95,15 +95,47 @@ def _words(text: str) -> set:
     return {_stem(w) for w in raw}
 
 
+ABSENT_ROBOT_POLICY = "defer"
+"""What to do when the robot the graph would have picked is not in the
+conversation. A named flag rather than a hardcoded branch because it is a
+behavioural choice worth measuring, not an implementation detail:
+
+  "defer"         the guide says the topic will be covered when the group
+                  reaches that robot's station. Preserves the routing
+                  decision — the right robot still answers, just later —
+                  and costs the visitor a wait.
+  "guide_answers" the guide answers now, from what it knows. Costs the
+                  visitor the specialist's answer, saves them the wait.
+
+Defaults to "defer" because the specialist's answer at their own station is
+the better answer, and the tour is going there anyway. It is only the wrong
+call when the group will NEVER reach that station — which is why deferring
+checks the remaining plan first and falls back to guide_answers when the
+block has already been cut. See KGRouter.decide.
+"""
+
+VALID_ABSENT_POLICIES = ("defer", "guide_answers")
+
+
 @dataclass(frozen=True)
 class RoutingDecision:
     """What the graph decided, and enough to explain it in the log."""
 
-    robot_id: str
+    robot_id: Optional[str]   # who answers; None when the question was deferred
     topic_id: str
     topic_label: str
     reason: str          # from kg_infer.route — argmax, or which explore rule
     score: float
+    # Set only when reason is a defer: the absent robot whose own station
+    # will cover this topic later. The caller uses it to name that robot in
+    # what the guide says, and to know that NOTHING was routed — a deferred
+    # question is not an observation about anybody. See decision/kg_feedback.py's
+    # Segment silence rule.
+    deferred_to: Optional[str] = None
+
+    @property
+    def is_deferred(self) -> bool:
+        return self.deferred_to is not None
 
 
 class KGRouter:
@@ -123,12 +155,21 @@ class KGRouter:
         links: Iterable[tuple],
         topics: Iterable[dict],
         explore: bool = True,
+        absent_robot_ids: Optional[Iterable[str]] = None,
+        absent_policy: str = ABSENT_ROBOT_POLICY,
     ):
         self._edges = list(edges)
         self._links = list(links)
         self._topics = {t["id"]: t.get("label", t["id"]) for t in topics}
         self._words = {tid: _words(label) for tid, label in self._topics.items()}
         self._explore = explore
+        self._absent = set(absent_robot_ids or ())
+        if absent_policy not in VALID_ABSENT_POLICIES:
+            raise ValueError(
+                f"absent_policy must be one of {VALID_ABSENT_POLICIES}, "
+                f"got {absent_policy!r}"
+            )
+        self._absent_policy = absent_policy
 
     # ── Topic resolution ──────────────────────────────────────────────────────
 
@@ -153,8 +194,29 @@ class KGRouter:
 
     # ── Routing ───────────────────────────────────────────────────────────────
 
-    def decide(self, utterance: str, robot_ids: Iterable[str]) -> Optional[RoutingDecision]:
-        """Who should answer? None means the graph has no opinion."""
+    def decide(
+        self,
+        utterance: str,
+        robot_ids: Iterable[str],
+        remaining_block_ids: Optional[Iterable[str]] = None,
+        guide_robot_id: Optional[str] = None,
+        absent_robot_ids: Optional[Iterable[str]] = None,
+    ) -> Optional[RoutingDecision]:
+        """
+        Who should answer? None means the graph has no opinion.
+
+        `absent_robot_ids` overrides the constructor's set for this call.
+        It has to be per-call rather than fixed at construction: the router
+        is cached with a TTL and reused across many turns, while who is in
+        the conversation changes as the group moves between stations. A set
+        frozen at construction would be stale by the second question.
+
+        `remaining_block_ids` and `guide_robot_id` are only consulted when
+        the robot the graph would have picked is absent — see
+        ABSENT_ROBOT_POLICY. Both optional, and absent handling degrades to
+        "no opinion" without them rather than promising something it cannot
+        check.
+        """
         robot_ids = list(robot_ids)
         if len(robot_ids) < 2:
             return None          # nothing to choose between
@@ -162,11 +224,88 @@ class KGRouter:
         if topic_id is None:
             return None
 
+        absent = (set(absent_robot_ids) if absent_robot_ids is not None
+                  else self._absent)
+
         picked, reason = route(self._edges, self._links, topic_id,
-                               robot_ids, explore=self._explore)
+                               robot_ids, explore=self._explore,
+                               absent=absent)
+
+        # Who WOULD have answered if everyone were present. Computed only to
+        # detect the absent-best case: if presence changed the answer, that
+        # is a different situation from ordinary routing and gets its own
+        # policy rather than silently handing the question to a runner-up
+        # the visitor never asked about.
+        if absent:
+            picked_ignoring_absence, _ = route(
+                self._edges, self._links, topic_id, robot_ids,
+                explore=self._explore,
+            )
+            if (picked_ignoring_absence is not None
+                    and picked_ignoring_absence in absent):
+                return self._handle_absent(
+                    topic_id, picked_ignoring_absence,
+                    remaining_block_ids, guide_robot_id,
+                )
+
         if picked is None:
             return None
 
+        return self._decision(topic_id, picked, reason, robot_ids)
+
+    def _handle_absent(
+        self,
+        topic_id: str,
+        absent_pick: str,
+        remaining_block_ids: Optional[Iterable[str]],
+        guide_robot_id: Optional[str],
+    ) -> Optional[RoutingDecision]:
+        """
+        The best robot for this topic is not in the conversation.
+
+        Deferring promises the visitor that the topic gets covered at that
+        robot's station, so it is only honest while that station is still on
+        the itinerary. PLAN_REVISE can have cut the block already — under
+        time pressure that is exactly when it would have — and a promise
+        about a station the group will never reach is worse than simply
+        answering now. So a defer that cannot be kept becomes a
+        guide_answers, and says so in the reason.
+        """
+        label = self._topics.get(topic_id, topic_id)
+
+        if self._absent_policy == "defer":
+            still_coming = (remaining_block_ids is None
+                            or absent_pick in set(remaining_block_ids))
+            if still_coming:
+                return RoutingDecision(
+                    robot_id=None, topic_id=topic_id, topic_label=label,
+                    reason=f"defer: {absent_pick} absent, covered at their station",
+                    score=0.0, deferred_to=absent_pick,
+                )
+            # Fall through to guide_answers — the block is gone, so there is
+            # no station left to defer to.
+            if guide_robot_id:
+                return RoutingDecision(
+                    robot_id=guide_robot_id, topic_id=topic_id, topic_label=label,
+                    reason=f"guide answers: {absent_pick} absent and its block "
+                           f"was already cut, nothing left to defer to",
+                    score=0.0,
+                )
+
+        if self._absent_policy == "guide_answers" and guide_robot_id:
+            return RoutingDecision(
+                robot_id=guide_robot_id, topic_id=topic_id, topic_label=label,
+                reason=f"guide answers: {absent_pick} absent",
+                score=0.0,
+            )
+
+        # No guide to fall back on. "No opinion" hands the turn to whoever
+        # received it, which is the same degradation every other unresolvable
+        # path in this module takes.
+        return None
+
+    def _decision(self, topic_id: str, picked: str, reason: str,
+                  robot_ids: list) -> RoutingDecision:
         from decision.kg_infer import rank_robots
         ranked = dict(rank_robots(self._edges, self._links, topic_id, robot_ids))
         return RoutingDecision(

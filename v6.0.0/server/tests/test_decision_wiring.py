@@ -728,6 +728,59 @@ class TestOutcomeEmission:
         gw.on_qa_window_close()
         assert observed == []
 
+    def test_a_deferred_question_credits_nothing(self, sink):
+        """End-to-end version of the silence rule for presence: the whole
+        gateway path, not just Segment. A defer means nobody answered and the
+        absent robot was never judged — crediting either would inflate n_obs
+        from an event that did not happen."""
+        from decision.kg import Evidence, RobotTopicEdge
+        from decision.kg_policy import KGRouter
+
+        edge = RobotTopicEdge(robot_id=B, topic_id="topic:rag")
+        for _ in range(8):
+            edge = edge.update(1.0, Evidence.SUPERVISOR)
+        router = KGRouter([edge], [], [
+            {"id": "topic:rag", "label": "retrieval augmented generation"},
+        ], explore=False)
+
+        observed = []
+        gw, registry = self._wire(sink, router, observed)
+        # B is the clear best for this topic and has walked away.
+        gw.presence.set_in_conversation(B, False, source="test")
+
+        gw.on_qa_window_open()
+        result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(A),
+                            "how does retrieval augmented generation work")
+        gw.on_qa_window_close()
+
+        assert result.mechanism == "kg_defer"
+        assert observed == []
+
+    def test_a_deferred_decision_is_still_logged(self, sink):
+        # Writing no OBSERVATION is not the same as writing no DECISION. The
+        # decision log is how "how often did presence change the answer"
+        # stays measurable.
+        from decision.kg import Evidence, RobotTopicEdge
+        from decision.kg_policy import KGRouter
+
+        edge = RobotTopicEdge(robot_id=B, topic_id="topic:rag")
+        for _ in range(8):
+            edge = edge.update(1.0, Evidence.SUPERVISOR)
+        router = KGRouter([edge], [], [
+            {"id": "topic:rag", "label": "retrieval augmented generation"},
+        ], explore=False)
+
+        observed = []
+        gw, registry = self._wire(sink, router, observed)
+        gw.presence.set_in_conversation(B, False, source="test")
+        gw.on_qa_window_open()
+        gw._decide(DecisionPoint.QA_ROUTE, registry.get(A),
+                   "how does retrieval augmented generation work")
+
+        routes = [d for d in sink.decisions
+                  if d.decision_point == DecisionPoint.QA_ROUTE.value]
+        assert routes and routes[-1].mechanism == "kg_defer"
+
     def test_a_failing_observer_does_not_break_the_demo(self, sink):
         def explode(_obs):
             raise RuntimeError("graph is unreachable")

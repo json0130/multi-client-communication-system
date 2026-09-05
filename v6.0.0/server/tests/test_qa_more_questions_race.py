@@ -163,13 +163,17 @@ class TestNoDoublePromptOnAdvance:
 
 class _FakeKGRouter:
     """Always names `target_id` as the answer — stands in for a competence
-    graph confident enough to override the receiver."""
+    graph confident enough to override the receiver.
+
+    **kwargs absorbs the presence-related arguments the real KGRouter.decide
+    now takes (remaining_block_ids / guide_robot_id / absent_robot_ids); this
+    fake is about the reroute-execution path, not about presence."""
 
     def __init__(self, target_id, topic_id="topic:llm"):
         self._target_id = target_id
         self._topic_id = topic_id
 
-    def decide(self, utterance, robot_ids):
+    def decide(self, utterance, robot_ids, **kwargs):
         return RoutingDecision(robot_id=self._target_id, topic_id=self._topic_id,
                                topic_label="LLMs", reason="argmax", score=0.9)
 

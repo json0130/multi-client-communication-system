@@ -43,6 +43,7 @@ from decision.models import (
 )
 from decision.flow import Block, FlowGraph, StepRef
 from decision.planner import block_importance, plan_for_budget
+from decision.presence import DEFAULT_PROXIMITY_M, Pose, PresenceTracker
 from decision.observation import (
     DemoRunTracker,
     build_observation,
@@ -77,8 +78,11 @@ __all__ = [
     "DecisionRecorder",
     "DecisionSink",
     "Block",
+    "DEFAULT_PROXIMITY_M",
     "DemoRunTracker",
     "FlowGraph",
+    "Pose",
+    "PresenceTracker",
     "StepRef",
     "block_importance",
     "plan_for_budget",

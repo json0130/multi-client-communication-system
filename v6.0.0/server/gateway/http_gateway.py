@@ -227,6 +227,54 @@ def create_http_gateway(
             }), 404
         return jsonify(instance.get_health())
 
+    @bp.route("/robots/<client_id>/presence", methods=["GET", "POST"])
+    def robot_presence(client_id: str):
+        """
+        Where a robot is, and whether it counts as in the conversation.
+
+        POST {"x": .., "y": .., "frame_id": "map"}  set a pose (what a ROS2
+                                                    bridge will call)
+        POST {"location": null}                     clear the pose
+        POST {"in_conversation": true|false|null}   MANUAL OVERRIDE — for sim
+                                                    and harness runs only,
+                                                    until a real pose source
+                                                    exists. Logged with its
+                                                    source, because a value
+                                                    that did not come from a
+                                                    location must always be
+                                                    attributable afterwards.
+
+        in_conversation is otherwise DERIVED from location and cannot be set
+        directly — see decision/presence.py.
+        """
+        presence = ws_gateway.presence
+        if request.method == "GET":
+            reference = request.args.get("reference")
+            return jsonify(presence.snapshot([client_id], reference).get(client_id, {}))
+
+        data = request.get_json(silent=True) or {}
+
+        if "in_conversation" in data:
+            value = data["in_conversation"]
+            if value is not None and not isinstance(value, bool):
+                return jsonify({"error": "in_conversation must be true, false or null"}), 400
+            source = str(data.get("source") or "http-override")[:80]
+            presence.set_in_conversation(client_id, value, source=source)
+
+        if "location" in data and data["location"] is None:
+            presence.set_location(client_id, None, source=str(data.get("source") or "http"))
+        elif "x" in data and "y" in data:
+            from decision.presence import Pose
+            try:
+                pose = Pose(x=float(data["x"]), y=float(data["y"]),
+                            frame_id=str(data.get("frame_id") or "map"),
+                            timestamp=data.get("timestamp"))
+            except (TypeError, ValueError):
+                return jsonify({"error": "x and y must be numbers"}), 400
+            presence.set_location(client_id, pose, source=str(data.get("source") or "http"))
+
+        return jsonify(presence.snapshot([client_id], data.get("reference")).get(client_id, {}))
+
     @bp.route("/robots/<client_id>/chat", methods=["POST"])
     def robot_chat(client_id: str):
         """Send a chat message to a robot from the server dashboard."""
@@ -294,6 +342,20 @@ def create_http_gateway(
                 "event": "chat_sentence",
                 "text": handoff,
                 "emotion_tag": "DEFAULT",
+            })
+
+        # Deferred: the guide has just said the topic will be covered at that
+        # robot's station, and no robot generates an answer this turn. Return
+        # before process_chat_stream — calling it would produce exactly the
+        # improvised answer deferring exists to avoid.
+        if target_instance is None:
+            return jsonify({
+                "client_id": client_id,
+                "response": handoff,
+                "emotion_tag": "DEFAULT",
+                "clean_text": handoff,
+                "is_delegation": False,
+                "delegation_target": None,
             })
 
         def _on_sentence(clean_text, emotion_tag):
