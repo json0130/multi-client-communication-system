@@ -80,7 +80,7 @@ INSERT INTO demo_robot_topic (robot_id, topic_id, weight, eligible) VALUES
     ('pepper_01',  'topic:human-pose-estimation',              0.5, true),
     ('chatbox_01', 'topic:retrieval-augmented-generation',     0.5, true),
     ('chatbox_01', 'topic:long-term-interaction',               0.5, true),
-    ('navel_001',  'topic:non-verbal-interaction',              0.5, true),
+    ('navel_01',   'topic:non-verbal-interaction',              0.5, true),
     ('silbot_01',  'topic:social-robot-navigation',             0.5, true)
 ON CONFLICT (robot_id, topic_id) DO NOTHING;
 

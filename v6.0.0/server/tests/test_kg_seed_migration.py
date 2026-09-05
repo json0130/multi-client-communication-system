@@ -69,7 +69,7 @@ class TestSeedWeightGuard:
             ("pepper_01", "topic:human-pose-estimation"),
             ("chatbox_01", "topic:retrieval-augmented-generation"),
             ("chatbox_01", "topic:long-term-interaction"),
-            ("navel_001", "topic:non-verbal-interaction"),
+            ("navel_01", "topic:non-verbal-interaction"),
             ("silbot_01", "topic:social-robot-navigation"),
         }
 
