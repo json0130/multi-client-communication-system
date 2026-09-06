@@ -179,7 +179,17 @@ def plan_for_budget(
         needed = start["total_sec"] - budget_sec
         windows = sum(len(b.qa_steps) for b in graph.blocks if b.robot_id not in skipped)
         if windows:
-            reduced = max(qa_floor, current_qa - needed / windows)
+            # Rounded to whole seconds BEFORE it is used, because that is the
+            # value the op carries and the orchestrator enforces. Reasoning
+            # with 67.667 while emitting 68 made the planner report a tour it
+            # was not going to produce: three windows applied at 68s cost 1s
+            # more than the estimate that declared the budget met, so
+            # feasible=True described a plan that overran. Deciding in the
+            # units the command actually uses makes the estimate and the plan
+            # the same object by construction, and errs toward cutting
+            # slightly more rather than promising a fit that is only
+            # reachable at fractional precision.
+            reduced = max(qa_floor, float(round(current_qa - needed / windows)))
             if reduced < current_qa:
                 current_qa = reduced
                 for b in graph.blocks:

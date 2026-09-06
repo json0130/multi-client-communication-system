@@ -178,7 +178,10 @@ def derive_plan(
         needed = estimate() - budget_sec
         windows = sum(b.qa_windows for b in blocks if b.robot_id not in skipped)
         if windows:
-            qa = max(qa_floor, qa - needed / windows)
+            # Whole seconds: the op carries an integer and the orchestrator
+            # enforces exactly that, so a budget is only real at the precision
+            # it can actually be commanded at. See planner.py's rung 1.
+            qa = max(qa_floor, float(round(qa - needed / windows)))
     if estimate() <= budget_sec:
         return outcome(True)
 

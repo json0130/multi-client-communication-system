@@ -17,7 +17,8 @@ from __future__ import annotations
 
 import pytest
 
-from decision.flow import DEFAULT_STEP_SEC, FlowGraph, StepRef
+from decision.flow import (DEFAULT_QA_BUDGET_SEC, DEFAULT_STEP_SEC,
+                           FlowGraph, StepRef)
 from decision.models import PlanOpKind, StepRole
 from decision.planner import QA_FLOOR_SEC, block_importance, plan_for_budget
 from demo.demo_script import build_script
@@ -249,3 +250,62 @@ class TestDropRemainingRung:
         assert r["estimate"]["scripted_sec"] == 0.0
         assert r["estimate"]["qa_sec"] == 0.0
         assert r["estimate"]["total_sec"] == r["estimate"]["fixed_sec"]
+
+
+class TestQaBudgetIsCommandable:
+    """
+    Regression: the planner reasoned in fractional seconds while emitting a
+    whole-second SET_QA_BUDGET op, so `feasible=True` could describe a plan
+    that overran once applied.
+
+    Found by tools/eval_conditions.py — running the same scenarios through
+    HeuristicPolicy rather than calling plan_for_budget directly recosted the
+    EMITTED ops instead of trusting the planner's own estimate, and nine
+    exact-fit cases came out 1s over. The estimate and the plan have to be
+    the same object; a budget is only real at the precision it can actually
+    be commanded at.
+    """
+
+    def _graph(self):
+        # The real script, so the arithmetic is the one a tour actually has.
+        return FlowGraph.from_script(build_script(GUIDE, [A, B, C]))
+
+    def test_emitted_qa_budgets_are_whole_seconds(self):
+        graph = self._graph()
+        plan = plan_for_budget(graph, 400.0, durations={})
+        for op in plan["ops"]:
+            if op.kind is PlanOpKind.SET_QA_BUDGET:
+                assert op.seconds == int(op.seconds), \
+                    f"{op.seconds} is not commandable as whole seconds"
+
+    def test_the_estimate_matches_the_plan_that_would_run(self):
+        # Recost the tour from the EMITTED ops rather than trusting the
+        # planner's internal figure — the exact check that found the bug.
+        graph = self._graph()
+        for budget in (400.0, 340.0, 300.0, 270.0, 250.0):
+            plan = plan_for_budget(graph, budget, durations={})
+            qa = next((float(o.seconds) for o in plan["ops"]
+                       if o.kind is PlanOpKind.SET_QA_BUDGET),
+                      DEFAULT_QA_BUDGET_SEC)
+            compressed = {o.robot_id for o in plan["ops"]
+                          if o.kind is PlanOpKind.COMPRESS}
+            skipped = {o.robot_id for o in plan["ops"]
+                       if o.kind is PlanOpKind.SKIP}
+            if any(o.kind is PlanOpKind.DROP_REMAINING for o in plan["ops"]):
+                skipped = {b.robot_id for b in graph.blocks}
+            recosted = graph.estimate({}, qa, compressed, skipped)["total_sec"]
+            assert recosted == plan["estimate"]["total_sec"], (
+                f"budget {budget}: planner said "
+                f"{plan['estimate']['total_sec']}s but the emitted ops "
+                f"produce {recosted}s"
+            )
+
+    def test_a_feasible_plan_actually_fits(self):
+        graph = self._graph()
+        for budget in (400.0, 340.0, 300.0, 270.0, 250.0, 200.0):
+            plan = plan_for_budget(graph, budget, durations={})
+            if plan["feasible"]:
+                assert plan["estimate"]["total_sec"] <= budget, (
+                    f"budget {budget}: declared feasible at "
+                    f"{plan['estimate']['total_sec']}s"
+                )
