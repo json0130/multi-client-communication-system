@@ -685,6 +685,21 @@ class WebSocketGateway:
             )
 
         target_id = result.action.robot_id
+
+        # Guide stepping in because the robot that owns this topic is away and
+        # its block has already been cut — there is no station left to defer
+        # to. Distinct phrasing from an ordinary reroute: "Pepper can tell you
+        # more about that" frames the guide as the better source, which is
+        # not what happened. It is a fallback, and saying so is both honest
+        # and more natural than a handoff line that does not fit.
+        if (result.mechanism == "kg_guide_answers"
+                and target_id and target_id != receiver_id):
+            guide = self._registry.get(target_id)
+            if guide is not None:
+                return guide, target_id, (
+                    "Let me pick that one up — I can give you the short version now."
+                )
+
         if (result.action.kind is not ActionKind.ROUTE_TO
                 or not target_id or target_id == receiver_id):
             return instance, receiver_id, None

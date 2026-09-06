@@ -1,0 +1,24 @@
+{
+  "archived_at": "2026-09-06T13:56:02.526440",
+  "reason": "robot_ids no longer used by any client config; edges could never route",
+  "rows": [
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-02T21:24:33.452173+00:00",
+      "n_displaced": 0
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:text-to-speech",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-02T21:25:12.767597+00:00",
+      "n_displaced": 0
+    }
+  ]
+}
