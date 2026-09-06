@@ -369,6 +369,11 @@ def create_http_gateway(
 
         result = target_instance.process_chat_stream(message, _on_sentence)
 
+        # Did the robot just sign off ("let me know if you have any other
+        # questions")? If so the window closes on its own after a pause,
+        # instead of waiting for someone to say "move on" out loud.
+        ws_gateway.check_qa_auto_close(target_id, result.clean_text or "")
+
         # Handle delegation — run synchronously so the browser gets the
         # target's answer. Must run BEFORE the "more questions?" resend below,
         # not after: a real run had the resend fire while Navel's delegated

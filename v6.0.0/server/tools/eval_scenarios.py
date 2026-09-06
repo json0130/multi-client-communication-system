@@ -70,29 +70,48 @@ TOPICS = [
 
 # Plausible round numbers in the range of the 49 real measurements taken so
 # far. Held constant — see the module docstring.
+def _block_durations(robot: str) -> dict:
+    """One block's steps, in the shape build_script now emits: a single
+    merged intro+handoff, greeting, prompt, and the project talk split
+    across PROJECT_CHECKLIST's three points."""
+    return {
+        f"introduce_{robot}": 10,        # teaser + hand-off, one utterance
+        f"{robot}_greeting": 8,
+        f"{robot}_prompt": 5,
+        f"{robot}_project_problem": 7,
+        f"{robot}_project_approach": 7,
+        f"{robot}_project_impact": 5,
+    }
+
+
 FIXED_DURATIONS = {
     "greeting": 8, "lab_intro": 12, "overview": 8,
-    "intro_project_a": 6, "introduce_chatbox_01": 6, "chatbox_01_greeting": 8,
-    "chatbox_01_prompt": 5, "chatbox_01_project": 19, "transition_to_navel_01": 6,
-    "intro_project_b": 6, "introduce_navel_01": 6, "navel_01_greeting": 8,
-    "navel_01_prompt": 5, "navel_01_project": 19, "transition_to_silbot_01": 6,
-    "intro_project_c": 6, "introduce_silbot_01": 6, "silbot_01_greeting": 8,
-    "silbot_01_prompt": 5, "silbot_01_project": 19,
+    **_block_durations(CHATBOX),
+    **_block_durations(NAVEL),
+    **_block_durations(SILBOT),
+    "transition_to_navel_01": 6, "transition_to_silbot_01": 6,
     "wrap_up": 15, "open_floor": 10,
 }
 
 # The arithmetic every expectation below is derived from, stated once:
 #
 #   fixed (opening 28 + closing 25)                        = 53s
-#   scripted per block, uncompressed  chatbox 50, navel 50, silbot 44   = 144s
-#   compressible per block (intro 6 + greeting 8 + prompt 5)            =  19s
-#   scripted per block, compressed    chatbox 31, navel 31, silbot 25   =  87s
+#   scripted per block, uncompressed  chatbox 48, navel 48, silbot 42   = 138s
+#   compressible per block (greeting 8 + prompt 5)                      =  13s
+#   scripted per block, compressed    chatbox 35, navel 35, silbot 29   =  99s
 #   Q&A at the 90s default × 3 windows                                  = 270s
 #   Q&A at the 45s floor  × 3 windows                                   = 135s
 #
-#   uncompressed, default Q&A   53 + 144 + 270 = 467s
-#   Q&A at floor only           53 + 144 + 135 = 332s
-#   Q&A at floor + all compressed 53 + 87 + 135 = 275s
+#   uncompressed, default Q&A   53 + 138 + 270 = 461s
+#   Q&A at floor only           53 + 138 + 135 = 326s
+#   Q&A at floor + all compressed 53 +  99 + 135 = 287s
+#
+# Compression saves LESS than it used to (13s a block, not 19s). The teaser
+# and the hand-off used to be two steps and the teaser was compressible;
+# merging them into one utterance means the whole thing carries the hand-off
+# and so has to survive, since a robot must never start talking with nobody
+# having introduced it. The ladder reaches for a skip sooner as a result —
+# a real consequence of the merge, not an accident of these numbers.
 
 QA_FLOOR = 45.0
 
@@ -235,14 +254,14 @@ SCENARIOS = [
     Scenario(
         id="S1-rung-order",
         description=(
-            "A general-audience group, no stated interest, 5m30s for a tour "
-            "that would take 7m47s at full length. Every robot present."
+            "A general-audience group, no stated interest, 5m20s for a tour "
+            "that would take 7m41s at full length. Every robot present."
         ),
         rationale=(
-            "467s of tour into a 330s budget. This scenario is about the "
+            "461s of tour into a 320s budget. This scenario is about the "
             "ladder's ORDER, not about importance. Rung 1 tightens Q&A, and "
             "Q&A alone nearly absorbs it: three windows dropping from 90s to "
-            "the 45s floor recovers 135s, landing at 332s — 2s over. So rung 2 "
+            "the 45s floor recovers 135s, landing at 326s — 6s over. So rung 2 "
             "must compress exactly ONE block to reach 313s, and rung 3 is "
             "never entered: no robot is skipped. That is the property worth "
             "pinning, because it is the reason the rungs are in this order at "
@@ -251,7 +270,7 @@ SCENARIOS = [
             "here and deliberately not asserted; S2 is the scenario that tests "
             "importance, and asserting it here too would just duplicate it."
         ),
-        run=lambda: _outcome(_plan(330)),
+        run=lambda: _outcome(_plan(320)),
         expected=ExpectedPlan(
             surviving_blocks=(CHATBOX, NAVEL, SILBOT),
             feasible=True,
@@ -270,9 +289,9 @@ SCENARIOS = [
             "the lab's own priorities rank LOWEST."
         ),
         rationale=(
-            "250s budget. Q&A to the floor gives 332s; compressing all three "
-            "gives 275s, still over — so rung 3 must skip exactly one block, "
-            "and 199s afterwards is comfortably inside. WHICH block is the "
+            "250s budget. Q&A to the floor gives 326s; compressing all three "
+            "gives 287s, still over — so rung 3 must skip exactly one block, "
+            "and 207s afterwards is comfortably inside. WHICH block is the "
             "entire point.\n"
             "  Hand-set defaults are chatbox 0.3, navel 0.5, silbot 0.7. With "
             "no stated interest the cheapest block to cut is chatbox_01, and "

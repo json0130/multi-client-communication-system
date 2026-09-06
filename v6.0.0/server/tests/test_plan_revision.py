@@ -843,3 +843,94 @@ class TestPreEngagedBlockCompression:
         orch._ws.tracker = _FakeTracker({B: {"turns": 4, "questions": 2}})
         orch._maybe_compress_pre_engaged_block(B)
         assert orch._script[orch._idx] is current
+
+
+# ── The project talk as a tickable checklist ──────────────────────────────────
+
+class TestProjectChecklist:
+    """
+    The project talk is one step per content point, not one paragraph.
+
+    Reported case: a visitor interrupted Silbot partway through its project
+    talk and the demo carried on to the next thing — Silbot had introduced
+    itself and said essentially nothing else. The run loop treats an
+    interrupted step as finished and advances past it, so a single-step talk
+    meant a single chance. As separate steps the points not yet reached are
+    still ahead of the play head and simply run when the Q&A closes.
+    """
+
+    def _script(self):
+        return build_script(GUIDE, [A, B, C])
+
+    def test_each_checklist_point_is_its_own_step(self):
+        from demo.demo_script import PROJECT_CHECKLIST
+        steps = self._script()
+        for robot in (A, B, C):
+            ids = [s.step_id for s in steps
+                   if s.block_robot_id == robot and s.role == StepRole.PROJECT]
+            assert ids == [f"{robot}_project_{p}" for p, _ in PROJECT_CHECKLIST]
+
+    def test_every_checklist_point_is_project_role(self):
+        # PROJECT is never compressible, so no point can be trimmed away by
+        # a COMPRESS — the research content is what the tour is for.
+        steps = self._script()
+        for s in steps:
+            if "_project_" in s.step_id:
+                assert s.role == StepRole.PROJECT
+                assert s.role not in StepRole.COMPRESSIBLE
+
+    def test_points_after_an_interruption_are_still_in_the_script(self, gateway, sink):
+        # The actual regression: interrupt during the FIRST point and the
+        # other two must still be ahead of the play head.
+        o = DemoOrchestrator(gateway, recorder=DecisionRecorder(sink))
+        o.load_script(self._script())
+        o._state = DemoState.QA_WINDOW
+        o._idx = next(i for i, s in enumerate(o._script)
+                      if s.step_id == f"{A}_project_problem")
+
+        remaining = [s.step_id for s in o._script[o._idx + 1:]
+                     if s.block_robot_id == A and s.role == StepRole.PROJECT]
+        assert remaining == [f"{A}_project_approach", f"{A}_project_impact"]
+
+    def test_a_skipped_block_takes_all_of_its_points_with_it(self, orch):
+        orch.revise_script([PlanOp(PlanOpKind.SKIP, robot_id=B)])
+        assert not [s for s in orch._script if s.block_robot_id == B]
+
+    def test_compression_never_removes_a_checklist_point(self, orch):
+        before = [s.step_id for s in orch._script
+                  if s.block_robot_id == B and s.role == StepRole.PROJECT]
+        orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])
+        after = [s.step_id for s in orch._script
+                 if s.block_robot_id == B and s.role == StepRole.PROJECT]
+        assert after == before
+
+
+class TestMergedIntroAndHandoff:
+    """
+    The teaser and the hand-off are one utterance now. As two steps they were
+    two independent generations, and a live run produced a good teaser
+    followed by "Great, let us move on to the next project!" — a non sequitur,
+    because the second generation could not see the first.
+    """
+
+    def test_a_block_has_exactly_one_introduction_step(self):
+        steps = build_script(GUIDE, [A, B, C])
+        for robot in (A, B, C):
+            intro_like = [s for s in steps if s.block_robot_id == robot
+                          and s.role in (StepRole.INTRO, StepRole.HANDOFF)]
+            assert len(intro_like) == 1
+            assert intro_like[0].step_id == f"introduce_{robot}"
+
+    def test_the_merged_step_is_a_handoff_and_survives_compression(self, orch):
+        # It carries the hand-off, so it must never be trimmed — a robot
+        # must not start talking with nobody having introduced it.
+        orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])
+        roles = [s.role for s in orch._script if s.block_robot_id == B]
+        assert StepRole.HANDOFF in roles
+        assert roles.index(StepRole.HANDOFF) < roles.index(StepRole.PROJECT)
+
+    def test_compression_now_only_drops_greeting_and_prompt(self, orch):
+        dropped = {s.role for s in orch._script if s.block_robot_id == B}
+        orch.revise_script([PlanOp(PlanOpKind.COMPRESS, robot_id=B)])
+        kept = {s.role for s in orch._script if s.block_robot_id == B}
+        assert dropped - kept == {StepRole.GREETING, StepRole.PROMPT}

@@ -395,6 +395,29 @@ DEMO_STEPS = [
 
 # ── Dynamic script builder ─────────────────────────────────────────────────────
 
+PROJECT_CHECKLIST = (
+    ("problem",  "the problem your research is solving, in plain terms"),
+    ("approach", "how your approach works"),
+    ("impact",   "why it matters — what it makes possible"),
+)
+"""What a project talk has to cover, as separately tickable points.
+
+These are the same three things the old single-paragraph instruction asked
+for; the change is that each is its own step, so "covered" is a position in
+the script rather than something that has to be inferred from what was said.
+That distinction is the whole point. A visitor interrupting mid-talk used to
+lose every point the robot had not reached yet, because the run loop treats
+an interrupted step as finished and advances past it — one step meant one
+chance. As separate steps the unreached points are simply still ahead of the
+play head, and run when the Q&A closes.
+
+Generic rather than per-robot: every project answers these three, and a
+per-robot checklist is a configuration surface nobody has asked for yet. If
+one is needed later it belongs beside robot_role in the robots table, and
+this becomes the default for robots that do not define their own.
+"""
+
+
 def build_script(guide_id: str, project_ids: list) -> list:
     """
     Build a demo script dynamically from a guide robot and an ordered list of
@@ -468,29 +491,26 @@ def build_script(guide_id: str, project_ids: list) -> list:
     # strings. Add a step here and it must be tagged, or plan revision will
     # silently leave it behind when the rest of its block moves.
     for i, robot_id in enumerate(project_ids):
-        is_last    = (i == n - 1)
-        proj_label = chr(65 + i)   # 'A', 'B', 'C', …
+        is_last = (i == n - 1)
 
-        steps.append(DemoStep(
-            step_id     = f"intro_project_{proj_label.lower()}",
-            robot_id    = guide_id,
-            text        = f"Introduce the next research project that will be presented by {robot_id}. "
-                          "Give a brief, intriguing teaser of the research area without going into detail — "
-                          "that is the robot's job. 2 sentences. Use [DEFAULT].",
-            generate    = True,
-            timeout_sec = 60,
-            block_robot_id = robot_id,
-            role           = StepRole.INTRO,
-        ))
-
+        # Teaser and hand-off in ONE utterance. They were two steps, and two
+        # separate generations produced two sentences that did not follow
+        # from each other — a live run had the guide give a decent teaser
+        # ("Next, we have Silbot, which focuses on...") and then, as a
+        # separate step, say "Great, let us move on to the next project!",
+        # which reads as a non sequitur because the second generation could
+        # not see the first. One instruction, one utterance, one thought.
         steps.append(DemoStep(
             step_id     = f"introduce_{robot_id}",
             robot_id    = guide_id,
-            text        = f"Hand off to {robot_id}, who will now present their research. "
-                          f"Point towards {robot_id} and invite them to say hello to the visitors. "
-                          "1-2 sentences. Use [POINT].",
+            text        = f"Introduce the next research project and hand off to {robot_id} "
+                          "in one flowing turn. First give a brief, intriguing teaser of the "
+                          "research area without going into detail — that is the robot's job — "
+                          f"then turn to {robot_id} and invite them to greet the visitors. "
+                          "Make it one connected thought, not two announcements. "
+                          "2-3 sentences. Use [POINT].",
             generate    = True,
-            timeout_sec = 50,
+            timeout_sec = 60,
             block_robot_id = robot_id,
             role           = StepRole.HANDOFF,
         ))
@@ -519,17 +539,30 @@ def build_script(guide_id: str, project_ids: list) -> list:
 
         # PROJECT and QA are never dropped by a COMPRESS — the research content
         # and the visitors' chance to ask about it are what the tour is for.
-        steps.append(DemoStep(
-            step_id     = f"{robot_id}_project",
-            robot_id    = robot_id,
-            text        = "Explain your research project to a non-expert audience. "
-                          "Cover what problem you are solving, your approach, and why it matters. "
-                          "Make it engaging and accessible. 3-4 sentences. Use [DEFAULT].",
-            generate    = True,
-            timeout_sec = 90,
-            block_robot_id = robot_id,
-            role           = StepRole.PROJECT,
-        ))
+        #
+        # One step per content point rather than one paragraph covering all
+        # three. The old single step asked for "what problem you are solving,
+        # your approach, and why it matters" in one generation, and a visitor
+        # interrupting partway through lost the rest of it: the run loop
+        # counts the interrupted step as done and moves on, so a robot cut off
+        # after its first sentence had introduced its project and said
+        # nothing else. Splitting the checklist into steps means the points
+        # not yet reached are still sitting in the script — they run after the
+        # Q&A closes, with no resume machinery involved, because they were
+        # never skipped in the first place.
+        for point_id, point_brief in PROJECT_CHECKLIST:
+            steps.append(DemoStep(
+                step_id     = f"{robot_id}_project_{point_id}",
+                robot_id    = robot_id,
+                text        = f"You are explaining your research to a non-expert audience, "
+                              f"one point at a time. Cover ONLY this point now: {point_brief}. "
+                              "Do not summarise the whole project and do not repeat what you "
+                              "have already said. 1-2 sentences. Use [DEFAULT].",
+                generate    = True,
+                timeout_sec = 60,
+                block_robot_id = robot_id,
+                role           = StepRole.PROJECT,
+            ))
 
         steps.append(DemoStep(
             step_id     = f"qa_invite_{robot_id}",

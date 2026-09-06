@@ -68,6 +68,16 @@ _looks_like_question = looks_like_question
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 10
 
+QA_AUTO_CLOSE_SEC = 5.0
+"""Silence after a robot invites further questions before the tour moves on
+by itself.
+
+Measured from the end of GENERATION, not the end of speech — the server gets
+no end-of-TTS signal for streamed chat sentences. A short sign-off takes
+roughly two seconds to say, so this is about three seconds of real silence:
+long enough that a visitor who wants to speak has room, short enough that the
+tour does not stall on a question nobody was going to ask."""
+
 
 class RobotConnection:
     """Manages a single persistent WebSocket connection to one robot."""
@@ -217,6 +227,11 @@ class WebSocketGateway:
         from decision.presence import PresenceTracker
         self._presence = PresenceTracker()
 
+        # Pending auto-close of the Q&A window after a robot signs off.
+        # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
+        self._auto_close_timer = None
+        self._auto_close_lock = threading.Lock()
+
         # Per-decision scratch space. Thread-local because every robot's
         # connection dispatches messages on its own reader thread, so two
         # visitors talking to two robots at once would otherwise interleave
@@ -278,6 +293,9 @@ class WebSocketGateway:
         """Called by DemoOrchestrator when a Q&A window opens."""
         self._tracker.open_window()
         self._segment.reset()
+        # A timer left over from the previous window would close this one
+        # almost as soon as it opened.
+        self.cancel_qa_auto_close("new window opened")
 
     def on_qa_window_close(self) -> None:
         """Called by DemoOrchestrator when a Q&A window closes.
@@ -292,6 +310,7 @@ class WebSocketGateway:
         cannot reintroduce hollow observations by taking a different path.
         """
         self._tracker.close_window()
+        self.cancel_qa_auto_close("window closed")
         try:
             observations = self._segment.observations()
             if observations and self._kg_observer is not None:
@@ -518,18 +537,63 @@ class WebSocketGateway:
                          exc_info=True)
             return instruction
 
+    def cancel_qa_auto_close(self, why: str = "") -> None:
+        """Stop a pending auto-close. Idempotent."""
+        with self._auto_close_lock:
+            timer, self._auto_close_timer = self._auto_close_timer, None
+        if timer is not None:
+            timer.cancel()
+            logger.info(f"[WS Gateway] Auto-close cancelled{(' — ' + why) if why else ''}.")
+
+    def _schedule_qa_auto_close(self, delay: float) -> None:
+        """
+        Close the Q&A window in `delay` seconds unless something cancels it.
+
+        A timer rather than an immediate close because the robot has just
+        invited more questions — "let me know if you have any other
+        questions" — and closing on that instant would cut off the visitor
+        who was drawing breath to take it up. The delay is the pause a person
+        leaves after asking; if nobody fills it, the tour moves on by itself
+        instead of waiting for someone to say "move on" out loud.
+
+        Note the delay starts when GENERATION finishes, not when the robot
+        stops speaking — the server has no end-of-TTS signal for streamed
+        chat sentences, only for demo steps that require an ACK. So the
+        visitor's real silence is this minus however long the closing
+        sentence takes to say. QA_AUTO_CLOSE_SEC is set with that in mind.
+        """
+        self.cancel_qa_auto_close()
+
+        def fire():
+            with self._auto_close_lock:
+                self._auto_close_timer = None
+            orch = self._demo_orchestrator
+            if orch is None or orch.get_status().get("state") != "qa_window":
+                return          # someone else already closed it
+            logger.info(f"[WS Gateway] Closing Q&A — robot invited further "
+                        f"questions and {delay:.0f}s passed in silence.")
+            orch.qa_end(source="policy")
+
+        timer = threading.Timer(delay, fire)
+        timer.daemon = True
+        with self._auto_close_lock:
+            self._auto_close_timer = timer
+        timer.start()
+
     def check_qa_auto_close(self, responding_robot_id: str, clean_text: str):
         """
         Decide, after a robot responds, whether the Q&A window should close.
 
-        DORMANT — nothing calls this, and nothing called its predecessor either.
-        The closing-phrase list and the guide's LLM wrap-up judgement were both
-        written and then never wired to a call site, so of the five Q&A
-        mechanisms only three have ever run: the advance phrases, the question
-        heuristic, and the intent classifier. It is left uncalled deliberately:
-        activating it here would change live demo behaviour under cover of a
-        refactor. Call it from the response path to turn it on, and expect the
-        Q&A windows to start closing on their own.
+        WIRED as of the closing-phrase auto-advance change. It was dormant for
+        a long time — the closing-phrase list and the guide's LLM wrap-up
+        judgement were both written and never called, so of the five Q&A
+        mechanisms only three ever ran. Turning it on was a deliberate
+        behaviour change, not a refactor: Q&A windows now close on their own
+        when a robot signs off, where before the visitor had to say "move on"
+        even after the robot had audibly finished.
+
+        An ADVANCE here SCHEDULES the close rather than doing it — see
+        _schedule_qa_auto_close for why the pause matters.
 
         The guide never judges its own responses — the recursion guard the
         original had, preserved.
@@ -550,8 +614,7 @@ class WebSocketGateway:
         action = self._decide(DecisionPoint.QA_ADVANCE, decider).action
 
         if action.kind is ActionKind.ADVANCE:
-            print("[WS Gateway] Closing Q&A — closing phrase in robot response.")
-            self._demo_orchestrator.qa_end(source="policy")
+            self._schedule_qa_auto_close(QA_AUTO_CLOSE_SEC)
             return
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
@@ -588,6 +651,12 @@ class WebSocketGateway:
         """
         if not self._demo_orchestrator or not user_text:
             return None
+
+        # The visitor took the robot up on its offer, so the pause that was
+        # counting down toward moving on is over. Cancelled before any
+        # decision is made: whatever this turn means, it means the window
+        # should not close because nobody said anything.
+        self.cancel_qa_auto_close("visitor spoke")
 
         # Engagement is tracked against the BLOCK the visitor is actually
         # asking about, not whichever robot's mic happened to receive the
@@ -893,6 +962,10 @@ class WebSocketGateway:
                         })
 
                     result = target_instance.process_chat_stream(message, _on_sentence)
+                    # Did the robot just sign off? If so the window closes on
+                    # its own after a pause, instead of waiting for someone to
+                    # say "move on" out loud.
+                    self.check_qa_auto_close(target_id, result.clean_text or "")
                     # Handle delegation if needed
                     if result.is_delegation and result.delegation_target:
                         from gateway.delegation_handler import DelegationHandler

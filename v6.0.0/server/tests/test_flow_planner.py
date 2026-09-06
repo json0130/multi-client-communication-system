@@ -145,7 +145,7 @@ class TestLadder:
         assert r["ops"] == [] and r["fits_already"]
 
     def test_mild_pressure_only_tightens_qa(self, graph, importance):
-        r = plan_for_budget(graph, 420, importance=importance)
+        r = plan_for_budget(graph, 450, importance=importance)
         assert {o.kind for o in r["ops"]} == {PlanOpKind.SET_QA_BUDGET}
         assert r["feasible"]
 

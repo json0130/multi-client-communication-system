@@ -31,17 +31,33 @@ PROJECTS = ["chatbox_01", "navel_01", "silbot_01"]
 # (tighten Q&A, then compress) — not "already fits", not "impossible".
 TIGHT_BUDGET = 300.0
 
-# Chosen so the tour is close enough to a 420s budget that a modest duration
-# drift plausibly tips it from "tighten + compress" into "also skip one" —
+# Chosen so the tour is close enough to DRIFT_BOUNDARY_BUDGET that a modest
+# duration drift tips it from "tighten + compress" into "also skip one" —
 # the exact ladder-rung transition the reported bug described.
+def _block(robot):
+    """Per-block durations for the current script shape: one merged
+    intro+handoff, greeting, prompt, and the project talk split across the
+    PROJECT_CHECKLIST points."""
+    return {
+        f"introduce_{robot}": 18,
+        f"{robot}_greeting": 12,
+        f"{robot}_prompt": 6,
+        f"{robot}_project_problem": 20,
+        f"{robot}_project_approach": 20,
+        f"{robot}_project_impact": 15,
+    }
+
+
+DRIFT_BOUNDARY_BUDGET = 460.0
+"""A budget sitting just above the skip rung. Undrifted, the tour fits by
+tightening Q&A and compressing; at +15% it no longer does and a project has
+to go. Re-derived when the script gained the merged intro+handoff and the
+per-checklist-point project steps — the old 420s sat comfortably inside the
+compress band under the new arithmetic and demonstrated nothing."""
+
 BOUNDARY_DURATIONS = {
     "greeting": 15, "lab_intro": 15, "overview": 10,
-    "intro_project_a": 10, "introduce_chatbox_01": 8, "chatbox_01_greeting": 12,
-    "chatbox_01_prompt": 6, "chatbox_01_project": 55,
-    "intro_project_b": 10, "introduce_navel_01": 8, "navel_01_greeting": 12,
-    "navel_01_prompt": 6, "navel_01_project": 55,
-    "intro_project_c": 10, "introduce_silbot_01": 8, "silbot_01_greeting": 12,
-    "silbot_01_prompt": 6, "silbot_01_project": 55,
+    **_block("chatbox_01"), **_block("navel_01"), **_block("silbot_01"),
     "transition_to_navel_01": 8, "transition_to_silbot_01": 8,
     "wrap_up": 15, "open_floor": 10,
 }
@@ -50,7 +66,7 @@ BOUNDARY_DURATIONS = {
 def _boundary_scenario(**overrides) -> dict:
     base = dict(
         guide_id=GUIDE, project_ids=PROJECTS,
-        budget_sec=420.0, elapsed_sec=0.0, at_robot=None, at_role="",
+        budget_sec=DRIFT_BOUNDARY_BUDGET, elapsed_sec=0.0, at_robot=None, at_role="",
         durations=dict(BOUNDARY_DURATIONS), kg_edges=[], kg_links=[], topics=[],
     )
     base.update(overrides)
