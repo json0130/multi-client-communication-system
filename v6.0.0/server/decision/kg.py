@@ -177,6 +177,24 @@ class RobotTopicEdge:
     # keep them all eligible. See decision/kg_infer.py::route.
     eligible: bool = True
 
+    # DECLARED scope: this topic is part of the robot's stated project area.
+    # Known before any evidence exists and never learned — it comes from the
+    # deployment's configuration, the way `role` and `access_level` do.
+    #
+    # This is what `weight` must NOT be used for. Conflating the two is what
+    # made seeding circular: a weight seeded from project assignments would
+    # let propagation re-derive a partition that was typed in by hand, and
+    # every generalisation number would then be confirming its own input
+    # (see tools/seed_kg.py). Split apart, `specialised` answers "whose
+    # subject is this" from configuration and `weight` answers "how well was
+    # it handled" from observation — so learning stays about quality, which
+    # is the thing supervision can actually tell you.
+    #
+    # Opt-in, defaulting False: a graph with nothing declared behaves exactly
+    # as it did before, so the filter is inert until a deployment populates
+    # it. See decision/kg_infer.py::route for how it narrows candidates.
+    specialised: bool = False
+
     @property
     def n_obs(self) -> int:
         """Total observations. Drives both the learning rate and confidence."""
@@ -243,6 +261,7 @@ class RobotTopicEdge:
             n_displaced=self.n_displaced + (1 if kind is Evidence.DISPLACED else 0),
             last_updated=now or datetime.now(timezone.utc),
             eligible=self.eligible,   # a hard exclusion is permanent; learning never lifts it
+            specialised=self.specialised,   # declared scope; observation never changes it
         )
 
     def as_row(self) -> dict:
@@ -255,6 +274,7 @@ class RobotTopicEdge:
             "n_displaced": self.n_displaced,
             "last_updated": (self.last_updated or datetime.now(timezone.utc)).isoformat(),
             "eligible": self.eligible,
+            "specialised": self.specialised,
         }
 
     @classmethod
@@ -269,6 +289,7 @@ class RobotTopicEdge:
             n_displaced=int(row.get("n_displaced", 0) or 0),
             last_updated=ts,
             eligible=bool(row.get("eligible", True)),
+            specialised=bool(row.get("specialised", False)),
         )
 
 

@@ -150,6 +150,18 @@ deliberately poor answers in front of visitors. Exploration is for cases where
 the graph genuinely cannot tell; a 0.37 gap is not one of those."""
 
 
+def _specialists(edges: list, topic_id: str) -> set:
+    """
+    Robots whose declared project area covers `topic_id`.
+
+    Configuration, not evidence — see RobotTopicEdge.specialised. Empty when
+    nothing has been declared, which is what keeps the whole mechanism inert
+    on a graph that has not opted in.
+    """
+    return {e.robot_id for e in edges
+            if e.topic_id == topic_id and e.specialised}
+
+
 def _ineligible(edges: list, topic_id: str) -> set:
     """
     Robot ids explicitly excluded from `topic_id`.
@@ -222,6 +234,25 @@ def route(
     links = list(links)
     excluded = _ineligible(edges, topic_id) | set(absent or ())
     robot_ids = [r for r in robot_ids if r not in excluded]
+
+    # Declared scope narrows the field before competence is consulted at all.
+    # Whose subject this is comes from configuration; how well they handle it
+    # comes from observation. Keeping those in that order is what lets the
+    # graph route correctly from a cold start without the weights having to
+    # encode the project partition — which is the thing that would make
+    # generalisation results circular. See RobotTopicEdge.specialised.
+    #
+    # A PREFERENCE, not an exclusion: if every specialist is ineligible or
+    # away, the field opens back up rather than stranding the question. That
+    # also leaves the absent-robot policy intact — KGRouter.decide computes
+    # the pick as if everyone were present, so an away specialist still
+    # produces a defer rather than a silent handover to a non-specialist.
+    specialists = _specialists(edges, topic_id)
+    if specialists:
+        narrowed = [r for r in robot_ids if r in specialists]
+        if narrowed:
+            robot_ids = narrowed
+
     ranked = rank_robots(edges, links, topic_id, robot_ids)
     if not ranked:
         return None, "no robots"

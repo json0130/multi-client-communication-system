@@ -352,3 +352,102 @@ class TestDeferredQuestionsWriteNothing:
         assert d.robot_id == GUIDE and not d.is_deferred
         segment.note_routed(d.robot_id, d.topic_id)
         assert [o.robot_id for o in segment.observations()] == [GUIDE]
+
+
+# ── Declared scope ────────────────────────────────────────────────────────────
+
+class TestDeclaredScope:
+    """
+    `specialised` is configuration — whose subject this is — and `weight` is
+    observation — how well it was handled. Keeping them apart is what lets
+    the graph route correctly from a cold start without the weights encoding
+    the project partition, which is what would make generalisation results
+    circular (see tools/seed_kg.py and migration 010).
+
+    Before this existed, a freshly seeded graph resolved every topic
+    correctly and then routed every one of them to whichever robot came
+    first alphabetically, because all three sat at the 0.5 prior.
+    """
+
+    def test_a_declared_specialist_wins_with_no_evidence_at_all(self):
+        edges = [RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC, specialised=True)]
+        picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
+        assert picked == OTHER
+
+    def test_without_a_declaration_it_falls_back_to_the_tie_break(self):
+        # The behaviour being fixed, pinned so the contrast is explicit.
+        picked, _ = route([], [], TOPIC, [R, OTHER], explore=False)
+        assert picked == sorted([R, OTHER])[0]
+
+    def test_declared_scope_outranks_a_better_measured_non_specialist(self):
+        # Scope is consulted BEFORE competence, so a non-specialist cannot
+        # win on weight alone. R has real evidence; OTHER has none but owns
+        # the subject.
+        edges = [
+            observed(TOPIC, 1.0, 8, robot=R),
+            RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC, specialised=True),
+        ]
+        picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
+        assert picked == OTHER
+
+    def test_competence_still_decides_between_two_specialists(self):
+        # Narrowing is not the whole decision — among declared specialists the
+        # learned weight is what separates them, which is the thing
+        # supervision is meant to teach.
+        third = "robot_c"
+        edges = [
+            RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC, specialised=True),
+            RobotTopicEdge(robot_id=third, topic_id=TOPIC, weight=1.0,
+                           n_supervisor=8, specialised=True),
+        ]
+        picked, _ = route(edges, [], TOPIC, [OTHER, third], explore=False)
+        assert picked == third
+
+    def test_an_undeclared_topic_is_left_to_competence(self):
+        # Topics no project owns (speech-recognition, text-to-speech,
+        # robot-hardware in migration 010) stay open, so the learned weight
+        # still has somewhere to matter.
+        other_topic = "topic:unowned"
+        edges = [observed(other_topic, 1.0, 8, robot=R)]
+        picked, _ = route(edges, [], other_topic, [R, OTHER], explore=False)
+        assert picked == R
+
+    def test_scope_is_a_preference_not_an_exclusion(self):
+        # Every specialist ineligible: the field opens back up rather than
+        # stranding the question.
+        edges = [
+            RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC,
+                           specialised=True, eligible=False),
+        ]
+        picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
+        assert picked == R
+
+    def test_an_absent_specialist_still_defers_rather_than_handing_over(self):
+        # KGRouter computes the pick as if everyone were present, so an away
+        # specialist produces a defer — not a silent handover to whoever is
+        # left. The presence policy is unchanged by scope narrowing.
+        edges = [RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC, specialised=True)]
+        router = KGRouter(edges, [], TOPICS, explore=False,
+                          absent_robot_ids=[OTHER])
+        d = router.decide(QUESTION, [R, OTHER],
+                          remaining_block_ids={R, OTHER}, guide_robot_id=GUIDE)
+        assert d.is_deferred and d.deferred_to == OTHER
+
+    def test_declaration_survives_learning(self):
+        # Observation changes the weight, never the declared scope.
+        e = RobotTopicEdge(robot_id=R, topic_id=TOPIC, specialised=True)
+        for _ in range(5):
+            e = e.update(0.0, Evidence.SUPERVISOR)
+        assert e.specialised is True
+        assert e.weight < 0.5
+
+    def test_scope_round_trips_through_a_row(self):
+        e = RobotTopicEdge(robot_id=R, topic_id=TOPIC, specialised=True)
+        assert RobotTopicEdge.from_row(e.as_row()).specialised is True
+
+    def test_a_row_without_the_column_defaults_to_undeclared(self):
+        # A database that has not run migration 010 must behave exactly as
+        # before, not as though everything were declared.
+        restored = RobotTopicEdge.from_row(
+            {"robot_id": R, "topic_id": TOPIC, "weight": 0.5})
+        assert restored.specialised is False
