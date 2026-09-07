@@ -124,6 +124,16 @@ def run_condition(style: str, registry, kg, out) -> dict:
             continue
 
         say(f"  >>> VISITOR: \"{utterance}\"\n")
+
+        # Does this close the window? The real system decides that BEFORE
+        # generating anything, and an ADVANCE short-circuits the reply — so a
+        # harness that always generates one overstates how much the robots
+        # actually say. Uses the real phrase rules, minus the LLM classifier,
+        # which needs a live window this offline replay does not have.
+        if _closes_the_window(utterance):
+            say("      (advance — window closes, demo continues; no reply generated)\n\n")
+            continue
+
         answerer = _who_answers(utterance, step, registry, kg)
         replies: list = []
         registry.get(answerer).process_chat_stream(
@@ -138,6 +148,21 @@ def run_condition(style: str, registry, kg, out) -> dict:
     elapsed = time.time() - started
     say(f"  --- {words} words spoken, {elapsed:.0f}s wall clock ---\n")
     return {"style": style, "words": words, "sec": round(elapsed, 1)}
+
+
+def _closes_the_window(utterance: str) -> bool:
+    """True when the visitor's turn ends the Q&A rather than asking anything.
+
+    The deterministic half of HeuristicPolicy._decide_advance — advance
+    phrases, bare affirmations and stated time pressure. The LLM classifier
+    is deliberately not consulted: it is nondeterministic, and a controlled
+    comparison must not have the conditions diverge on a coin flip.
+    """
+    from decision.policy import (QA_ADVANCE_PHRASES, TIME_PRESSURE_PHRASES,
+                                 _is_bare_affirmation, _matches)
+    return bool(_matches(utterance, QA_ADVANCE_PHRASES)
+                or _is_bare_affirmation(utterance)
+                or _matches(utterance, TIME_PRESSURE_PHRASES))
 
 
 def _who_answers(utterance: str, step, registry, kg) -> str:
