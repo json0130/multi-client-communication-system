@@ -1,0 +1,216 @@
+{
+  "archived_at": "2026-09-07T14:34:35.487277",
+  "reason": "graph state before removing auto-accept harness observations",
+  "rows": [
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-03T04:12:26.965227+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:large-language-models",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-04T02:42:53.238075+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "pepper_01",
+      "topic_id": "topic:human-pose-estimation",
+      "weight": 0.5,
+      "n_supervisor": 0,
+      "n_outcome": 0,
+      "last_updated": "2026-09-06T23:09:33.095137+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:long-term-interaction",
+      "weight": 0.5,
+      "n_supervisor": 0,
+      "n_outcome": 0,
+      "last_updated": "2026-09-06T23:09:33.095137+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:non-verbal-interaction",
+      "weight": 0.5,
+      "n_supervisor": 0,
+      "n_outcome": 0,
+      "last_updated": "2026-09-06T23:09:33.095137+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:human-robot-trust",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:40:31.089154+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:40:31.212172+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:knowledge-graphs",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:44:10.533763+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:text-to-speech",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:44:10.655514+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "silbot_01",
+      "topic_id": "topic:facial-expression-analysis",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:46:11.908343+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:53:10.949777+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:robot-hardware",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:58:16.685197+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:multi-robot-coordination",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:58:16.801018+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:conversational-memory",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-06T23:59:58.140777+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "silbot_01",
+      "topic_id": "topic:speech-recognition",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-07T00:05:05.802559+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "silbot_01",
+      "topic_id": "topic:large-language-models",
+      "weight": 0.628125,
+      "n_supervisor": 0,
+      "n_outcome": 2,
+      "last_updated": "2026-09-07T00:05:05.954625+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:text-to-speech",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-07T00:06:59.234043+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:text-to-speech",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-07T00:12:02.182304+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "silbot_01",
+      "topic_id": "topic:social-robot-navigation",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-07T00:20:20.485356+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:large-language-models",
+      "weight": 0.667969,
+      "n_supervisor": 0,
+      "n_outcome": 3,
+      "last_updated": "2026-09-07T00:37:00.796174+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    },
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:social-robot-navigation",
+      "weight": 0.628125,
+      "n_supervisor": 0,
+      "n_outcome": 2,
+      "last_updated": "2026-09-07T00:39:42.407844+00:00",
+      "n_displaced": 0,
+      "eligible": true
+    }
+  ]
+}

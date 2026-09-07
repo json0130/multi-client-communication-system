@@ -324,15 +324,32 @@ class Harness:
             print(f"    ! {kind} duration not recorded: {str(e)[:60]}")
 
     def _observe(self, observations) -> None:
-        """Persist outcome observations — unless this is an evaluation session.
+        """Persist outcome observations — unless nobody actually supervised.
 
         A study participant is not a supervisor. Writing OUTCOME rows from an
         evaluation would train the graph on the very session being used to
         measure it, so the reported result would partly reflect learning that
         happened during measurement. --eval-writes opts in deliberately; the
         default keeps evaluation read-only.
+
+        A STUB OPERATOR IS NOT A SUPERVISOR EITHER, and this is the sharper
+        case. An outcome observation means "a segment closed and nobody
+        intervened" — which is evidence only because a human was watching and
+        chose not to. Under --auto nobody is watching, so acceptance carries
+        no information at all. Worse, exploration deliberately routes to the
+        LEAST-observed robot to spread evidence around, so auto-accept closes
+        a loop that manufactures competence out of the router's own
+        randomness.
+
+        This was not hypothetical: four unattended collection runs left
+        navel_01 outranking silbot_01 on social-robot-navigation, and a live
+        demo then sent a navigation question to Navel. Same discipline as
+        kg_feedback.Segment's silence rule — do not record an event nobody
+        judged.
         """
         if self.eval_mode and not self.args.eval_writes:
+            return
+        if self.args.auto != "off":
             return
         apply(observations, self.repo)
         for o in observations:
