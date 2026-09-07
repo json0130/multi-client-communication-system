@@ -126,6 +126,13 @@ class RoutingDecision:
     topic_label: str
     reason: str          # from kg_infer.route — argmax, or which explore rule
     score: float
+    # How many candidates the decision actually chose BETWEEN, after
+    # eligibility, presence and declared scope had narrowed the field. 1
+    # means there was no choice to make, which is what tells the outcome
+    # path that a clean segment here carries no information about quality —
+    # see kg_feedback.Segment.note_routed.
+    candidates_considered: int = 0
+
     # Set only when reason is a defer: the absent robot whose own station
     # will cover this topic later. The caller uses it to name that robot in
     # what the guide says, and to know that NOTHING was routed — a deferred
@@ -251,7 +258,13 @@ class KGRouter:
         if picked is None:
             return None
 
-        return self._decision(topic_id, picked, reason, robot_ids)
+        # The field the decision actually chose between, after every
+        # structural filter. One candidate means there was no choice, which
+        # the outcome path needs to know — see Segment.note_routed.
+        from decision.kg_infer import surviving_candidates
+        considered = len(surviving_candidates(self._edges, topic_id,
+                                              robot_ids, absent))
+        return self._decision(topic_id, picked, reason, robot_ids, considered)
 
     def _handle_absent(
         self,
@@ -305,11 +318,12 @@ class KGRouter:
         return None
 
     def _decision(self, topic_id: str, picked: str, reason: str,
-                  robot_ids: list) -> RoutingDecision:
+                  robot_ids: list, considered: int = 0) -> RoutingDecision:
         from decision.kg_infer import rank_robots
         ranked = dict(rank_robots(self._edges, self._links, topic_id, robot_ids))
         return RoutingDecision(
             robot_id=picked, topic_id=topic_id,
             topic_label=self._topics.get(topic_id, topic_id),
             reason=reason, score=round(ranked.get(picked, 0.5), 4),
+            candidates_considered=considered,
         )

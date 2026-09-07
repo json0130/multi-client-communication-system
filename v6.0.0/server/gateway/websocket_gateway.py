@@ -453,7 +453,15 @@ class WebSocketGateway:
 
             # Only a question that actually resolved to a topic is recorded, so
             # the segment can never credit an edge for a turn it did not handle.
-            self._segment.note_routed(decision.robot_id, decision.topic_id)
+            #
+            # had_alternatives is what stops declared scope laundering itself
+            # into learned competence: when scope narrowed the field to one
+            # specialist there was no choice to make, and a clean segment
+            # there says only that scope fired. See Segment.note_routed.
+            self._segment.note_routed(
+                decision.robot_id, decision.topic_id,
+                had_alternatives=decision.candidates_considered > 1,
+            )
             return PolicyResult(Action.route_to(decision.robot_id), mechanism)
         except Exception as e:
             logger.warning(f"[WS Gateway] KG routing failed, using receiver: {e}")

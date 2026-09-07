@@ -162,6 +162,44 @@ def _specialists(edges: list, topic_id: str) -> set:
             if e.topic_id == topic_id and e.specialised}
 
 
+def surviving_candidates(
+    edges: list,
+    topic_id: str,
+    robot_ids: Iterable[str],
+    absent: Optional[Iterable[str]] = None,
+) -> list:
+    """
+    The robots a routing decision is actually choosing between, in order.
+
+    Applies the three STRUCTURAL filters, all before competence is consulted:
+    eligibility (may this robot answer at all), presence (can it right now),
+    and declared scope (is this its subject).
+
+    Extracted because two callers need the same answer for different
+    reasons — route() needs the list, and KGRouter needs its LENGTH, since a
+    field of one means the decision had nothing to choose between and a
+    clean outcome there says nothing about quality (see
+    kg_feedback.Segment.note_routed). Computing it twice would let them
+    disagree.
+
+    Scope is a PREFERENCE, not an exclusion: if every specialist is
+    ineligible or away the field opens back up rather than stranding the
+    question. That also leaves the absent-robot policy intact —
+    KGRouter.decide computes the pick as if everyone were present, so an
+    away specialist still produces a defer rather than a silent handover to
+    a non-specialist.
+    """
+    excluded = _ineligible(edges, topic_id) | set(absent or ())
+    candidates = [r for r in robot_ids if r not in excluded]
+
+    specialists = _specialists(edges, topic_id)
+    if specialists:
+        narrowed = [r for r in candidates if r in specialists]
+        if narrowed:
+            return narrowed
+    return candidates
+
+
 def _ineligible(edges: list, topic_id: str) -> set:
     """
     Robot ids explicitly excluded from `topic_id`.
@@ -232,26 +270,7 @@ def route(
     """
     edges = list(edges)
     links = list(links)
-    excluded = _ineligible(edges, topic_id) | set(absent or ())
-    robot_ids = [r for r in robot_ids if r not in excluded]
-
-    # Declared scope narrows the field before competence is consulted at all.
-    # Whose subject this is comes from configuration; how well they handle it
-    # comes from observation. Keeping those in that order is what lets the
-    # graph route correctly from a cold start without the weights having to
-    # encode the project partition — which is the thing that would make
-    # generalisation results circular. See RobotTopicEdge.specialised.
-    #
-    # A PREFERENCE, not an exclusion: if every specialist is ineligible or
-    # away, the field opens back up rather than stranding the question. That
-    # also leaves the absent-robot policy intact — KGRouter.decide computes
-    # the pick as if everyone were present, so an away specialist still
-    # produces a defer rather than a silent handover to a non-specialist.
-    specialists = _specialists(edges, topic_id)
-    if specialists:
-        narrowed = [r for r in robot_ids if r in specialists]
-        if narrowed:
-            robot_ids = narrowed
+    robot_ids = surviving_candidates(edges, topic_id, robot_ids, absent)
 
     ranked = rank_robots(edges, links, topic_id, robot_ids)
     if not ranked:

@@ -119,8 +119,23 @@ def create_kg_gateway(registry=None, ws_gateway=None) -> Blueprint:
                 "message": "No topic resolved — correction logged, graph unchanged.",
             })
 
+        # Who DECLARES this topic as their subject. Changes what a
+        # displacement means: routing away from a specialist to someone
+        # outside its scope is a statement about the subject or about
+        # availability, not a judgement on how well the specialist handles
+        # its own area — see kg_feedback.from_reroute.
+        try:
+            specialists = {
+                e["robot_id"] for e in repo.graph()
+                if e["topic_id"] == topic_id and e.get("specialised")
+            }
+        except Exception as e:
+            print(f"[kg_gateway] could not read declared scope: {e}")
+            specialists = set()
+
         observations = from_reroute(topic_id, chosen,
-                                    (data.get("displaced_robot_id") or "").strip() or None)
+                                    (data.get("displaced_robot_id") or "").strip() or None,
+                                    specialists=specialists)
         edges = apply(observations, repo)
 
         # Suppress this segment's outcome observations. Without it a corrected

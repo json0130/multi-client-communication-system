@@ -14,7 +14,8 @@ from __future__ import annotations
 import pytest
 
 from decision.kg import Evidence, PRIOR, RobotTopicEdge
-from decision.kg_feedback import apply, from_reroute, from_segment_outcome
+from decision.kg_feedback import (TARGET_CHOSEN, Segment, apply,
+                                  from_reroute, from_segment_outcome)
 
 A, B = "chatbox_001", "navel_001"
 T = "topic:rag"
@@ -214,3 +215,98 @@ class TestSilenceRule:
         seg = Segment()
         seg.note_routed(A, T)
         assert seg.observations()[0].evidence is Evidence.OUTCOME
+
+
+# ── Stage 2: scope and quality are different claims ───────────────────────────
+
+class TestDisplacementIsScopeAware:
+    """
+    Routing away from a declared specialist to someone outside its scope is a
+    statement about the subject, or about who was free — not a judgement on
+    how well the specialist handles its own area. Penalising it there would
+    teach "Silbot is bad at navigation" from an event that said nothing of
+    the kind.
+    """
+
+    TOPIC = "topic:social-robot-navigation"
+
+    def test_crossing_out_of_scope_does_not_penalise_the_specialist(self):
+        out = from_reroute(self.TOPIC, "chatbox_01", "silbot_01",
+                           specialists={"silbot_01"})
+        assert [o.robot_id for o in out] == ["chatbox_01"]
+        assert all(o.target == TARGET_CHOSEN for o in out)
+
+    def test_the_positive_is_never_suppressed(self):
+        # A reroute is a human deliberately naming a robot. Unlike an
+        # automatic outcome it cannot fire just because scope left one
+        # candidate standing.
+        out = from_reroute(self.TOPIC, "chatbox_01", "silbot_01",
+                           specialists={"silbot_01"})
+        assert out and out[0].robot_id == "chatbox_01"
+        assert out[0].evidence is Evidence.SUPERVISOR
+
+    def test_between_two_specialists_it_is_a_real_comparison(self):
+        out = from_reroute(self.TOPIC, "silbot_01", "navel_01",
+                           specialists={"silbot_01", "navel_01"})
+        assert {o.robot_id for o in out} == {"silbot_01", "navel_01"}
+        displaced = next(o for o in out if o.robot_id == "navel_01")
+        assert displaced.evidence is Evidence.DISPLACED
+
+    def test_between_two_non_specialists_it_is_a_real_comparison(self):
+        # An undeclared topic — nobody owns it, so the reroute is pure
+        # competence evidence and behaves exactly as it did before Stage 2.
+        out = from_reroute("topic:text-to-speech", "navel_01", "chatbox_01",
+                           specialists=set())
+        assert {o.robot_id for o in out} == {"navel_01", "chatbox_01"}
+
+    def test_routing_TO_the_specialist_still_penalises_the_displaced(self):
+        # The system routed outside scope and the operator corrected it. The
+        # non-specialist genuinely did worse here, so the pair is written.
+        out = from_reroute(self.TOPIC, "silbot_01", "chatbox_01",
+                           specialists={"silbot_01"})
+        assert {o.robot_id for o in out} == {"silbot_01", "chatbox_01"}
+
+    def test_no_specialists_argument_behaves_as_before(self):
+        # Callers that have not been updated must keep working unchanged.
+        out = from_reroute(self.TOPIC, "chatbox_01", "silbot_01")
+        assert {o.robot_id for o in out} == {"chatbox_01", "silbot_01"}
+
+
+class TestOutcomeNeedsAChoice:
+    """
+    An outcome means "this robot handled the segment and nobody intervened".
+    That is evidence about quality only if somebody could have been chosen
+    instead. When declared scope narrowed the field to one specialist there
+    was no choice, and recording it anyway would let the weight climb toward
+    1.0 purely by counting how often scope fired — the hand-typed partition
+    re-derived through the outcome path.
+
+    This is the leak that would actually be large: unlike a reroute, an
+    outcome is automatic and fires on every clean segment.
+    """
+
+    def test_a_sole_candidate_credits_nothing(self):
+        s = Segment()
+        s.note_routed("silbot_01", "topic:social-robot-navigation",
+                      had_alternatives=False)
+        assert s.observations() == []
+        assert s.answered_anything is False
+
+    def test_a_real_choice_still_credits(self):
+        s = Segment()
+        s.note_routed("silbot_01", "topic:social-robot-navigation",
+                      had_alternatives=True)
+        assert [o.robot_id for o in s.observations()] == ["silbot_01"]
+
+    def test_it_defaults_to_crediting(self):
+        # Callers that predate the argument keep their behaviour.
+        s = Segment()
+        s.note_routed("silbot_01", "topic:social-robot-navigation")
+        assert len(s.observations()) == 1
+
+    def test_a_mixed_window_credits_only_the_real_choices(self):
+        s = Segment()
+        s.note_routed("silbot_01", "topic:social-robot-navigation",
+                      had_alternatives=False)
+        s.note_routed("navel_01", "topic:text-to-speech", had_alternatives=True)
+        assert [o.robot_id for o in s.observations()] == ["navel_01"]

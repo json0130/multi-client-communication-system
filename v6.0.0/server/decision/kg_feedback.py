@@ -61,6 +61,7 @@ def from_reroute(
     topic_id: Optional[str],
     chosen_robot_id: str,
     displaced_robot_id: Optional[str] = None,
+    specialists: Iterable[str] = (),
 ) -> list:
     """
     An operator sent a question to `chosen_robot_id` instead of whoever had it.
@@ -69,6 +70,29 @@ def from_reroute(
     a question that mentioned no subject, and it is correct: an observation
     filed against the wrong topic is worse than no observation, because it is
     indistinguishable from a real one afterwards.
+
+    `specialists` are the robots whose DECLARED scope covers this topic (see
+    RobotTopicEdge.specialised). They change what a displacement means, and
+    only that:
+
+      displaced was a specialist, chosen was not
+          The operator went outside declared scope. The likely reasons are
+          that the subject was misread, or that the specialist was busy —
+          neither is a judgement on how well the specialist handles its own
+          topic. Penalising it here would teach "Silbot is bad at
+          navigation" from an event that said nothing of the kind, so the
+          penalty is suppressed and only the positive is recorded.
+
+      any other combination
+          Both specialists, or neither, or the specialist gained the
+          question. The operator was choosing between comparable
+          candidates, which is exactly the comparison `weight` is meant to
+          hold, so the usual asymmetric pair is written.
+
+    The POSITIVE is never suppressed. A reroute is a human deliberately
+    naming a robot, and unlike an automatic outcome it cannot fire just
+    because scope left one candidate standing — if scope had already sent
+    the question there, there would have been nothing to reroute.
     """
     if not topic_id or not chosen_robot_id:
         return []
@@ -79,8 +103,12 @@ def from_reroute(
     # Self-reroute is a no-op on the negative side: an operator re-confirming the
     # robot that already had the question is evidence FOR it and nothing else.
     if displaced_robot_id and displaced_robot_id != chosen_robot_id:
-        out.append(Observation(displaced_robot_id, topic_id, TARGET_DISPLACED,
-                               Evidence.DISPLACED, "operator routed away"))
+        specialists = set(specialists)
+        crossed_out_of_scope = (displaced_robot_id in specialists
+                                and chosen_robot_id not in specialists)
+        if not crossed_out_of_scope:
+            out.append(Observation(displaced_robot_id, topic_id, TARGET_DISPLACED,
+                                   Evidence.DISPLACED, "operator routed away"))
     return out
 
 
@@ -111,14 +139,32 @@ class Segment:
     routed: list = field(default_factory=list)   # (robot_id, topic_id) pairs
     corrected: bool = False
 
-    def note_routed(self, robot_id: Optional[str], topic_id: Optional[str]) -> None:
+    def note_routed(self, robot_id: Optional[str], topic_id: Optional[str],
+                    had_alternatives: bool = True) -> None:
         """A question was answered by `robot_id` and resolved to `topic_id`.
 
         A turn whose topic never resolved is NOT recorded. It was a real
         question, but there is no edge it belongs to, and attributing it to a
         guess would be worse than dropping it.
+
+        `had_alternatives` is False when routing had exactly one candidate —
+        typically because declared scope narrowed the field to a single
+        specialist. Those turns are NOT recorded either, and that is the
+        second half of the scope/quality split.
+
+        An outcome means "this robot handled the segment and nobody
+        intervened". That is evidence about QUALITY only if somebody could
+        have been chosen instead; when there was one candidate it says
+        nothing except that scope fired. Recording it anyway would let the
+        weight climb toward 1.0 purely by counting how often scope sent
+        questions to the same robot — the hand-typed partition re-derived
+        through the outcome path, which is precisely the circularity that
+        splitting `specialised` out of `weight` was meant to end.
+
+        Unlike a reroute, an outcome is automatic and fires on every clean
+        segment, so this is where that leak would actually be large.
         """
-        if robot_id and topic_id:
+        if robot_id and topic_id and had_alternatives:
             self.routed.append((robot_id, topic_id))
 
     def note_correction(self) -> None:
