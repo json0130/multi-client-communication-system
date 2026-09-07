@@ -255,6 +255,8 @@ def derive_route(
     remaining_blocks: Iterable[str],
     guide_robot_id: str,
     absent_policy: str = "defer",
+    ineligible: Iterable[str] = (),
+    learned_winner: Optional[str] = None,
 ) -> RouteOutcome:
     """
     Who answers, re-derived from decision/kg_policy.py's ABSENT_ROBOT_POLICY.
@@ -268,9 +270,25 @@ def derive_route(
     was never judged.
     """
     absent, remaining = set(absent), set(remaining_blocks)
+    ineligible = set(ineligible)
 
     if topic_owner is None:
-        return RouteOutcome(None, None, 0)        # receiver answers, unrecorded
+        # UNDECLARED topic — nobody's project covers it, so scope is silent
+        # and the LEARNED weight is the only thing that could decide. It only
+        # gets to when the candidates are actually distinguishable;
+        # otherwise the graph is ordering robots on propagated fractions of
+        # one distant observation, which the live graph did at a 0.003
+        # margin. `learned_winner` is the robot with real evidence, or None
+        # when nothing separates them — in which case the receiver answers or
+        # delegation takes it, and nothing is recorded either way.
+        if learned_winner and learned_winner not in set(ineligible) | set(absent):
+            return RouteOutcome(learned_winner, None, 1)
+        return RouteOutcome(None, None, 0)
+
+    # DECLARED scope is exclusive: an owner that cannot answer does not hand
+    # the topic to a robot whose project it is not.
+    if topic_owner in ineligible:
+        return RouteOutcome(None, None, 0)
 
     if topic_owner not in absent:
         return RouteOutcome(topic_owner, None, 1)
@@ -278,6 +296,7 @@ def derive_route(
     if absent_policy == "defer" and topic_owner in remaining:
         return RouteOutcome(None, topic_owner, 0)
 
-    # Either the policy is guide_answers, or the block was already cut and
-    # there is no station left to defer to.
+    # The policy is guide_answers, or the block was already cut and there is
+    # no station left to defer to. Under EXCLUSIVE scope the guide is the
+    # only permitted answerer here — never a peer.
     return RouteOutcome(guide_robot_id, None, 1)

@@ -249,9 +249,14 @@ def _outcome(plan: dict, projects=None) -> dict:
     }
 
 
-def _route(utterance: str, absent=(), remaining_blocks=None) -> dict:
+def _route(utterance: str, absent=(), remaining_blocks=None,
+           ineligible=()) -> dict:
     """The real router, plus what the Segment would record."""
-    router = KGRouter(EDGES, [], TOPICS, explore=False,
+    from dataclasses import replace as _replace
+    barred = set(ineligible)
+    edges = [_replace(e, eligible=False) if e.robot_id in barred else e
+             for e in EDGES]
+    router = KGRouter(edges, [], TOPICS, explore=False,
                       absent_robot_ids=absent)
     decision = router.decide(
         utterance, PROJECTS,
@@ -509,22 +514,75 @@ def _generated_plan_cases():
 
 
 def _generated_route_cases():
+    """Routing across the three structural filters that decide production:
+    declared scope, eligibility and presence.
+
+    The grid used to vary presence only, against a graph of observed edges
+    with no declared scope — so it exercised the learned-weight path while
+    production decides almost everything by scope. It now varies the
+    mechanism that actually runs.
+    """
     from tools.eval_oracle import derive_route
 
     for topic, owner in TOPIC_OWNER.items():
-        for label, absent, remaining in (
-            ("present", (), tuple(PROJECTS)),
-            ("absent-block-ahead", (owner,), tuple(PROJECTS)),
-            ("absent-block-cut", (owner,),
+        peer = next(r for r in PROJECTS if r != owner)
+        for label, absent, ineligible, remaining in (
+            ("present",            (),       (),      tuple(PROJECTS)),
+            ("absent-block-ahead", (owner,), (),      tuple(PROJECTS)),
+            ("absent-block-cut",   (owner,), (),
              tuple(r for r in PROJECTS if r != owner)),
+            # Scope is exclusive, so an ineligible owner strands the topic
+            # rather than passing it to a robot who does not own it.
+            ("owner-ineligible",   (),       (owner,), tuple(PROJECTS)),
+            # A peer being away or barred must not disturb a decision that
+            # was never theirs to make.
+            ("peer-absent",        (peer,),  (),      tuple(PROJECTS)),
+            ("peer-ineligible",    (),       (peer,), tuple(PROJECTS)),
         ):
             yield {
                 "id": f"G-route-{owner}-{label}",
                 "kind": "route",
                 "utterance": TOPIC_UTTERANCE[topic],
                 "absent": absent,
+                "ineligible": ineligible,
                 "remaining": remaining,
-                "expected": derive_route(owner, absent, remaining, GUIDE),
+                "expected": derive_route(owner, absent, remaining, GUIDE,
+                                         ineligible=ineligible),
+            }
+
+    # UNDECLARED topics: nobody's project covers them, so the graph should
+    # decline rather than order robots on propagated noise. The old grid had
+    # no case for this half of routing at all.
+    for label, utterance, learned in (
+        # ChatBox holds real observations on text-to-speech (see EDGES), so
+        # the learned path decides it even though nobody declares it — the
+        # one place a weight can still change a routing outcome.
+        ("text-to-speech-observed",
+         "which text to speech engine makes the voices", CHATBOX),
+        # Nothing has ever been observed here, so nothing separates the
+        # candidates and the graph must decline.
+        ("robot-hardware-unobserved",
+         "tell me about the robot hardware", None),
+    ):
+        yield {
+            "id": f"G-route-undeclared-{label}",
+            "kind": "route",
+            "utterance": utterance,
+            "absent": (), "ineligible": (), "remaining": tuple(PROJECTS),
+            "expected": derive_route(None, (), PROJECTS, GUIDE,
+                                     learned_winner=learned),
+        }
+        # And with that same robot barred, the learned path has nobody left.
+        if learned:
+            yield {
+                "id": f"G-route-undeclared-{label}-barred",
+                "kind": "route",
+                "utterance": utterance,
+                "absent": (), "ineligible": (learned,),
+                "remaining": tuple(PROJECTS),
+                "expected": derive_route(None, (), PROJECTS, GUIDE,
+                                         ineligible=(learned,),
+                                         learned_winner=learned),
             }
 
 
@@ -557,7 +615,8 @@ def run_generated(case: dict) -> list:
                     f"{got_qa} vs {round(e.qa_budget_sec)}"))
     else:
         actual = _route(case["utterance"], absent=case["absent"],
-                        remaining_blocks=case["remaining"])
+                        remaining_blocks=case["remaining"],
+                        ineligible=case.get("ineligible", ()))
         out.append(("answering_robot",
                     actual["answering_robot"] == e.answering_robot,
                     f"{actual['answering_robot']} vs {e.answering_robot}"))
