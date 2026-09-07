@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { getKgGraph, getKgTopics, getKgSummary, seedKg, observeKg, getRobots } from '../api'
+import { getKgGraph, getKgTopics, getKgSummary, seedKg, observeKg, getRobots,
+         getStyleFits, rateStyle, getDemoStatus } from '../api'
 import KGGraphView from './KGGraphView'
 
 /**
@@ -50,18 +51,23 @@ export default function KGTab() {
   const [error,    setError]    = useState('')
   const [showAll,  setShowAll]  = useState(false)  // include never-observed edges
   const [view,     setView]     = useState('matrix')  // 'matrix' | 'graph'
+  const [fits,     setFits]     = useState([])     // (robot, style) audience fit
+  const [runStyle, setRunStyle] = useState(null)   // style of the live run, if any
 
   const load = useCallback(async () => {
     setError('')
     try {
-      const [g, t, s, r] = await Promise.all([
+      const [g, t, s, r, f, d] = await Promise.all([
         getKgGraph(), getKgTopics(), getKgSummary(), getRobots(),
+        getStyleFits(), getDemoStatus().catch(() => ({})),
       ])
       setEdges(g.edges || [])
       setTopics(t.topics || [])
       setLinks(t.links || [])
       setSummary(s)
       setRobots((r.robots || []))
+      setFits(f.fits || [])
+      setRunStyle(d && d.visitor_style ? d.visitor_style : null)
     } catch (e) {
       setError(e.message)
     }
@@ -306,6 +312,110 @@ export default function KGTab() {
           </div>
         </div>
       )}
+
+      <StyleFitPanel
+        fits={fits}
+        robots={robotIds}
+        runStyle={runStyle}
+        busy={busy}
+        onRate={(robotId, style, target) => run(() => rateStyle(robotId, style, target))}
+      />
+    </div>
+  )
+}
+
+const STYLES = ['technical', 'business', 'interactive']
+
+/**
+ * How well each robot pitches to each kind of audience.
+ *
+ * Rating was reachable only by curl, which meant it was never going to
+ * happen during a live tour — so the table stayed empty and the framing
+ * never adapted. Two clicks per cell, and the style of the running demo is
+ * highlighted so an operator does not have to remember which audience is in
+ * front of them.
+ *
+ * Supervisor judgements only. There is deliberately no automatic path into
+ * this table: a Q&A window closing cleanly says nobody objected to the
+ * ROUTING, and says nothing at all about how the answer was pitched.
+ */
+function StyleFitPanel({ fits, robots, runStyle, busy, onRate }) {
+  const byKey = {}
+  fits.forEach(f => { byKey[`${f.robot_id}|${f.style}`] = f })
+
+  return (
+    <div className="kg-panel" style={{ marginTop: 18 }}>
+      <div className="kg-panel-head">
+        <h3 style={{ margin: 0, fontSize: 14 }}>Audience fit</h3>
+        <span className="muted" style={{ fontSize: 12 }}>
+          How well each robot pitches to each audience. Rate after you hear an
+          answer land — or not. Never affects who answers, only how the answer
+          is framed.
+        </span>
+      </div>
+
+      <table className="kg-table" style={{ width: '100%' }}>
+        <thead>
+          <tr>
+            <th style={{ textAlign: 'left' }}>Robot</th>
+            {STYLES.map(st => (
+              <th key={st} style={{ textAlign: 'center' }}>
+                {st}
+                {runStyle === st && (
+                  <span className="muted" style={{ fontSize: 10, display: 'block' }}>
+                    this run
+                  </span>
+                )}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {robots.map(rid => (
+            <tr key={rid}>
+              <td style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>{rid}</td>
+              {STYLES.map(st => {
+                const f = byKey[`${rid}|${st}`]
+                const n = f ? f.n_supervisor : 0
+                const clamped = f ? Number(f.clamped) : 0.5
+                // The threshold decision/style_fit.py acts on, shown rather
+                // than left implicit — this is the only thing a rating
+                // actually changes.
+                const reinforced = clamped < 0.40
+                return (
+                  <td key={st} style={{ textAlign: 'center', padding: '6px 4px' }}>
+                    <div style={{
+                      fontFamily: 'var(--mono)', fontSize: 12,
+                      color: n === 0 ? 'var(--muted)'
+                           : reinforced ? 'var(--danger, #c0392b)' : 'inherit',
+                    }}>
+                      {n === 0 ? '—' : clamped.toFixed(2)}
+                      <span className="muted" style={{ fontSize: 10 }}>
+                        {n > 0 ? ` n=${n}` : ''}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 3 }}>
+                      <button className="btn btn-secondary" disabled={busy}
+                              style={{ padding: '1px 7px', fontSize: 11 }}
+                              title={`${rid} pitched well to a ${st} audience`}
+                              onClick={() => onRate(rid, st, 1.0)}>+</button>
+                      <button className="btn btn-secondary" disabled={busy}
+                              style={{ padding: '1px 7px', fontSize: 11 }}
+                              title={`${rid} pitched poorly to a ${st} audience`}
+                              onClick={() => onRate(rid, st, 0.0)}>−</button>
+                    </div>
+                    {reinforced && (
+                      <div className="muted" style={{ fontSize: 9, marginTop: 2 }}>
+                        corrective note on
+                      </div>
+                    )}
+                  </td>
+                )
+              })}
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }

@@ -857,6 +857,13 @@ class DemoOrchestrator:
                 "elapsed_sec":     round(elapsed, 1),
                 "time_budget_sec": self._time_budget_sec,
                 "revisions":       list(self._revisions),
+                # The run's standing visitor style. Exposed so the dashboard
+                # can offer a one-click rating against the audience actually
+                # being presented to — rating style fit needs to know which
+                # style was in force, and until now nothing outside the
+                # orchestrator could tell.
+                "visitor_style":   (self._visitor_profile.style
+                                    if self._visitor_profile else None),
                 # Full step list for the dashboard timeline
                 "steps": [
                     {

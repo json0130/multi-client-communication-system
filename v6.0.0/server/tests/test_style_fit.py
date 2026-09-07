@@ -149,3 +149,44 @@ class TestItNeverTouchesRouting:
         from decision import kg_infer, kg_policy
         for module in (kg_infer, kg_policy):
             assert "style_fit" not in inspect.getsource(module)
+
+
+class TestTheRatingPathIsReachable:
+    """
+    Rating was endpoint-only, which meant it was never going to happen during
+    a live tour — so the table stayed empty and the framing never adapted.
+    These pin the pieces the dashboard panel needs.
+    """
+
+    def test_the_run_reports_its_visitor_style(self):
+        # The panel highlights the style in force so an operator does not
+        # have to remember which audience is in front of them.
+        from decision.visitor_profile import VisitorProfile
+        from demo.demo_orchestrator import DemoOrchestrator, DemoStep
+
+        class Stub:
+            def send_to_robot(self, *a, **k): pass
+        o = DemoOrchestrator(Stub())
+        o.load_script([DemoStep(step_id="s", robot_id="r", text="x")])
+        assert o.get_status()["visitor_style"] is None
+        o._visitor_profile = VisitorProfile(style="business")
+        assert o.get_status()["visitor_style"] == "business"
+
+    def test_the_panel_threshold_matches_the_code(self):
+        # The panel shows "corrective note on" below REINFORCE_BELOW. If the
+        # constant moves and the panel does not, it reports the wrong state.
+        import re
+        src = open("robot-dashboard/src/components/KGTab.jsx").read()
+        shown = re.search(r"clamped < ([0-9.]+)", src)
+        assert shown, "the panel no longer shows the reinforcement threshold"
+        assert float(shown.group(1)) == REINFORCE_BELOW
+
+    def test_every_rateable_style_has_a_directive(self):
+        # A style the panel offers but that frames nothing would collect
+        # ratings that change no behaviour.
+        import re
+        src = open("robot-dashboard/src/components/KGTab.jsx").read()
+        listed = re.search(r"const STYLES = \[([^\]]+)\]", src)
+        assert listed
+        for st in re.findall(r"'([a-z]+)'", listed.group(1)):
+            assert STYLE_FRAMING.get(st), f"{st} is rateable but frames nothing"

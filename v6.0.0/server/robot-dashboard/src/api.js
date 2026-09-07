@@ -98,3 +98,11 @@ export const observeKg    = (robotId, topicId, target, kind = 'supervisor') =>
 export const getFlowStatus = () => req('GET', '/flow/status')
 export const previewFlowPlan = (budgetSec, interest = '', importance = {}) =>
   req('POST', '/flow/plan', { budget_sec: budgetSec, interest, importance })
+
+// ── Style fit ────────────────────────────────────────────────────────────────
+// How well each robot pitches to each kind of audience. Supervisor judgements
+// only — there is deliberately no automatic path into this table, because a
+// Q&A window closing cleanly says nothing about how an answer was pitched.
+export const getStyleFits = ()  => req('GET', '/kg/style')
+export const rateStyle = (robotId, style, target) =>
+  req('POST', '/kg/style', { robot_id: robotId, style, target })
