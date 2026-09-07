@@ -81,11 +81,20 @@ def build_delegation_prompt(
 
     # Format active peers
     if active_robots:
+        # Declared topics, where the graph knows them, because ownership is
+        # what makes a hand-off decidable. Given only prose roles, a robot
+        # asked about a peer's subject answered it itself.
         peer_lines = "\n".join(
             f"  - ID: '{r['client_id']}' | Name: {r['robot_name']} | Role: {r['robot_role']}"
+            + (f"\n      OWNS: {', '.join(r['declared_topics'])}"
+               if r.get("declared_topics") else "")
             for r in active_robots
         )
-        peers_block = f"CURRENTLY ACTIVE ROBOTS:\n{peer_lines}"
+        peers_block = (
+            f"CURRENTLY ACTIVE ROBOTS:\n{peer_lines}\n"
+            "If a question is about a subject another robot OWNS, it is theirs "
+            "to answer, not yours — hand it over even if you could attempt it."
+        )
     else:
         peers_block = "CURRENTLY ACTIVE ROBOTS:\n  None. You are the only active robot."
 

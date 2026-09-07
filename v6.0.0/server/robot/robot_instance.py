@@ -519,13 +519,32 @@ class RobotInstance:
         )
 
     def _get_active_peers(self) -> list[dict]:
-        """Fetch all other currently active robots from DB."""
+        """Other active robots, each with the topics it actually declares.
+
+        The declared topics matter as much as the role prose: asked how it
+        would recall something a visitor said an hour ago, Silbot explained
+        long-context memory — ChatBox's declared area — instead of handing
+        over, because the peer list gave it a paragraph about ChatBox rather
+        than a list of what ChatBox owns. Ownership is a fact the graph
+        already holds; showing it makes hand-off decidable rather than a
+        judgement about prose.
+
+        Best-effort: an unreachable graph returns the roles alone, which is
+        exactly the previous behaviour.
+        """
         peers = robot_repo.get_all_active_robots(exclude_id=self.client_id)
+        try:
+            from data.demo_kg_repo import declared_topics_by_robot
+            declared = declared_topics_by_robot()
+        except Exception as e:
+            print(f"[RobotInstance] declared topics unavailable: {e}")
+            declared = {}
         return [
             {
                 "client_id": r.client_id,
                 "robot_name": r.robot_name,
                 "robot_role": r.robot_role,
+                "declared_topics": declared.get(r.client_id, []),
             }
             for r in peers
         ]

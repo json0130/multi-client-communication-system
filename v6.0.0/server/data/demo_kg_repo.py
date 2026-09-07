@@ -128,6 +128,29 @@ def apply_observation(
 
 # ── Reads for the dashboard ───────────────────────────────────────────────────
 
+def declared_topics_by_robot() -> dict:
+    """{robot_id: [topic label, ...]} for every DECLARED edge.
+
+    Read by robot/robot_instance.py when it lists teammates, so the model can
+    see who owns what instead of inferring it from a prose role. Without it a
+    robot asked about a peer's subject answered anyway: Silbot, asked how it
+    would recall something a visitor said an hour ago, explained long-context
+    memory — ChatBox's declared area — rather than handing over.
+
+    Empty on any failure, which returns the peer list to roles alone.
+    """
+    try:
+        rows = (get_client().table(VIEW).select("robot_id,topic_label,specialised")
+                .eq("specialised", True).execute().data or [])
+    except Exception as e:
+        print(f"[demo_kg_repo] declared_topics_by_robot error: {e}")
+        return {}
+    out: dict = {}
+    for r in rows:
+        out.setdefault(r["robot_id"], []).append(r.get("topic_label") or "")
+    return {k: sorted(v for v in vs if v) for k, vs in out.items()}
+
+
 def graph(robot_id: Optional[str] = None) -> list[dict]:
     """Edges with confidence/clamped/human_share precomputed by the view, so the
     UI never reimplements the arithmetic."""

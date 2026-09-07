@@ -160,9 +160,32 @@ def main() -> int:
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--report", action="store_true")
+    ap.add_argument("--list", action="store_true",
+                    help="print every unverified fact with its id, for review")
+    ap.add_argument("--verify", nargs="*", metavar="ID",
+                    help="mark fact ids as researcher-confirmed; "
+                         "--verify all marks every unverified row")
     args = ap.parse_args()
 
     from data import demo_facts_repo as repo
+
+    if args.list or args.verify is not None:
+        from data.connection import get_client
+        rows = (get_client().table(repo.TABLE).select("*")
+                .eq("verified", False).order("topic_id").execute().data or [])
+        if args.verify is None:
+            print(f"  {len(rows)} unverified fact(s). Confirm with "
+                  f"--verify <id> [<id> ...], or --verify all\n")
+            for r in rows:
+                print(f"  [{r['id']:>4}] {r['kind']:<11} {r['topic_id'][6:]:<30} "
+                      f"{r.get('robot_id') or '(general)'}")
+                print(f"         {r['fact']}")
+            return 0
+        targets = ([r["id"] for r in rows] if args.verify == ["all"]
+                   else [int(x) for x in args.verify])
+        done = sum(1 for t in targets if repo.set_verified(t, True))
+        print(f"  marked {done}/{len(targets)} fact(s) verified.")
+        return 0
 
     if args.report:
         rows = repo.coverage()
