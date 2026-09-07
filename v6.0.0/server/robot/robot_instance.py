@@ -226,11 +226,20 @@ class RobotInstance:
         is_delegated: bool = False,
         delegated_context: Optional[Sequence[MemoryRecord]] = None,
         task_id: Optional[str] = None,
+        style_framing: str = "",
     ) -> ChatResult:
         """
         Like process_chat() but fires on_sentence(clean_text, emotion_tag) for each
         sentence as the LLM generates it. Returns the final ChatResult after streaming.
         on_sentence is called synchronously — the caller thread is held during generation.
+
+        `style_framing` is the visitor's audience directive (see
+        decision/visitor_profile.py). Scripted steps have always carried it;
+        Q&A answers did not, which meant a technical visitor got precise
+        language from the scripted talk and generic language the moment they
+        asked a follow-up — and Q&A is where a visitor spends most of their
+        attention. Appended to the SYSTEM prompt, so it steers how the answer
+        is worded without becoming something the robot reads out.
         """
         self.last_active = time.time()
         self._refresh_role_from_db()
@@ -258,6 +267,9 @@ class RobotInstance:
                 self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context,
             )
+
+        if style_framing:
+            system += f"\n\n*** THIS VISITOR ***{style_framing}"
 
         from modules.llm.llm_provider import parse_response
         full_text = ""

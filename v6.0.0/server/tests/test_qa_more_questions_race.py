@@ -81,10 +81,13 @@ class FakeInstance:
     def classify_qa_intent(self, message):
         return self._intent
 
-    def process_chat_stream(self, message, on_sentence):
+    def process_chat_stream(self, message, on_sentence, style_framing="", **kw):
         # A real robot's own conversational reply — exactly the call that
         # used to race the orchestrator's background state flip. Tagged with
         # client_id so a reroute test can tell WHICH robot actually answered.
+        # Record the framing so a test can assert the visitor's style reached
+        # the Q&A path, not only the scripted steps.
+        self.last_style_framing = style_framing
         text = f"[{self.client_id}] Great, let's move on!"
         on_sentence(text, "DEFAULT")
         return _ChatResult(text)

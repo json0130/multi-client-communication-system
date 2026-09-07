@@ -618,6 +618,21 @@ class WebSocketGateway:
             self._auto_close_timer = timer
         timer.start()
 
+    def style_framing_for(self, robot_id: str) -> str:
+        """The visitor's style directive for this robot, or "" — best-effort.
+
+        Q&A answers used to be the one generated text that ignored the visitor
+        profile entirely. See RobotInstance.process_chat_stream.
+        """
+        orch = self._demo_orchestrator
+        if orch is None:
+            return ""
+        try:
+            return orch.framing_for_robot(robot_id) or ""
+        except Exception as e:
+            logger.warning(f"[WS Gateway] style framing lookup failed: {e}")
+            return ""
+
     def check_qa_auto_close(self, responding_robot_id: str, clean_text: str):
         """
         Decide, after a robot responds, whether the Q&A window should close.
@@ -1015,7 +1030,10 @@ class WebSocketGateway:
                             "emotion_tag": emotion_tag,
                         })
 
-                    result = target_instance.process_chat_stream(message, _on_sentence)
+                    result = target_instance.process_chat_stream(
+                        message, _on_sentence,
+                        style_framing=self.style_framing_for(target_id),
+                    )
                     # Did the robot just sign off? If so the window closes on
                     # its own after a pause, instead of waiting for someone to
                     # say "move on" out loud.

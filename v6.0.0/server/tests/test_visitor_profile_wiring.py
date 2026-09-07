@@ -184,3 +184,52 @@ class TestStyleFitReachesGeneration:
         o._visitor_profile = None
         o._send_step(o._script[0])
         assert gw.received_instructions[-1] == "Explain your project."
+
+
+class TestQAAnswersAreStyledToo:
+    """
+    The visitor profile used to reach scripted steps only. A technical visitor
+    got precise language from the project talk and generic language the moment
+    they asked a follow-up — and Q&A is where a visitor spends most of their
+    attention, so half the styling was missing from the half that matters most.
+    """
+
+    def _orch(self, style="technical"):
+        from decision.visitor_profile import VisitorProfile
+        gw = RecordingGateway()
+        o = DemoOrchestrator(gw)
+        o.load_script([DemoStep(step_id="s", robot_id="silbot_01", text="x")])
+        o._visitor_profile = VisitorProfile(style=style)
+        return o, gw
+
+    def test_the_run_exposes_its_framing(self):
+        from decision.visitor_profile import STYLE_FRAMING
+        o, _ = self._orch("technical")
+        assert o.framing_for_robot("silbot_01") == STYLE_FRAMING["technical"]
+
+    def test_no_profile_means_no_framing(self):
+        o, _ = self._orch()
+        o._visitor_profile = None
+        assert o.framing_for_robot("silbot_01") == ""
+
+    def test_general_style_frames_nothing(self):
+        o, _ = self._orch("general")
+        assert o.framing_for_robot("silbot_01") == ""
+
+    def test_the_gateway_lookup_is_best_effort(self):
+        # A framing lookup must never be able to stop a robot answering.
+        from gateway.websocket_gateway import WebSocketGateway
+
+        class Boom:
+            def framing_for_robot(self, robot_id):
+                raise RuntimeError("nope")
+
+        gw = WebSocketGateway.__new__(WebSocketGateway)
+        gw._demo_orchestrator = Boom()
+        assert WebSocketGateway.style_framing_for(gw, "silbot_01") == ""
+
+    def test_no_orchestrator_means_no_framing(self):
+        from gateway.websocket_gateway import WebSocketGateway
+        gw = WebSocketGateway.__new__(WebSocketGateway)
+        gw._demo_orchestrator = None
+        assert WebSocketGateway.style_framing_for(gw, "silbot_01") == ""

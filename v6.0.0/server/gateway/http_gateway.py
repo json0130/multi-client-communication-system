@@ -367,7 +367,10 @@ def create_http_gateway(
                 "emotion_tag": emotion_tag,
             })
 
-        result = target_instance.process_chat_stream(message, _on_sentence)
+        result = target_instance.process_chat_stream(
+            message, _on_sentence,
+            style_framing=ws_gateway.style_framing_for(target_id),
+        )
 
         # Did the robot just sign off ("let me know if you have any other
         # questions")? If so the window closes on its own after a pause,

@@ -1145,6 +1145,18 @@ class DemoOrchestrator:
             logger.info(f"[Demo] '{block_robot_id}' already engaged ad-hoc "
                        f"({engagement['turns']} turns) — compressed its scripted intro.")
 
+    def framing_for_robot(self, robot_id: str) -> str:
+        """The style directive for `robot_id` under the CURRENT run's visitor
+        profile, or "" when no profile is set.
+
+        Public so the Q&A path can use the same framing scripted steps get.
+        Without it a technical visitor heard precise language during the talk
+        and generic language the moment they asked a follow-up.
+        """
+        with self._lock:
+            profile = self._visitor_profile
+        return self._framing_for(robot_id, profile)
+
     def _framing_for(self, robot_id: str, profile) -> str:
         """The style directive for one generated step.
 
