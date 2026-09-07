@@ -889,8 +889,20 @@ class DemoOrchestrator:
         Q&A step's ACK time is the guide finishing its invitation, not the
         window; conflating the two would put operator-driven variance into the
         content averages, which is the whole thing this split avoids.
+
+        RESUME steps are excluded for the same reason. A scripted step's
+        length is a property of its content, which is why averaging it across
+        runs converges on something useful. The length of a resume is a
+        property of WHERE a visitor happened to interrupt — the same step
+        resumed twice yields two unrelated numbers — so folding those into
+        the content average makes every estimate worse the more
+        interruptions a campaign collects. Observed in real data before this
+        guard existed: a `chatbox_01_project_resume` row sitting alongside
+        the genuine step timings.
         """
-        if self._duration_sink is None or step.role == StepRole.QA:
+        if (self._duration_sink is None
+                or step.role == StepRole.QA
+                or step.step_id.endswith("_resume")):
             return
         with self._lock:
             started = self._step_started_at

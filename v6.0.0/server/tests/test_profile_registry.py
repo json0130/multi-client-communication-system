@@ -227,7 +227,14 @@ def test_the_lab_demo_profile_is_valid():
     assert p is not None
     assert p.get("pepper_01").access_level is AccessLevel.GLOBAL
     assert len(p.managers) == 1
-    for worker in ("chatbox_jetson_001", "navel_001", "silbot_01"):
+    # Derived from the script rather than hardcoded: these ids drifted once
+    # already — the profile went on naming chatbox_jetson_001 and navel_001
+    # after the live clients had become chatbox_01 and navel_01, so the two
+    # robots the profile was meant to govern silently fell back to the
+    # default access level. A literal list here cannot catch that; reading
+    # the same constants the script uses can.
+    from demo import demo_script
+    for worker in (demo_script.CHATBOX, demo_script.NAVEL, demo_script.SILBOT):
         assert p.get(worker).access_level is AccessLevel.LOCAL
 
 

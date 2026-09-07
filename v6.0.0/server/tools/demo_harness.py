@@ -229,14 +229,14 @@ class Harness:
         self.label_of = {t["id"]: t["label"] for t in self.topics}
 
         guide = "pepper_01"
-        projects = ["chatbox_jetson_001", "navel_001", "silbot_01"]
+        projects = ["chatbox_01", "navel_01", "silbot_01"]
         self.guide, self.projects = guide, projects
-        names = {"chatbox_jetson_001": "ChatBox", "navel_001": "Navel",
+        names = {"chatbox_01": "ChatBox", "navel_01": "Navel",
                  "silbot_01": "Silbot"}
         roles = {
-            "chatbox_jetson_001": "You research retrieval augmented generation "
+            "chatbox_01": "You research retrieval augmented generation "
                                   "and conversational memory for robots.",
-            "navel_001": "You research emotion recognition and social signals "
+            "navel_01": "You research emotion recognition and social signals "
                          "in human-robot interaction.",
             "silbot_01": "You research social navigation and mapping for robots "
                          "moving among people.",

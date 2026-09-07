@@ -31,12 +31,12 @@ robots:
   # default_visibility: global means the records they write are readable by the
   # Manager, which is what gives Pepper its unified view. It does not widen what
   # these robots can read — that is governed by access_level alone.
-  - id: chatbox_jetson_001
+  - id: chatbox_01
     role: "Conversational AI researcher"
     access_level: local
     default_visibility: global
 
-  - id: navel_001
+  - id: navel_01
     role: "Emotion-aware interaction researcher"
     access_level: local
     default_visibility: global
