@@ -1,0 +1,40 @@
+{
+  "archived_at": "2026-09-08T00:34:18.035065",
+  "reason": "outcome observations written by tools/audience_experiment.py, which wired kg_observer and so trained the graph on the very runs used to measure it \u2014 same fault as an unattended harness run; the experiment no longer writes",
+  "rows": [
+    {
+      "robot_id": "silbot_01",
+      "topic_id": "topic:text-to-speech",
+      "topic_label": "text to speech",
+      "topic_category": "speech",
+      "weight": 0.820015,
+      "eligible": true,
+      "specialised": false,
+      "n_supervisor": 0,
+      "n_outcome": 12,
+      "n_displaced": 0,
+      "n_obs": 12,
+      "confidence": 0.8,
+      "clamped": 0.756012010574341,
+      "human_share": 0,
+      "last_updated": "2026-09-07T09:36:48.834214+00:00"
+    },
+    {
+      "robot_id": "chatbox_01",
+      "topic_id": "topic:text-to-speech",
+      "topic_label": "text to speech",
+      "topic_category": "speech",
+      "weight": 0.575,
+      "eligible": true,
+      "specialised": false,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "n_displaced": 0,
+      "n_obs": 1,
+      "confidence": 0.25,
+      "clamped": 0.518749997019768,
+      "human_share": 0,
+      "last_updated": "2026-09-07T09:28:13.213305+00:00"
+    }
+  ]
+}

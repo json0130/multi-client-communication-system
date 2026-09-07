@@ -128,6 +128,28 @@ def rank_robots(
 
 # ── Routing, with exploration ─────────────────────────────────────────────────
 
+MIN_EVIDENCE_MARGIN = 0.05
+"""How far apart the best and worst candidate must be before the graph
+claims an opinion on a topic NOBODY declares.
+
+Only applies with exploration OFF, to undeclared topics, and only with more
+than one candidate. A near-tie is exactly what the exploration rules exist
+for, so a campaign still spends that turn learning; live, the same closeness
+means the graph cannot tell the candidates apart. A
+declared specialist wins on configuration and needs no evidence at all —
+that is what declaring means — and a single remaining candidate is the
+answer whatever its score.
+
+Deliberately a SPREAD and not a distance from the prior. A robot the graph
+is confident is bad at something is a real opinion about ordering, and
+gating on "above the prior" would discard it and strand a question that had
+a defensible answer.
+
+Set equal to EXPLORE_MARGIN, which already encodes "closer than this and the
+graph cannot tell two robots apart". Measured against the live graph, the
+orphan topics separated their top two by 0.003 — two orders of magnitude
+inside this."""
+
 EXPLORE_MARGIN = 0.05
 """Posterior gap below which two robots are treated as indistinguishable."""
 
@@ -182,21 +204,28 @@ def surviving_candidates(
     kg_feedback.Segment.note_routed). Computing it twice would let them
     disagree.
 
-    Scope is a PREFERENCE, not an exclusion: if every specialist is
-    ineligible or away the field opens back up rather than stranding the
-    question. That also leaves the absent-robot policy intact —
-    KGRouter.decide computes the pick as if everyone were present, so an
-    away specialist still produces a defer rather than a silent handover to
-    a non-specialist.
+    Scope is EXCLUSIVE where it is declared. If a topic has specialists,
+    only they may answer it, and the field does not reopen when they are
+    unavailable — an absent specialist produces a defer (see
+    ABSENT_ROBOT_POLICY), which is the honest outcome, rather than a silent
+    handover to a robot whose project it is not.
+
+    It was a preference, and the reopening was the problem: it meant routing
+    ALWAYS had an opinion, so the LLM delegation fallback could never run and
+    sat in the system untested. Exclusivity gives the two mechanisms
+    genuinely separate jobs — the graph answers what it was configured to
+    answer, and anything outside every declared area is handed to delegation
+    rather than resolved on noise.
+
+    Returns [] when scope excludes everyone. That is "no candidate", which
+    route() reports as no opinion, not an error.
     """
     excluded = _ineligible(edges, topic_id) | set(absent or ())
     candidates = [r for r in robot_ids if r not in excluded]
 
     specialists = _specialists(edges, topic_id)
     if specialists:
-        narrowed = [r for r in candidates if r in specialists]
-        if narrowed:
-            return narrowed
+        return [r for r in candidates if r in specialists]
     return candidates
 
 
@@ -275,6 +304,28 @@ def route(
     ranked = rank_robots(edges, links, topic_id, robot_ids)
     if not ranked:
         return None, "no robots"
+
+    # An UNDECLARED topic — nobody's project covers it. Ranking here can be
+    # ordering robots on propagated fractions of a single distant
+    # observation: the live graph separated the top two by 0.003 on all
+    # three orphan topics, which is noise presented as a decision. When the
+    # candidates are that close the honest answer is that the graph has no
+    # opinion, which hands the turn to the receiver or to LLM delegation —
+    # the mechanism that exists for exactly the questions declared scope
+    # does not cover.
+    #
+    # The test is the SPREAD between candidates, not the distance from the
+    # prior. A robot the graph is confident is BAD at something is still a
+    # real opinion about ordering, and with one candidate left there is
+    # nothing to be uncertain between — both of those must still route.
+    # Only when NOT exploring. A near-tie is the exploration rules' whole
+    # purpose — a campaign should spend that turn learning which robot is
+    # better. Live, with exploration off, the same closeness means the graph
+    # cannot tell them apart and should say so rather than pick one.
+    if (not explore and len(ranked) > 1
+            and not _specialists(edges, topic_id)
+            and ranked[0][1] - ranked[-1][1] < MIN_EVIDENCE_MARGIN):
+        return None, "no confident opinion"
     if len(ranked) == 1 or not explore:
         return ranked[0][0], "argmax"
 

@@ -374,10 +374,38 @@ class TestDeclaredScope:
         picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
         assert picked == OTHER
 
-    def test_without_a_declaration_it_falls_back_to_the_tie_break(self):
-        # The behaviour being fixed, pinned so the contrast is explicit.
-        picked, _ = route([], [], TOPIC, [R, OTHER], explore=False)
-        assert picked == sorted([R, OTHER])[0]
+    def test_without_a_declaration_and_without_evidence_there_is_no_opinion(self):
+        """Nobody declares it and nothing separates the candidates, so the
+        graph says so instead of ordering them alphabetically.
+
+        This used to return the alphabetically-first robot. On the live graph
+        that meant deciding all three orphan topics on a 0.003 margin —
+        propagated fractions of one distant observation, presented as a
+        routing decision. Saying nothing hands the turn to the receiver or to
+        LLM delegation, which is what that fallback is for."""
+        picked, reason = route([], [], TOPIC, [R, OTHER], explore=False)
+        assert picked is None
+        assert reason == "no confident opinion"
+
+    def test_a_campaign_still_explores_an_undeclared_tie(self):
+        # The gate is for live routing. A near-tie is precisely what the
+        # exploration rules exist to spend a turn on.
+        picked, _ = route([], [], TOPIC, [R, OTHER], explore=True)
+        assert picked in (R, OTHER)
+
+    def test_real_evidence_on_an_undeclared_topic_still_routes(self):
+        # The gate is about being unable to tell candidates apart, not about
+        # lacking a declaration.
+        edges = [observed(TOPIC, 1.0, 6, robot=OTHER)]
+        picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
+        assert picked == OTHER
+
+    def test_a_sole_candidate_routes_whatever_its_score(self):
+        # Nothing to be uncertain between. Even a robot the graph rates
+        # badly is the answer when it is the only one left.
+        edges = [observed(TOPIC, 0.0, 6, robot=R)]
+        picked, _ = route(edges, [], TOPIC, [R], explore=False)
+        assert picked == R
 
     def test_declared_scope_outranks_a_better_measured_non_specialist(self):
         # Scope is consulted BEFORE competence, so a non-specialist cannot
@@ -412,15 +440,28 @@ class TestDeclaredScope:
         picked, _ = route(edges, [], other_topic, [R, OTHER], explore=False)
         assert picked == R
 
-    def test_scope_is_a_preference_not_an_exclusion(self):
-        # Every specialist ineligible: the field opens back up rather than
-        # stranding the question.
+    def test_scope_is_EXCLUSIVE_the_field_does_not_reopen(self):
+        """Every specialist unavailable means nobody answers — the question
+        is not handed to a robot whose project it is not.
+
+        Scope used to be a preference that reopened the field. That meant
+        routing ALWAYS had an opinion, so the LLM delegation fallback could
+        never run and sat in the system untested. Exclusivity gives the two
+        mechanisms separate jobs: the graph answers what it was configured
+        to answer, and everything else goes to delegation."""
         edges = [
             RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC,
                            specialised=True, eligible=False),
         ]
-        picked, _ = route(edges, [], TOPIC, [R, OTHER], explore=False)
-        assert picked == R
+        picked, reason = route(edges, [], TOPIC, [R, OTHER], explore=False)
+        assert picked is None
+        assert reason == "no robots"
+
+    def test_an_absent_specialist_does_not_hand_over_to_a_non_specialist(self):
+        edges = [RobotTopicEdge(robot_id=OTHER, topic_id=TOPIC, specialised=True)]
+        picked, _ = route(edges, [], TOPIC, [R, OTHER],
+                          explore=False, absent=[OTHER])
+        assert picked is None, "handed a declared topic to a non-specialist"
 
     def test_an_absent_specialist_still_defers_rather_than_handing_over(self):
         # KGRouter computes the pick as if everyone were present, so an away

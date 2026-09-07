@@ -143,9 +143,16 @@ def build_system(style: str):
         if registry.connect(rid) is None:
             raise SystemExit(f"Could not build an instance for {rid}.")
 
+    # NO kg_observer. This is a measurement tool, and wiring one trains the
+    # graph on the very runs used to measure it — the same fault as an
+    # unattended harness run, which demo_harness._observe already refuses.
+    # It was wired, and twelve outcome observations landed on an undeclared
+    # silbot_01 -> text-to-speech edge, taking its weight to 0.82 and
+    # changing what the next run routed. Measurement must not move what it
+    # measures.
     gw = WebSocketGateway(registry, recorder=DecisionRecorder(),
                           kg_router_factory=server_app.build_kg_router,
-                          kg_observer=server_app.apply_kg_observations)
+                          kg_observer=None)
     orch = DemoOrchestrator(gw, session_context=gw.session_context,
                             subject_lookup=server_app.lookup_subject)
     subjects = {r: server_app.lookup_subject(r) for r in PROJECTS}

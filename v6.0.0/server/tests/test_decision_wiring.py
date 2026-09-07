@@ -834,3 +834,26 @@ class TestTheLiveRouterDoesNotExplore:
             "tell me about alpha beta", ["chatbox_01", "navel_01", "silbot_01"],
             guide_robot_id="pepper_01").robot_id for _ in range(12)}
         assert len(picks) == 1, f"live routing was not deterministic: {picks}"
+
+
+class TestMeasurementToolsDoNotTrainTheGraph:
+    """
+    A tool that measures the system must not change it. demo_harness._observe
+    already refuses to write under --auto or in eval mode; the audience
+    experiment wired kg_observer and did write, putting twelve outcome
+    observations on an undeclared silbot_01 -> text-to-speech edge and taking
+    its weight to 0.82 — which then changed what the next run routed.
+    """
+
+    def test_the_audience_experiment_passes_no_observer(self):
+        import inspect
+        from tools import audience_experiment
+        src = inspect.getsource(audience_experiment.build_system)
+        assert "kg_observer=None" in src, \
+            "the audience experiment must not write observations"
+
+    def test_the_harness_refuses_to_write_unattended(self):
+        import inspect
+        from tools import demo_harness
+        src = inspect.getsource(demo_harness.Harness._observe)
+        assert 'self.args.auto != "off"' in src
