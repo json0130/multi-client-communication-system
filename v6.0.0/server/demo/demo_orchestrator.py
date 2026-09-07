@@ -133,6 +133,7 @@ class DemoOrchestrator:
         recorder=None,
         session_context: Optional[Callable[[], dict]] = None,
         duration_sink: Optional[Callable[[str, dict], None]] = None,
+        style_fit: Optional[Callable[[str, str], object]] = None,
     ):
         self._ws     = ws_gateway
         self._script: list[DemoStep] = []
@@ -160,6 +161,11 @@ class DemoOrchestrator:
         # length is a property of the operator and the group, and mixing them
         # makes every step estimate worse as more runs arrive.
         self._duration_sink = duration_sink
+        # (robot_id, style) -> decision.style_fit.StyleFit, or None. Injected
+        # rather than imported so demo/ keeps no dependency on data/, the same
+        # reason duration_sink and recorder are. Absent means "nothing known",
+        # which is what every robot looks like before anyone has rated one.
+        self._style_fit = style_fit
         self._run_id: Optional[str] = None
         self._step_started_at: Optional[float] = None
         self._visitor_profile = None   # decision.visitor_profile.VisitorProfile | None
@@ -1126,6 +1132,29 @@ class DemoOrchestrator:
             logger.info(f"[Demo] '{block_robot_id}' already engaged ad-hoc "
                        f"({engagement['turns']} turns) — compressed its scripted intro.")
 
+    def _framing_for(self, robot_id: str, profile) -> str:
+        """The style directive for one generated step.
+
+        Ordinarily just the visitor's framing, uniform across robots — the
+        audience's need is the same whoever is speaking. What varies is how
+        well each robot ACTS on it, and a robot with a poor record on this
+        audience gets an extra corrective note (decision/style_fit.py).
+
+        Best-effort throughout: no profile, no lookup, or a lookup that
+        raises all fall back to the plain directive, which is exactly what
+        this returned before style fit existed.
+        """
+        if profile is None:
+            return ""
+        from decision.style_fit import framing_for
+        fit = None
+        if self._style_fit is not None:
+            try:
+                fit = self._style_fit(robot_id, profile.style)
+            except Exception as e:
+                logger.warning(f"[Demo] style fit lookup failed: {e}")
+        return framing_for(profile.style, fit)
+
     def _post_step_delay(self, step: DemoStep) -> float:
         """
         How long to pause after `step` before sending the next one.
@@ -1153,7 +1182,7 @@ class DemoOrchestrator:
             # is a property of the visitor, not of any one robot.
             with self._lock:
                 profile = self._visitor_profile
-            instruction = step.text + (profile.framing if profile else "")
+            instruction = step.text + self._framing_for(step.robot_id, profile)
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
             generated = self._ws.generate_demo_step(step.robot_id, instruction)
             # Compare against INSTRUCTION, not step.text: generate_demo_step's

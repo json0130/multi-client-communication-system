@@ -252,6 +252,33 @@ def _step_durations() -> dict:
     return durations
 
 
+_style_cache: dict = {"at": 0.0, "fits": {}}
+
+
+def lookup_style_fit(robot_id: str, style: str):
+    """One robot's record with one audience, or None when nothing is known.
+
+    Cached on the same TTL as the graph and duration snapshots and for the
+    same reason: this sits on the path every generated step takes, and a
+    Supabase round-trip per utterance would put database latency into the
+    pause before a robot speaks. Ratings arrive at human speed, so a few
+    seconds of staleness costs nothing.
+
+    Returns None rather than raising on any failure — generation then falls
+    back to the plain style directive, which is what it did before style fit
+    existed.
+    """
+    import time as _time
+    if _time.time() - _style_cache["at"] >= _SNAPSHOT_TTL_SEC:
+        try:
+            from data import demo_style_repo
+            _style_cache.update(at=_time.time(), fits=demo_style_repo.snapshot())
+        except Exception as e:
+            print(f"[App] style fit unavailable, framing from the directive alone: {e}")
+            _style_cache.update(at=_time.time(), fits={})
+    return _style_cache["fits"].get((robot_id, style))
+
+
 def build_flow_plan(obs) -> Optional[dict]:
     """
     PLAN_REVISE's real implementation — decision.planner fed real data.
@@ -350,6 +377,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         recorder=recorder,
         session_context=ws_gateway.session_context,
         duration_sink=record_duration,
+        style_fit=lookup_style_fit,
     )
     _orchestrator_ref["o"] = orchestrator
     orchestrator.load_script(DEMO_STEPS)

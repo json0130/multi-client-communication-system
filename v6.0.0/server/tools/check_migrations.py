@@ -45,6 +45,7 @@ CHECKS = [
     ("008_demo_durations", "demo_qa_durations", []),
     ("009_kg_role_seed", "demo_robot_topic", ["eligible"]),
     ("010_kg_declared_scope", "demo_robot_topic", ["specialised"]),
+    ("011_robot_style_fit", "demo_robot_style", []),
 ]
 
 # Tables the server must be able to INSERT into, with a minimal valid row.
@@ -74,6 +75,7 @@ VIEWS = [
     ("006_demo_kg", "demo_kg_edges"),
     ("008_demo_durations", "demo_step_duration_stats"),
     ("008_demo_durations", "demo_qa_duration_stats"),
+    ("011_robot_style_fit", "demo_style_fit"),
 ]
 
 

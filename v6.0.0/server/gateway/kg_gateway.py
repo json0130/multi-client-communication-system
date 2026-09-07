@@ -155,6 +155,58 @@ def create_kg_gateway(registry=None, ws_gateway=None) -> Blueprint:
             "requested": [o.as_row() for o in observations],
         })
 
+    @bp.route("/kg/style", methods=["GET", "POST"])
+    def style_fit():
+        """
+        How well a robot pitched to this audience.
+
+        GET  -> every (robot, style) row with confidence/clamped precomputed.
+        POST {robot_id, style, target: 0..1}
+             target 1.0 = well pitched for that audience, 0.0 = not.
+
+        SUPERVISOR JUDGEMENTS ONLY. There is deliberately no automatic path
+        into this table: a Q&A window closing cleanly means nobody objected
+        to the ROUTING and says nothing about how the answer was pitched, so
+        crediting style fit for it would manufacture a judgement nobody made.
+        It moves when a person says the pitch was good or bad, or not at all.
+
+        Never affects routing — see decision/style_fit.py. It changes the
+        framing directive the robot is briefed with at generation time.
+        """
+        from data import demo_style_repo
+
+        if request.method == "GET":
+            return jsonify({"fits": demo_style_repo.all_fits()})
+
+        data = request.get_json(silent=True) or {}
+        robot_id = (data.get("robot_id") or "").strip()
+        style = (data.get("style") or "").strip().lower()
+        if not robot_id or not style:
+            return jsonify({"error": "robot_id and style are required."}), 400
+
+        from decision.visitor_profile import STYLE_FRAMING
+        if style not in STYLE_FRAMING:
+            return jsonify({
+                "error": f"style must be one of: {', '.join(STYLE_FRAMING)}",
+            }), 400
+        try:
+            target = float(data.get("target"))
+        except (TypeError, ValueError):
+            return jsonify({"error": "target must be a number in [0,1]."}), 400
+
+        fit = demo_style_repo.record(robot_id, style, target)
+        if fit is None:
+            return jsonify({"error": "Could not write — see server log."}), 500
+        return jsonify({
+            "robot_id": fit.robot_id, "style": fit.style,
+            "weight": round(fit.weight, 4), "n_supervisor": fit.n_supervisor,
+            "confidence": round(fit.confidence, 4),
+            "clamped": round(fit.clamped, 4),
+            # What this actually changes: whether the robot gets the extra
+            # corrective note on top of the ordinary directive.
+            "reinforced": fit.needs_reinforcement,
+        })
+
     @bp.route("/kg/seed", methods=["POST"])
     def seed():
         """

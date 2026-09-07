@@ -124,3 +124,63 @@ class TestFallbackSafety:
         orch = make_orch(gw, profile)
         orch._send_step(orch._script[0])
         assert "technical audience" in gw.received_instructions[0]
+
+
+# ── Style fit reaching the instruction ────────────────────────────────────────
+
+class TestStyleFitReachesGeneration:
+    """
+    A learned audience fit is only worth anything if it changes what the
+    robot is actually briefed with. These run the real _send_step against a
+    recording gateway and read the instruction that came out.
+    """
+
+    def _orch(self, style_fit=None):
+        from decision.visitor_profile import VisitorProfile
+        gw = RecordingGateway()
+        o = DemoOrchestrator(gw, style_fit=style_fit)
+        o.load_script([DemoStep(step_id="s", robot_id="silbot_01",
+                                text="Explain your project.", generate=True)])
+        o._visitor_profile = VisitorProfile(style="technical")
+        return o, gw
+
+    def test_with_no_lookup_the_instruction_is_the_plain_directive(self):
+        from decision.visitor_profile import STYLE_FRAMING
+        o, gw = self._orch(style_fit=None)
+        o._send_step(o._script[0])
+        assert gw.received_instructions[-1] == "Explain your project." + STYLE_FRAMING["technical"]
+
+    def test_a_poorly_rated_robot_gets_the_corrective_note(self):
+        from decision.style_fit import STYLE_REINFORCEMENT, StyleFit
+        poor = StyleFit(robot_id="silbot_01", style="technical")
+        for _ in range(3):
+            poor = poor.record(0.0)
+        o, gw = self._orch(style_fit=lambda r, s: poor)
+        o._send_step(o._script[0])
+        assert STYLE_REINFORCEMENT["technical"] in gw.received_instructions[-1]
+
+    def test_a_well_rated_robot_does_not(self):
+        from decision.style_fit import STYLE_REINFORCEMENT, StyleFit
+        good = StyleFit(robot_id="silbot_01", style="technical")
+        for _ in range(5):
+            good = good.record(1.0)
+        o, gw = self._orch(style_fit=lambda r, s: good)
+        o._send_step(o._script[0])
+        assert STYLE_REINFORCEMENT["technical"] not in gw.received_instructions[-1]
+
+    def test_a_failing_lookup_falls_back_to_the_plain_directive(self):
+        # Best-effort throughout: a style-fit lookup that raises must never
+        # stop a robot speaking.
+        from decision.visitor_profile import STYLE_FRAMING
+
+        def boom(robot_id, style):
+            raise RuntimeError("supabase down")
+        o, gw = self._orch(style_fit=boom)
+        o._send_step(o._script[0])
+        assert gw.received_instructions[-1] == "Explain your project." + STYLE_FRAMING["technical"]
+
+    def test_no_profile_means_no_framing_at_all(self):
+        o, gw = self._orch(style_fit=None)
+        o._visitor_profile = None
+        o._send_step(o._script[0])
+        assert gw.received_instructions[-1] == "Explain your project."
