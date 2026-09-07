@@ -1171,8 +1171,9 @@ COMMIT;
 -- VERIFIED IS FALSE BY DEFAULT
 -- A fact nobody has checked must be distinguishable from one a researcher
 -- confirmed. Seeded rows are drafted from robots.robot_role and are marked
--- unverified; tools/check_facts.py reports what is still unreviewed, and the
--- server warns at boot. Nothing is silently promoted to fact by being typed.
+-- unverified. `python3 tools/seed_topic_facts.py --report` lists what is
+-- still unreviewed, and the server prints a warning at boot while any
+-- unverified row exists. Nothing becomes fact by being typed.
 --
 -- Reversible: see 012_topic_facts_down.sql
 

@@ -404,6 +404,20 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         style_fit=lookup_style_fit,
         subject_lookup=lookup_subject,
     )
+    # Unreviewed project facts are usable — that is how they get tested — but
+    # they must never be demoed without someone knowing. A robot states them
+    # hedged (see decision/grounding.py), and this is the other half: the
+    # operator is told before the tour, not after a visitor repeats one.
+    try:
+        from data.demo_facts_repo import unverified_count
+        pending = unverified_count()
+        if pending:
+            print(f"[App] WARNING: {pending} topic fact(s) are UNVERIFIED. Robots "
+                  f"will hedge them rather than state them as results. Review with: "
+                  f"python3 tools/seed_topic_facts.py --report")
+    except Exception:
+        pass
+
     _orchestrator_ref["o"] = orchestrator
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
