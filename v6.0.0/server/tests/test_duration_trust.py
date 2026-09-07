@@ -119,3 +119,46 @@ class TestEstimateFallsBackCleanly:
         with_outlier = graph.estimate({"greeting": 99.0}, qa_budget=0.0)["total_sec"]
         without = graph.estimate({}, qa_budget=0.0)["total_sec"]
         assert with_outlier - without == pytest.approx(99.0 - DEFAULT_STEP_SEC)
+
+
+class TestRowsForOneStepAreCombined:
+    """
+    demo_step_duration_stats groups by (step_id, block_robot_id), so one
+    step_id can appear on several rows — transition_to_silbot_01 belongs to
+    whichever block precedes Silbot, which changes with the robot ordering.
+    FlowGraph.estimate looks steps up by step_id alone, so those rows have to
+    be combined.
+
+    Before this, a dict comprehension over the rows kept whichever Supabase
+    returned last: the planner used a different duration for the same step
+    depending on row order, and a well-observed row could be silently
+    replaced by a barely-observed one.
+    """
+
+    def test_rows_for_the_same_step_are_run_weighted(self, durations_from):
+        got = durations_from(_rows(
+            ("transition_to_silbot_01", 9, 10.0),
+            ("transition_to_silbot_01", 1, 20.0),
+        ))
+        # (9*10 + 1*20) / 10 = 11.0 — not 20.0, and not 15.0 either.
+        assert got["transition_to_silbot_01"] == pytest.approx(11.0)
+
+    def test_the_threshold_applies_to_the_combined_count(self, durations_from):
+        # Two rows of two runs each is four observations of the same step.
+        got = durations_from(_rows(
+            ("transition_to_silbot_01", 2, 10.0),
+            ("transition_to_silbot_01", 2, 14.0),
+        ))
+        assert got["transition_to_silbot_01"] == pytest.approx(12.0)
+
+    def test_combined_rows_below_the_threshold_are_still_dropped(self, durations_from):
+        got = durations_from(_rows(
+            ("transition_to_silbot_01", 1, 10.0),
+            ("transition_to_silbot_01", 1, 14.0),
+        ))
+        assert got == {}
+
+    def test_row_order_does_not_change_the_answer(self, durations_from):
+        a = durations_from(_rows(("s", 9, 10.0), ("s", 1, 20.0)))
+        b = durations_from(_rows(("s", 1, 20.0), ("s", 9, 10.0)))
+        assert a == b

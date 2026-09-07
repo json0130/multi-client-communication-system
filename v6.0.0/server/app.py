@@ -218,15 +218,31 @@ def _step_durations() -> dict:
         from data.demo_duration_repo import step_stats
         from decision.flow import MIN_RUNS_TO_TRUST
         rows = step_stats()
-        # A mean from too few runs is dropped rather than down-weighted, so
-        # the planner falls back to DEFAULT_STEP_SEC and measured_coverage
-        # keeps meaning "backed by data worth trusting". See
-        # decision/flow.py::MIN_RUNS_TO_TRUST for why n=1 is the real hazard.
-        durations = {r["step_id"]: float(r["mean_sec"]) for r in rows
-                     if r.get("mean_sec") is not None
-                     and int(r.get("runs") or 0) >= MIN_RUNS_TO_TRUST}
-        untrusted = sum(1 for r in rows if r.get("mean_sec") is not None
-                        and int(r.get("runs") or 0) < MIN_RUNS_TO_TRUST)
+        # demo_step_duration_stats groups by (step_id, block_robot_id), and
+        # one step_id can legitimately appear under several blocks: with the
+        # robots in a different order, transition_to_silbot_01 belongs to
+        # whichever block precedes Silbot. FlowGraph.estimate looks steps up
+        # by step_id ALONE, so those rows have to be combined — a dict
+        # comprehension over the rows silently kept whichever Supabase
+        # happened to return last, which is a different number run to run.
+        #
+        # Combined as a run-weighted mean, so ten observations under one
+        # block outweigh three under another rather than counting equally,
+        # and the trust threshold is applied to the COMBINED count: three
+        # runs is three runs whether or not the block ordering varied.
+        agg: dict = {}
+        for r in rows:
+            if r.get("mean_sec") is None:
+                continue
+            n = int(r.get("runs") or 0)
+            if n <= 0:
+                continue
+            total_n, total_sec = agg.get(r["step_id"], (0, 0.0))
+            agg[r["step_id"]] = (total_n + n, total_sec + n * float(r["mean_sec"]))
+
+        durations = {sid: secs / n for sid, (n, secs) in agg.items()
+                     if n >= MIN_RUNS_TO_TRUST}
+        untrusted = sum(1 for n, _ in agg.values() if n < MIN_RUNS_TO_TRUST)
         if untrusted:
             print(f"[App] {len(durations)} step timing(s) trusted, {untrusted} below "
                   f"{MIN_RUNS_TO_TRUST} runs — planning those from defaults")
