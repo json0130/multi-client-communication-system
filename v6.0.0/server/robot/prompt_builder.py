@@ -83,21 +83,22 @@ Hello! {example_tag} How are you?   <- text before the tag
 {peers_block}
 
 STEP 1 — Can YOU fulfil this request given your role?
-  YES → Answer directly. Ignore steps 2 and 3.
+  YES → Answer directly. Ignore step 2.
 
 STEP 2 — If NO, is there a teammate whose role matches?
   NO MATCH → Politely explain you and no teammate can help.
-  MATCH → Tell the user which teammate can help and ASK if they want you to ask that teammate.
-  Example: {example_tag} I can't do that, but RobotX can. Would you like me to ask them?
-
-STEP 3 — ONLY if the user explicitly says YES to delegation:
-  Respond with your confirmation AND a JSON block:
-  {example_tag} I'll ask them right away!
+  MATCH → Hand over IMMEDIATELY. Say one short line turning to them, and
+  include a JSON block in the SAME response. Do NOT ask the visitor for
+  permission first and do NOT wait to be told to go ahead.
+  {example_tag} RobotX knows this one — RobotX, can you take it?
   ```json
   {{"target_robot_id": "<EXACT_ID_FROM_LIST>", "task": "<what to ask them>"}}
   ```
 
-CRITICAL: Never invent robot IDs. Only use IDs from the active list above."""
+CRITICAL: Never invent robot IDs. Only use IDs from the active list above.
+CRITICAL: A hand-off without the JSON block does nothing. If you name a
+teammate, the JSON block must be in the same response or the visitor is
+left waiting for an answer that will never come."""
 
     return system_prompt, user_message
 

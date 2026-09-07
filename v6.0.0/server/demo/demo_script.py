@@ -418,7 +418,7 @@ this becomes the default for robots that do not define their own.
 """
 
 
-def build_script(guide_id: str, project_ids: list) -> list:
+def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> list:
     """
     Build a demo script dynamically from a guide robot and an ordered list of
     project robots.  The guide introduces the lab and each robot; project robots
@@ -427,12 +427,23 @@ def build_script(guide_id: str, project_ids: list) -> list:
     Args:
         guide_id    : client_id of the host/guide robot (plays the Pepper role).
         project_ids : Ordered list of project robot client_ids.
+        subjects    : {robot_id: "what this robot researches"}, used in the
+                      guide's introduction. Optional, and omitting it is why
+                      this argument exists: the instruction used to say "give
+                      a teaser of the research area" while telling the guide
+                      nothing except a client_id, so the guide invented one —
+                      a live run had Pepper introduce Silbot, whose subject is
+                      navigation, as working on understanding emotions. The
+                      caller supplies these from the same declared scope
+                      routing uses, so what the guide SAYS a robot does and
+                      where questions about it GO cannot drift apart.
 
     Returns:
         A list of DemoStep objects ready to pass to DemoOrchestrator.load_script().
     """
     steps = []
     n = len(project_ids)
+    subjects = subjects or {}
 
     # ── Opening ────────────────────────────────────────────────────────────────
     # No block_robot_id: these belong to no project, so plan revision never
@@ -503,12 +514,16 @@ def build_script(guide_id: str, project_ids: list) -> list:
         steps.append(DemoStep(
             step_id     = f"introduce_{robot_id}",
             robot_id    = guide_id,
-            text        = f"Introduce the next research project and hand off to {robot_id} "
-                          "in one flowing turn. First give a brief, intriguing teaser of the "
-                          "research area without going into detail — that is the robot's job — "
-                          f"then turn to {robot_id} and invite them to greet the visitors. "
-                          "Make it one connected thought, not two announcements. "
-                          "2-3 sentences. Use [POINT].",
+            text        = (f"Introduce the next research project and hand off to {robot_id} "
+                           "in one flowing turn. "
+                           + (f"Their research area is: {subjects[robot_id]}. Introduce THAT "
+                              "subject and nothing else — do not invent or guess a different "
+                              "one. " if subjects.get(robot_id) else "")
+                           + "Give a brief, intriguing teaser of it without going into detail "
+                           "— that is the robot's job — "
+                           f"then turn to {robot_id} and invite them to greet the visitors. "
+                           "Make it one connected thought, not two announcements. "
+                           "2-3 sentences. Use [POINT]."),
             generate    = True,
             timeout_sec = 60,
             block_robot_id = robot_id,

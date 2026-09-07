@@ -134,6 +134,7 @@ class DemoOrchestrator:
         session_context: Optional[Callable[[], dict]] = None,
         duration_sink: Optional[Callable[[str, dict], None]] = None,
         style_fit: Optional[Callable[[str, str], object]] = None,
+        subject_lookup: Optional[Callable[[str], str]] = None,
     ):
         self._ws     = ws_gateway
         self._script: list[DemoStep] = []
@@ -166,6 +167,11 @@ class DemoOrchestrator:
         # reason duration_sink and recorder are. Absent means "nothing known",
         # which is what every robot looks like before anyone has rated one.
         self._style_fit = style_fit
+        # robot_id -> "what this robot researches", for the guide's
+        # introduction. Injected for the same reason as style_fit, and read
+        # from the SAME declared scope routing uses, so the subject the guide
+        # announces and the subject questions get routed on cannot drift.
+        self._subject_lookup = subject_lookup
         self._run_id: Optional[str] = None
         self._step_started_at: Optional[float] = None
         self._visitor_profile = None   # decision.visitor_profile.VisitorProfile | None
@@ -245,7 +251,14 @@ class DemoOrchestrator:
                 from demo.demo_script import build_script  # local import avoids circular dependency
                 guide    = robot_ids[0]
                 projects = robot_ids[1:]
-                self._script = build_script(guide, projects)
+                subjects = {}
+                if self._subject_lookup is not None:
+                    for r in projects:
+                        try:
+                            subjects[r] = self._subject_lookup(r) or ""
+                        except Exception as e:
+                            logger.warning(f"[Demo] subject lookup failed for {r}: {e}")
+                self._script = build_script(guide, projects, subjects=subjects)
                 logger.info(f"[Demo] Dynamic script built — guide={guide}, projects={projects}")
             if not self._script:
                 logger.error("[Demo] No script loaded.")

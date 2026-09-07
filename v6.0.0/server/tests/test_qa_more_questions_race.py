@@ -36,7 +36,8 @@ import pytest
 from flask import Flask
 
 from core.rbac import AccessLevel, RobotIdentity
-from decision import DecisionPoint, DecisionRecorder, MemoryDecisionSink
+from decision import (DecisionPoint, DecisionRecorder, Mechanism,
+                      MemoryDecisionSink)
 from decision.kg_policy import RoutingDecision
 from demo.demo_orchestrator import DemoOrchestrator, DemoState, StepRole
 from demo.demo_script import build_script
@@ -174,8 +175,13 @@ class _FakeKGRouter:
         self._topic_id = topic_id
 
     def decide(self, utterance, robot_ids, **kwargs):
+        # target_id None models a router with no opinion — an utterance whose
+        # topic never resolved.
+        if self._target_id is None:
+            return None
         return RoutingDecision(robot_id=self._target_id, topic_id=self._topic_id,
-                               topic_label="LLMs", reason="argmax", score=0.9)
+                               topic_label="LLMs", reason="argmax", score=0.9,
+                               candidates_considered=2)
 
 
 @pytest.fixture
@@ -282,3 +288,64 @@ class TestQARouteExecution:
         target_instance, target_id, handoff = gw.route_question(instance, "how accurate is it")
         assert target_id == A
         assert handoff is None
+
+
+class TestUnresolvedQuestionsGoToThePresenter:
+    """
+    Regression: mid-way through Silbot's block a visitor asked "so which
+    techniqe do you use". Nothing in the vocabulary matches "technique", so
+    the topic did not resolve, routing had no opinion, and the question was
+    answered by whoever's microphone caught it — the guide. Pepper then
+    invented an answer on Silbot's behalf: "Silbot specializes in using
+    machine learning techniques."
+
+    Inside a robot's own block an unresolvable question is almost certainly
+    about that robot, so it answers. The guide speaking for a specialist is
+    the failure worth removing.
+    """
+
+    def _wire(self, sink_list):
+        registry = FakeRegistry([
+            FakeInstance(GUIDE, "Pepper", "Lab guide", AccessLevel.GLOBAL),
+            FakeInstance(A, "ChatBox", "RAG research"),
+            FakeInstance(B, "Navel", "Emotion research"),
+        ])
+        recorder = DecisionRecorder(MemoryDecisionSink())
+        # A router that resolves nothing, which is what an unmatched word does.
+        gw = WebSocketGateway(registry, recorder=recorder,
+                              kg_router_factory=lambda: _FakeKGRouter(None),
+                              kg_observer=sink_list.extend)
+        orch = DemoOrchestrator(gw, recorder=recorder,
+                                session_context=gw.session_context)
+        orch.load_script(build_script(GUIDE, [A, B]))
+        gw.set_demo_orchestrator(orch)
+        orch._state = DemoState.QA_WINDOW
+        orch._idx = next(i for i, s in enumerate(orch._script)
+                         if s.block_robot_id == A and s.role == StepRole.QA)
+        gw.on_qa_window_open()
+        gw.send_to_robot = lambda cid, d: None
+        return gw, registry
+
+    def test_the_presenting_robot_answers_not_the_guide(self):
+        observed = []
+        gw, registry = self._wire(observed)
+        result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(GUIDE),
+                            "so which techniqe do you use")
+        assert result.action.robot_id == A
+        assert result.mechanism == "presenter_fallback"
+
+    def test_it_writes_no_observation(self):
+        # Nothing resolved, so there is no edge this turn belongs to.
+        observed = []
+        gw, registry = self._wire(observed)
+        gw._decide(DecisionPoint.QA_ROUTE, registry.get(GUIDE),
+                   "so which techniqe do you use")
+        gw.on_qa_window_close()
+        assert observed == []
+
+    def test_the_presenter_receiving_it_directly_is_not_rerouted(self):
+        observed = []
+        gw, registry = self._wire(observed)
+        result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(A),
+                            "so which techniqe do you use")
+        assert result.mechanism == Mechanism.RECEIVER

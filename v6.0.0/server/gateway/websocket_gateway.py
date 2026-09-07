@@ -420,9 +420,28 @@ class WebSocketGateway:
                 # carried off by one coincidental word.
                 context_robot_id=obs.presenting_robot_id,
             )
-            if decision is None:
-                return None
             from decision.models import Action
+
+            if decision is None:
+                # No topic resolved. Inside a robot's own block the question
+                # is almost certainly about THAT robot, so it answers rather
+                # than whoever's microphone caught it — which during a Q&A
+                # window is usually the guide, and the guide answering for a
+                # specialist is how a live run got "Silbot specializes in
+                # machine learning techniques", invented on the spot.
+                #
+                # Deliberately no observation: nothing resolved, so there is
+                # no edge this turn belongs to. Recording it would be filing
+                # evidence against a guessed topic, which Segment.note_routed
+                # refuses for the same reason.
+                presenter = obs.presenting_robot_id
+                if (presenter and presenter != obs.decider_robot_id
+                        and self._registry.get(presenter) is not None):
+                    logger.info(f"[KG route] '{obs.user_utterance[:40]}' -> no topic "
+                                f"-> presenter {presenter} answers")
+                    return PolicyResult(Action.route_to(presenter),
+                                        "presenter_fallback")
+                return None
             logger.info(
                 f"[KG route] '{obs.user_utterance[:40]}' -> {decision.topic_label} "
                 f"-> {decision.robot_id} ({decision.reason}, {decision.score})")

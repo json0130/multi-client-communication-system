@@ -279,6 +279,30 @@ def lookup_style_fit(robot_id: str, style: str):
     return _style_cache["fits"].get((robot_id, style))
 
 
+def lookup_subject(robot_id: str) -> str:
+    """What this robot researches, as a phrase for the guide's introduction.
+
+    Built from the DECLARED scope in the competence graph — the same rows
+    routing narrows on — so the subject the guide announces and the subject
+    questions are routed on are one fact, not two that can drift. A live run
+    had Pepper introduce Silbot as working on understanding emotions because
+    the script told it to describe "the research area" without ever saying
+    what that area was.
+
+    Falls back to "" on any failure, which returns the instruction to its
+    previous wording rather than blocking the demo.
+    """
+    try:
+        topics, edges, _links = _kg_snapshot()
+        labels = {t["id"]: t.get("label", t["id"]) for t in topics}
+        declared = [labels.get(e.topic_id, e.topic_id) for e in edges
+                    if e.robot_id == robot_id and e.specialised]
+        return ", ".join(sorted(declared))
+    except Exception as e:
+        print(f"[App] subject lookup failed for {robot_id}: {e}")
+        return ""
+
+
 def build_flow_plan(obs) -> Optional[dict]:
     """
     PLAN_REVISE's real implementation — decision.planner fed real data.
@@ -378,6 +402,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         session_context=ws_gateway.session_context,
         duration_sink=record_duration,
         style_fit=lookup_style_fit,
+        subject_lookup=lookup_subject,
     )
     _orchestrator_ref["o"] = orchestrator
     orchestrator.load_script(DEMO_STEPS)
