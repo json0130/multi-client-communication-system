@@ -161,7 +161,16 @@ def build_kg_router():
     topics, edges, links = _kg_snapshot()
     if not topics:
         return None
-    return KGRouter(edges, links, topics)
+    # explore=False, EXPLICITLY. This is the live server, and exploration
+    # deliberately routes to the less-observed robot when the graph cannot
+    # separate two candidates — which is right for a rollout campaign and
+    # wrong in front of visitors. It was defaulting to True here, so every
+    # real question was an exploration step: decision/kg_infer.py::route
+    # states the rule ("the rollout harness turns it on, a live demo turns it
+    # off") and this call was the one place not honouring it. Found because
+    # a controlled experiment routed the same question to different robots in
+    # different conditions.
+    return KGRouter(edges, links, topics, explore=False)
 
 
 def apply_kg_observations(observations) -> None:

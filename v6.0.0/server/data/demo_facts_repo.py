@@ -50,6 +50,29 @@ def facts_for(topic_id: str, robot_id: Optional[str] = None,
     return mine[:limit]
 
 
+def facts_for_robot(robot_id: str, limit: int = 10) -> list[dict]:
+    """Everything this robot may state, across all of its own topics.
+
+    Used when the utterance resolved to NO topic. A question asked during a
+    robot's own block is almost certainly about its work, and the
+    alternative is handing the model zero grounding — which is exactly when
+    a live run had Silbot invent "GraphSLAM and FastSLAM". Broad grounding
+    beats none.
+    """
+    if not robot_id:
+        return []
+    try:
+        rows = (get_client().table(TABLE).select("*")
+                .eq("robot_id", robot_id).execute().data or [])
+    except Exception as e:
+        print(f"[demo_facts_repo] facts_for_robot error: {e}")
+        return []
+    rows.sort(key=lambda r: (
+        KIND_ORDER.index(r["kind"]) if r["kind"] in KIND_ORDER else 99,
+        not r.get("verified"), r.get("id", 0)))
+    return rows[:limit]
+
+
 def coverage() -> list[dict]:
     """Per-topic fact counts, for tools/check_facts.py and the dashboard."""
     try:

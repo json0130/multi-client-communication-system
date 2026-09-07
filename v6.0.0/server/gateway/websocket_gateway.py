@@ -658,11 +658,15 @@ class WebSocketGateway:
             router = self._kg_router_factory() if self._kg_router_factory else None
             if router is None:
                 return []
-            topic_id = router.resolve_topic(utterance)
-            if not topic_id:
-                return []
             from data import demo_facts_repo
             from decision.grounding import format_facts
+            topic_id = router.resolve_topic(utterance)
+            if not topic_id:
+                # No topic, so no targeted facts — but handing the model
+                # nothing is the condition under which it invents. A question
+                # asked during a robot's own block is almost certainly about
+                # its work, so ground on everything that robot may state.
+                return format_facts(demo_facts_repo.facts_for_robot(robot_id))
             return format_facts(demo_facts_repo.facts_for(topic_id, robot_id))
         except Exception as e:
             logger.warning(f"[WS Gateway] grounding lookup failed: {e}")

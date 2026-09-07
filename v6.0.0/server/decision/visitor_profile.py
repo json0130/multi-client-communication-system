@@ -36,17 +36,20 @@ from dataclasses import dataclass
 # tells the robot what to say; this only steers HOW, not WHAT.
 STYLE_FRAMING = {
     "technical": (
-        " Frame this for a technical audience: use precise terminology, name "
-        "the underlying methods or algorithms, and do not shy away from "
-        "implementation detail."
+        " Frame this for a technical audience: use precise terminology and "
+        "do not shy away from implementation detail. Name a method, model or "
+        "number ONLY if it was given to you as a known fact — if it was not, "
+        "be precise about the shape of the approach and say plainly that you "
+        "would have to check the specific figure. Precision about what you "
+        "actually know is what this audience wants; a confident guess is the "
+        "one thing that loses them."
     ),
     "business": (
         " Frame this for a business audience: lead with practical value and "
         "real-world application, avoid technical jargon, and keep the "
-        "emphasis on outcomes rather than mechanism. State it; do not offer "
-        "a demonstration or invite the visitor to try anything — closing "
-        "with \"interested in seeing this in action?\" belongs to the "
-        "interactive framing and blurs the two."
+        "emphasis on outcomes rather than mechanism. Close on the value "
+        "itself — the last sentence should state what this makes possible, "
+        "not ask the visitor a question."
     ),
     "interactive": (
         " Frame this for a hands-on audience: invite the visitor to ask a "

@@ -77,8 +77,9 @@ rating; the test that asserts one rating is not enough is what caught it."""
 STYLE_REINFORCEMENT = {
     "technical": (
         " Visitors have previously found your answers on this too general: "
-        "name a specific method, model or number rather than describing the "
-        "area in the abstract."
+        "go deeper into the mechanism — the steps, the trade-offs, what it "
+        "assumes — rather than describing the area in the abstract. Still "
+        "never name a method, model or number you were not given."
     ),
     "business": (
         " Visitors have previously found your answers on this too technical: "

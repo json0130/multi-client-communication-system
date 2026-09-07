@@ -798,3 +798,39 @@ class TestOutcomeEmission:
         gw.on_qa_window_open()
         gw._decide(DecisionPoint.QA_ROUTE, registry.get(A), "retrieval augmented generation")
         gw.on_qa_window_close()          # must not raise
+
+
+class TestTheLiveRouterDoesNotExplore:
+    """
+    Exploration deliberately routes to the LESS observed robot when the graph
+    cannot separate two candidates. That is correct for a rollout campaign
+    and wrong in front of visitors, and decision/kg_infer.py::route says so:
+    "the rollout harness turns it on, a live demo turns it off."
+
+    build_kg_router let it default to True, so every live question was an
+    exploration step. Caught when a controlled experiment routed the same
+    utterance to different robots in different conditions — the one thing a
+    controlled experiment must never do.
+    """
+
+    def test_build_kg_router_disables_exploration(self, monkeypatch):
+        import app
+        monkeypatch.setattr(app, "_kg_snapshot",
+                            lambda: ([{"id": "topic:a", "label": "alpha"}], [], []))
+        router = app.build_kg_router()
+        assert router is not None
+        assert router._explore is False
+
+    def test_routing_is_stable_across_repeated_calls(self, monkeypatch):
+        # The property the bug broke: same graph, same question, same answer.
+        import app
+        from decision.kg import Evidence, RobotTopicEdge
+
+        e = RobotTopicEdge(robot_id="chatbox_01", topic_id="topic:a")
+        e = e.update(1.0, Evidence.SUPERVISOR)
+        monkeypatch.setattr(app, "_kg_snapshot",
+                            lambda: ([{"id": "topic:a", "label": "alpha beta"}], [e], []))
+        picks = {app.build_kg_router().decide(
+            "tell me about alpha beta", ["chatbox_01", "navel_01", "silbot_01"],
+            guide_robot_id="pepper_01").robot_id for _ in range(12)}
+        assert len(picks) == 1, f"live routing was not deterministic: {picks}"
