@@ -30,6 +30,32 @@ from decision.kg_infer import route
 MIN_TOPIC_OVERLAP = 1
 """Content words a question must share with a topic label to resolve to it."""
 
+MIN_OVERLAP_TO_LEAVE_CONTEXT = 2
+"""Content words needed to resolve a question ONTO A SUBJECT THE CURRENT
+SPEAKER DOES NOT OWN.
+
+A single shared word is enough to identify a topic when there is no context
+to contradict it, and far too little to justify taking a question away from
+the robot the visitor is standing in front of. A real run: mid-way through
+Silbot's navigation talk a visitor asked "which technique or model do you
+use". `which`, `do` and `you` are stopwords, so the whole utterance reduced
+to {hmm, model, techniqu, then, use} — and `model` alone matched "large
+language models", so the question went to ChatBox, which answered about
+retrieval-augmented generation. Silbot then had to contradict it: "No, we
+use SLAM and social robotics techniques. RAG is not part of our approach."
+
+Note what was lost: `you` is the word that made it a question ABOUT SILBOT,
+and stopword removal discards it. Rather than special-casing pronouns —
+which would need a second matcher and a second thing to defend — the
+context does that work. Inside a robot's own block its declared topics are
+the assumed subject, and leaving them takes more than one generic noun.
+
+The cost is real and worth stating: "what about emotions?" asked during
+Silbot's talk now resolves to nothing and Silbot answers it, rather than
+routing to Navel on the strength of one word. That is the safer failure —
+the robot in front of the visitor replying, possibly to say whose area it
+is, beats a confident handover built on a coincidence."""
+
 STOPWORDS = {
     "the", "a", "an", "and", "or", "of", "for", "to", "in", "on", "with", "is",
     "are", "was", "how", "what", "why", "when", "who", "which", "can", "could",
@@ -180,12 +206,31 @@ class KGRouter:
 
     # ── Topic resolution ──────────────────────────────────────────────────────
 
-    def resolve_topic(self, utterance: str) -> Optional[str]:
+    def declared_topics(self, robot_id: Optional[str]) -> set:
+        """The topics this robot's project area covers, from `specialised`.
+
+        Empty for an unknown robot, or before migration 010 has been applied
+        — which is what makes every context-sensitive path below degrade to
+        the behaviour it had before declared scope existed.
+        """
+        if not robot_id:
+            return set()
+        return {e.topic_id for e in self._edges
+                if e.robot_id == robot_id and e.specialised}
+
+    def resolve_topic(self, utterance: str,
+                      context_topics: Optional[Iterable[str]] = None) -> Optional[str]:
         """Best-matching topic id, or None when nothing clearly matches.
 
         Returns None on a TIE as well as on no match. Two topics matching a
         question equally well means the question did not identify one, and
         picking either would route on a coin flip.
+
+        `context_topics` are the subjects currently being presented — the
+        declared area of whoever is speaking. A match that would leave them
+        needs MIN_OVERLAP_TO_LEAVE_CONTEXT words rather than one; see that
+        constant for the run this comes from. With no context supplied the
+        rule cannot fire and resolution behaves exactly as it always did.
         """
         qw = _words(utterance)
         if not qw:
@@ -197,7 +242,13 @@ class KGRouter:
         scored.sort(key=lambda x: (-x[1], x[0]))
         if len(scored) > 1 and scored[0][1] == scored[1][1]:
             return None
-        return scored[0][0]
+
+        topic, overlap = scored[0]
+        context = set(context_topics or ())
+        if (context and topic not in context
+                and overlap < MIN_OVERLAP_TO_LEAVE_CONTEXT):
+            return None
+        return topic
 
     # ── Routing ───────────────────────────────────────────────────────────────
 
@@ -208,6 +259,7 @@ class KGRouter:
         remaining_block_ids: Optional[Iterable[str]] = None,
         guide_robot_id: Optional[str] = None,
         absent_robot_ids: Optional[Iterable[str]] = None,
+        context_robot_id: Optional[str] = None,
     ) -> Optional[RoutingDecision]:
         """
         Who should answer? None means the graph has no opinion.
@@ -218,6 +270,10 @@ class KGRouter:
         the conversation changes as the group moves between stations. A set
         frozen at construction would be stale by the second question.
 
+        `context_robot_id` is whoever is presenting — its declared topics
+        are treated as the subject under discussion, so an ambiguous
+        follow-up stays with the robot the visitor is actually talking to.
+
         `remaining_block_ids` and `guide_robot_id` are only consulted when
         the robot the graph would have picked is absent — see
         ABSENT_ROBOT_POLICY. Both optional, and absent handling degrades to
@@ -227,7 +283,11 @@ class KGRouter:
         robot_ids = list(robot_ids)
         if len(robot_ids) < 2:
             return None          # nothing to choose between
-        topic_id = self.resolve_topic(utterance)
+        # The subject currently on the floor. A weak match that would leave
+        # it is not enough to move the question elsewhere — see
+        # MIN_OVERLAP_TO_LEAVE_CONTEXT.
+        topic_id = self.resolve_topic(
+            utterance, context_topics=self.declared_topics(context_robot_id))
         if topic_id is None:
             return None
 

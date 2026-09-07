@@ -415,6 +415,10 @@ class WebSocketGateway:
                 remaining_block_ids=remaining_blocks,
                 guide_robot_id=obs.guide_robot_id,
                 absent_robot_ids=absent,
+                # Whoever is presenting owns the subject on the floor, so an
+                # ambiguous follow-up stays with them rather than being
+                # carried off by one coincidental word.
+                context_robot_id=obs.presenting_robot_id,
             )
             if decision is None:
                 return None

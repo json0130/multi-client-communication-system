@@ -451,3 +451,91 @@ class TestDeclaredScope:
         restored = RobotTopicEdge.from_row(
             {"robot_id": R, "topic_id": TOPIC, "weight": 0.5})
         assert restored.specialised is False
+
+
+# ── Context anchoring ─────────────────────────────────────────────────────────
+
+class TestAmbiguousFollowUpsStayWithTheSpeaker:
+    """
+    Regression for a real run: mid-way through Silbot's navigation talk a
+    visitor asked "which technique or model do you use". `which`, `do` and
+    `you` are stopwords, so `model` alone matched "large language models" and
+    the question went to ChatBox, which answered about retrieval-augmented
+    generation. Silbot then had to contradict it.
+
+    The word that made it a question ABOUT SILBOT — `you` — is exactly the
+    one stopword removal throws away, so the context has to carry it instead.
+    """
+
+    NAV = "topic:social-robot-navigation"
+    LLM = "topic:large-language-models"
+    EMO = "topic:emotion-recognition"
+    VOCAB = [
+        {"id": NAV, "label": "social robot navigation"},
+        {"id": LLM, "label": "large language models"},
+        {"id": EMO, "label": "emotion recognition"},
+    ]
+    FLEET = ["chatbox_01", "navel_01", "silbot_01"]
+
+    def _router(self):
+        return KGRouter(
+            [RobotTopicEdge(robot_id="silbot_01", topic_id=self.NAV, specialised=True),
+             RobotTopicEdge(robot_id="chatbox_01", topic_id=self.LLM, specialised=True),
+             RobotTopicEdge(robot_id="navel_01", topic_id=self.EMO, specialised=True)],
+            [], self.VOCAB, explore=False)
+
+    def test_the_reported_question_no_longer_leaves_silbot(self):
+        d = self._router().decide(
+            "hmmm then which technique or model do you use", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id="silbot_01")
+        assert d is None, "one coincidental word must not move the question"
+
+    def test_a_strong_match_still_moves_it(self):
+        # Two content words is a real statement of subject, not a coincidence.
+        d = self._router().decide(
+            "how does emotion recognition work", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id="silbot_01")
+        assert d is not None and d.robot_id == "navel_01"
+
+    def test_a_weak_match_INSIDE_the_speakers_scope_still_resolves(self):
+        # "navigation" alone is one content word, but it is the speaker's own
+        # subject — there is nothing to protect against, so it resolves.
+        d = self._router().decide(
+            "and the navigation part?", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id="silbot_01")
+        assert d is not None and d.robot_id == "silbot_01"
+
+    def test_the_accepted_cost_a_weak_but_fair_match_no_longer_moves(self):
+        """The trade this rule makes, pinned so it is a decision rather than
+        a surprise. "and the navigation part?" asked at ChatBox's station is
+        arguably a real request for Silbot, and one content word is no longer
+        enough to act on it — ChatBox answers, probably by saying whose area
+        it is. Accepted because the same looseness sent a navigation question
+        to ChatBox and got an answer about RAG; the robot in front of the
+        visitor replying is the safer failure."""
+        d = self._router().decide(
+            "and the navigation part?", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id="chatbox_01")
+        assert d is None
+
+    def test_without_context_the_old_behaviour_is_unchanged(self):
+        # Openings and closings have no presenting robot; resolution there
+        # behaves exactly as it always did.
+        d = self._router().decide(
+            "hmmm then which technique or model do you use", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id=None)
+        assert d is not None and d.robot_id == "chatbox_01"
+
+    def test_an_undeclared_speaker_gives_no_context(self):
+        # A robot with no declared scope cannot anchor anything, so the rule
+        # cannot fire — the same degradation as a database without 010.
+        d = self._router().decide(
+            "what models do you use", self.FLEET,
+            guide_robot_id=GUIDE, context_robot_id="pepper_01")
+        assert d is not None and d.robot_id == "chatbox_01"
+
+    def test_declared_topics_reads_the_speakers_scope(self):
+        r = self._router()
+        assert r.declared_topics("silbot_01") == {self.NAV}
+        assert r.declared_topics("pepper_01") == set()
+        assert r.declared_topics(None) == set()

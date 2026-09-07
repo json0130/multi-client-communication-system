@@ -66,6 +66,10 @@ def build_delegation_prompt(
 1. The VERY FIRST CHARACTER of your response MUST be an open bracket '['.
 2. Use EXACTLY ONE tag from this list: {tags_str}
 3. Keep responses to 1-2 sentences maximum.
+4. You are ANSWERING THE VISITOR, not running the tour. Never announce the
+   next project, introduce another robot, invite one to speak, or say the
+   group is moving on — a separate script does all of that, and doing it
+   here makes it happen twice.
 
 *** CORRECT EXAMPLES ***
 {example_tag} Hello! How can I help you today?
