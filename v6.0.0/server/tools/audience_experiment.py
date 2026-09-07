@@ -1,34 +1,46 @@
 """
 tools/audience_experiment.py
 =============================
-Does the visitor profile actually change how the robots talk?
+Does the visitor profile change how the robots talk — and does a hand-off to
+a specialist actually fire?
 
 Runs ONE fixed scenario — the same tour, the same visitor utterances, the
 same interruption points — once per audience, changing nothing but
-VisitorProfile.style. Everything else is held constant so any difference in
-the transcripts is attributable to the style and to nothing else:
+VisitorProfile.style. Any difference in the transcripts is attributable to
+the style and to nothing else.
 
     python3 tools/audience_experiment.py                  # all three
     python3 tools/audience_experiment.py --styles technical
-    python3 tools/audience_experiment.py --out runs/      # write transcripts
+    python3 tools/audience_experiment.py --out runs/audience
 
-WHY A SEPARATE TOOL AND NOT demo_harness
-demo_harness measures ROUTING — which robot took which question — and
-deliberately stubs generation for campaign volume. This measures the TEXT,
-so generation has to be real, and the visitor script has to be identical
-across conditions rather than sampled. Different question, different tool.
+IT DRIVES THE REAL GATEWAY
+Every visitor turn goes through WebSocketGateway.route_question ->
+process_chat_stream -> DelegationHandler, wired exactly as app.create_app()
+wires it, with send_to_robot recorded instead of dialled. An earlier version
+reimplemented the routing decision in the harness, which meant it could not
+show the hand-off at all: whether Pepper announces a specialist and whether
+that specialist then speaks are properties of the gateway, so the gateway is
+what has to run.
 
-WHAT IS HELD CONSTANT
-The script, the robot order, the subjects, the visitor's words, and where
-they interrupt. The competence graph is read once and shared, so routing
-cannot drift between conditions either. The ONLY difference is the style
-directive appended to each generation.
+Two different mechanisms can produce "Pepper names a robot, that robot
+answers", and the transcript labels which one fired:
+
+  KG REROUTE      the competence graph resolved the question to a topic
+                  another robot declares. Deterministic. The receiver speaks
+                  a one-line hand-off, the named robot answers in its own
+                  voice.
+  LLM DELEGATION  no confident graph read, so the answering robot's own LLM
+                  decided to hand over and emitted a JSON block, which
+                  DelegationHandler executes against the target.
+
+Routing is tried first on purpose — it is deterministic and auditable, and
+delegation is the fallback for what it cannot resolve.
 
 WHAT THIS CANNOT TELL YOU
-Whether the styling is GOOD — only whether it is different, and how. Judging
-"is this pitched right for a high-school group" is what the ratings in
-decision/style_fit.py are for, and needs a person. This produces the
-transcripts that make that judgement possible.
+Whether the styling is GOOD — only whether it differs, and how. Judging "is
+this pitched right for a school group" needs a person; that is what the
+ratings in decision/style_fit.py are for. This produces the transcripts that
+make the judgement possible.
 """
 
 from __future__ import annotations
@@ -36,28 +48,39 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import textwrap
 import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ── The scenario, identical for every condition ──────────────────────────────
-# Written to mirror the shape of the real runs in the logs: a barge-in during
-# a project talk, a technical follow-up, an acknowledgement, and a close.
-# `after` names the step this visitor turn interrupts.
 GUIDE = "pepper_01"
 PROJECTS = ["silbot_01", "chatbox_01"]
 
+# Every visitor turn is addressed to PEPPER — the guide holds the microphone,
+# which is the situation being tested: the visitor interrupts the guide while
+# a specialist is mid-talk. `after` names the step the interruption lands on.
 VISITOR_SCRIPT = [
+    # Silbot is talking. Question about Silbot's own subject: the presenting
+    # robot should take it, with no announcement — it is already the owner.
     {"after": "silbot_01_project_problem",
      "say": "so which technique do you use"},
+
+    # Silbot is still talking, but this is CHATBOX's declared subject. This is
+    # the hand-off case: Pepper should name ChatBox and ChatBox should answer.
     {"after": "silbot_01_project_approach",
-     "say": "and how does it know where a person is going"},
+     "say": "what about retrieval augmented generation, how does that work"},
+
+    # An acknowledgement. Must NOT be routed anywhere.
     {"after": "silbot_01_project_impact",
      "say": "okay thank you"},
+
+    # ChatBox is talking; this is SILBOT's subject. Hand-off the other way.
     {"after": "chatbox_01_project_problem",
-     "say": "what models do you use for that"},
+     "say": "and how does social robot navigation avoid people"},
+
+    # ChatBox's own subject while ChatBox presents.
     {"after": "chatbox_01_project_approach",
-     "say": "okay that sounds cool"},
+     "say": "what models do you use for that"},
 ]
 
 AUDIENCES = {
@@ -67,96 +90,17 @@ AUDIENCES = {
 }
 
 
-def _fmt(text: str, width: int = 76, indent: str = "      ") -> str:
-    import textwrap
-    return "\n".join(textwrap.wrap(text, width,
-                                   initial_indent=indent,
-                                   subsequent_indent=indent)) or (indent + "(empty)")
-
-
-def run_condition(style: str, registry, kg, out) -> dict:
-    """One full tour under one audience style. Returns word/timing stats."""
-    from decision.style_fit import framing_for
-    from decision.visitor_profile import VisitorProfile
-    from demo.demo_script import build_script
-
-    profile = VisitorProfile(style=style)
-    topics, edges, _links = kg
-    labels = {t["id"]: t.get("label", t["id"]) for t in topics}
-    subjects = {
-        r: ", ".join(sorted(labels.get(e.topic_id, e.topic_id) for e in edges
-                            if e.robot_id == r and e.specialised))
-        for r in PROJECTS
-    }
-
-    script = build_script(GUIDE, PROJECTS, subjects=subjects)
-    by_step = {s["after"]: s["say"] for s in VISITOR_SCRIPT}
-
-    framing = framing_for(style, None)          # no ratings yet — plain directive
-    say = out.write
-
-    say(f"\n{'=' * 78}\n")
-    say(f"  AUDIENCE: {AUDIENCES[style]}\n")
-    say(f"  style={style!r}\n")
-    say("  framing appended to every generation:\n")
-    say(_fmt(framing.strip() or "(none — general audience)", indent="      ") + "\n")
-    say(f"{'=' * 78}\n\n")
-
-    started = time.time()
-    words = 0
-
-    for step in script:
-        instance = registry.get(step.robot_id)
-        if instance is None:
-            continue
-
-        if step.generate:
-            spoken = instance.generate_demo_speech(step.text + framing).clean_text
-        else:
-            spoken = step.text
-        words += len(spoken.split())
-        say(f"  [{step.robot_id}] {step.step_id}\n")
-        say(_fmt(spoken) + "\n\n")
-
-        # A visitor interrupts here, in every condition, with the same words.
-        utterance = by_step.get(step.step_id)
-        if not utterance:
-            continue
-
-        say(f"  >>> VISITOR: \"{utterance}\"\n")
-
-        # Does this close the window? The real system decides that BEFORE
-        # generating anything, and an ADVANCE short-circuits the reply — so a
-        # harness that always generates one overstates how much the robots
-        # actually say. Uses the real phrase rules, minus the LLM classifier,
-        # which needs a live window this offline replay does not have.
-        if _closes_the_window(utterance):
-            say("      (advance — window closes, demo continues; no reply generated)\n\n")
-            continue
-
-        answerer = _who_answers(utterance, step, registry, kg)
-        replies: list = []
-        registry.get(answerer).process_chat_stream(
-            utterance, lambda t, _tag: replies.append(t),
-            style_framing=framing,
-        )
-        reply = " ".join(replies).strip()
-        words += len(reply.split())
-        say(f"  [{answerer}] (Q&A)\n")
-        say(_fmt(reply) + "\n\n")
-
-    elapsed = time.time() - started
-    say(f"  --- {words} words spoken, {elapsed:.0f}s wall clock ---\n")
-    return {"style": style, "words": words, "sec": round(elapsed, 1)}
+def _wrap(text: str, indent: str = "      ") -> str:
+    return "\n".join(textwrap.wrap(text, 76, initial_indent=indent,
+                                   subsequent_indent=indent)) or indent + "(empty)"
 
 
 def _closes_the_window(utterance: str) -> bool:
-    """True when the visitor's turn ends the Q&A rather than asking anything.
+    """True when the turn ends the Q&A instead of asking anything.
 
-    The deterministic half of HeuristicPolicy._decide_advance — advance
-    phrases, bare affirmations and stated time pressure. The LLM classifier
-    is deliberately not consulted: it is nondeterministic, and a controlled
-    comparison must not have the conditions diverge on a coin flip.
+    The deterministic half of HeuristicPolicy._decide_advance. The LLM
+    classifier is deliberately not consulted: it is nondeterministic, and a
+    controlled comparison must not have its conditions diverge on a coin flip.
     """
     from decision.policy import (QA_ADVANCE_PHRASES, TIME_PRESSURE_PHRASES,
                                  _is_bare_affirmation, _matches)
@@ -165,25 +109,137 @@ def _closes_the_window(utterance: str) -> bool:
                 or _matches(utterance, TIME_PRESSURE_PHRASES))
 
 
-def _who_answers(utterance: str, step, registry, kg) -> str:
-    """The real routing decision, so the transcript reflects the real system."""
-    from decision.kg_policy import KGRouter
-    from decision.observation import looks_like_question
-    topics, edges, links = kg
-    presenter = step.block_robot_id or step.robot_id
+def build_system(style: str):
+    """A real gateway + orchestrator, wired as app.create_app() wires them."""
+    import app as server_app
+    from core.profiles import ProfileRegistry
+    from core.rbac import GrantStore, RBACFilter
+    from decision import DecisionRecorder
+    from decision.visitor_profile import VisitorProfile
+    from demo.demo_orchestrator import DemoOrchestrator
+    from demo.demo_script import build_script
+    from gateway.websocket_gateway import WebSocketGateway
+    from robot.robot_registry import RobotRegistry
 
-    router = KGRouter(edges, links, topics, explore=False)
-    d = router.decide(utterance, PROJECTS,
-                      remaining_block_ids=set(PROJECTS),
-                      guide_robot_id=GUIDE,
-                      context_robot_id=presenter)
-    if d is not None and d.robot_id and registry.get(d.robot_id) is not None:
-        return d.robot_id
-    # Unresolved: the presenting robot takes its own question, but only if it
-    # IS a question — matching gateway/websocket_gateway.py::_kg_route.
-    if looks_like_question(utterance) and registry.get(presenter) is not None:
-        return presenter
-    return GUIDE
+    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    profiles = ProfileRegistry.from_directory(os.path.join(here, "profiles"))
+    registry = RobotRegistry(rbac=RBACFilter(), grants=GrantStore(),
+                             profiles=profiles)
+    for rid in [GUIDE] + PROJECTS:
+        if registry.connect(rid) is None:
+            raise SystemExit(f"Could not build an instance for {rid}.")
+
+    gw = WebSocketGateway(registry, recorder=DecisionRecorder(),
+                          kg_router_factory=server_app.build_kg_router,
+                          kg_observer=server_app.apply_kg_observations)
+    orch = DemoOrchestrator(gw, session_context=gw.session_context,
+                            subject_lookup=server_app.lookup_subject)
+    subjects = {r: server_app.lookup_subject(r) for r in PROJECTS}
+    orch.load_script(build_script(GUIDE, PROJECTS, subjects=subjects))
+    gw.set_demo_orchestrator(orch)
+    orch._visitor_profile = VisitorProfile(style=style)
+    return gw, orch, registry
+
+
+def run_condition(style: str, out) -> dict:
+    from decision.observation import looks_like_question
+    from demo.demo_orchestrator import DemoState
+
+    gw, orch, registry = build_system(style)
+    say = out.write
+
+    # Record what each robot is told to say instead of dialling a socket.
+    spoken: list = []
+    gw.send_to_robot = lambda cid, d: spoken.append((cid, d))
+
+    say(f"\n{'=' * 78}\n  AUDIENCE: {AUDIENCES[style]}   (style={style!r})\n")
+    say(f"{'=' * 78}\n")
+    say("  Style directive appended to every generation:\n")
+    say(_wrap(orch.framing_for_robot(GUIDE).strip() or "(none — general audience)") + "\n\n")
+
+    by_step = {s["after"]: s["say"] for s in VISITOR_SCRIPT}
+    started, words = time.time(), 0
+    handoffs, delegations, presenter_takes = 0, 0, 0
+
+    for idx, step in enumerate(orch._script):
+        orch._idx = idx
+        orch._state = DemoState.RUNNING
+        before = len(spoken)
+        orch._send_step(step)                      # real generation + framing
+        for _cid, d in spoken[before:]:
+            text = d.get("text") or ""
+            if text:
+                words += len(text.split())
+                say(f"  [{step.robot_id}] {step.step_id}\n")
+                say(_wrap(text) + "\n\n")
+
+        utterance = by_step.get(step.step_id)
+        if not utterance:
+            continue
+
+        say(f'  >>> VISITOR (to Pepper): "{utterance}"\n')
+        if _closes_the_window(utterance):
+            say("      -> advance: window closes, demo continues. No reply.\n\n")
+            continue
+
+        # A Q&A window is what an interruption opens; routing only runs inside one.
+        orch._state = DemoState.QA_WINDOW
+        gw.on_qa_window_open()
+
+        mark = len(spoken)
+        pepper = registry.get(GUIDE)
+        target_inst, target_id, handoff = gw.route_question(pepper, utterance)
+
+        if handoff:
+            handoffs += 1
+            words += len(handoff.split())
+            say("      -- KG REROUTE: the graph resolved this to another robot's subject\n")
+            say(f"  [{GUIDE}] hand-off\n")
+            say(_wrap(handoff) + "\n\n")
+        elif target_id != GUIDE:
+            presenter_takes += 1
+            say(f"      -- presenter fallback: {target_id} takes its own question "
+                f"(silent, no announcement)\n")
+
+        if target_inst is None:
+            say("      -- deferred: covered at that robot's own station. No reply.\n\n")
+            gw.on_qa_window_close()
+            continue
+
+        replies: list = []
+        result = target_inst.process_chat_stream(
+            utterance, lambda t, _tag: replies.append(t),
+            style_framing=gw.style_framing_for(target_id))
+        reply = " ".join(replies).strip()
+        if reply:
+            words += len(reply.split())
+            say(f"  [{target_id}] answers\n")
+            say(_wrap(reply) + "\n\n")
+
+        # The LLM's own hand-off, if the graph had no opinion and it chose one.
+        if result.is_delegation and result.delegation_target:
+            from gateway.delegation_handler import DelegationHandler
+            delegations += 1
+            say("      -- LLM DELEGATION: the answering robot handed over itself\n")
+            mark2 = len(spoken)
+            DelegationHandler(registry, gw).execute_sync(
+                target_id, result.delegation_target,
+                f"Answer the visitor: {utterance}")
+            for cid, d in spoken[mark2:]:
+                t = d.get("text") or d.get("clean_text") or ""
+                if t and "?" not in d.get("step_id", ""):
+                    words += len(t.split())
+                    say(f"  [{cid}] delegated answer\n")
+                    say(_wrap(t) + "\n\n")
+
+        gw.on_qa_window_close()
+
+    elapsed = time.time() - started
+    say(f"  --- {words} words | {handoffs} KG reroute(s) | {delegations} LLM "
+        f"delegation(s) | {presenter_takes} presenter take(s) | {elapsed:.0f}s ---\n")
+    return {"style": style, "words": words, "handoffs": handoffs,
+            "delegations": delegations, "presenter": presenter_takes,
+            "sec": round(elapsed, 1)}
 
 
 def main() -> int:
@@ -191,46 +247,27 @@ def main() -> int:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--styles", nargs="*", default=list(AUDIENCES),
                     choices=list(AUDIENCES))
-    ap.add_argument("--out", default="", help="directory to write transcripts to")
+    ap.add_argument("--out", default="")
     args = ap.parse_args()
-
-    from data import demo_kg_repo as repo
-    from decision.kg import RobotTopicEdge
-    from robot.robot_registry import RobotRegistry
-    from core.rbac import GrantStore, RBACFilter
-    from core.profiles import ProfileRegistry
-
-    topics = repo.all_topics()
-    edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
-    links = [(l["topic_a"], l["topic_b"], float(l["weight"])) for l in repo.all_links()]
-    kg = (topics, edges, links)
-
-    profiles = ProfileRegistry.from_directory(
-        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                     "profiles"))
-    registry = RobotRegistry(profiles=profiles, rbac=RBACFilter(), grants=GrantStore())
-    for rid in [GUIDE] + PROJECTS:
-        if registry.connect(rid) is None:
-            print(f"Could not build an instance for {rid} — is it in the robots table?")
-            return 1
 
     stats = []
     for style in args.styles:
         path = os.path.join(args.out, f"audience_{style}.txt") if args.out else None
         if path:
             os.makedirs(args.out, exist_ok=True)
+            sys.stdout.write(f"[audience] {style} -> {path}\n")
+            sys.stdout.flush()
         with (open(path, "w") if path else sys.stdout) as fh:
-            if path:
-                sys.stdout.write(f"[audience] running {style} -> {path}\n")
-                sys.stdout.flush()
-            stats.append(run_condition(style, registry, kg, fh))
+            stats.append(run_condition(style, fh))
 
     print("\n" + "=" * 78)
-    print("  Same scenario, same words, same interruptions — style only")
+    print("  Same tour, same visitor words, same interruptions — style only")
     print("=" * 78)
-    print(f"  {'audience':<14} {'words':>7} {'seconds':>9}")
+    print(f"  {'audience':<13} {'words':>6} {'KG reroute':>11} {'LLM deleg':>10} "
+          f"{'presenter':>10} {'sec':>6}")
     for s in stats:
-        print(f"  {s['style']:<14} {s['words']:>7} {s['sec']:>9}")
+        print(f"  {s['style']:<13} {s['words']:>6} {s['handoffs']:>11} "
+              f"{s['delegations']:>10} {s['presenter']:>10} {s['sec']:>6}")
     print("=" * 78)
     return 0
 

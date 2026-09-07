@@ -369,6 +369,33 @@ class TestUnresolvedQuestionsGoToThePresenter:
             assert result.action.robot_id == A, f"{q!r} did not reach the presenter"
             assert result.mechanism == "presenter_fallback"
 
+    def test_a_confident_route_to_the_presenter_is_also_silent(self):
+        """Silence keys on WHO the target is, not on which rule picked them.
+
+        A question about ChatBox's own models, asked during ChatBox's own
+        block, resolves confidently by argmax rather than by the presenter
+        fallback — and was announced as "ChatBox can tell you more about
+        that" while the group stood in front of ChatBox mid-talk.
+        """
+        observed = []
+        gw, registry = self._wire(observed)
+        gw._kg_router_factory = lambda: _FakeKGRouter(A)   # argmax -> the presenter
+        target_inst, target_id, handoff = gw.route_question(
+            registry.get(GUIDE), "how does retrieval augmented generation work")
+        assert target_id == A
+        assert handoff is None, "announced a hand-off to the robot already presenting"
+
+    def test_a_route_to_a_DIFFERENT_robot_still_announces(self):
+        # The line exists for a reason — moving the question to someone the
+        # visitor is not standing in front of has to be said out loud.
+        observed = []
+        gw, registry = self._wire(observed)
+        gw._kg_router_factory = lambda: _FakeKGRouter(B)   # not the presenter
+        _inst, target_id, handoff = gw.route_question(
+            registry.get(GUIDE), "how does emotion recognition work")
+        assert target_id == B
+        assert handoff and "Navel" in handoff
+
     def test_the_presenter_handover_is_silent(self):
         # It is the natural owner of what is being discussed, not a
         # redirection — announcing it every turn is what made the live log

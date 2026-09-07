@@ -618,6 +618,16 @@ class WebSocketGateway:
             self._auto_close_timer = timer
         timer.start()
 
+    def _presenting_robot_id(self):
+        """Whose block the tour is currently in, or None outside a demo."""
+        orch = self._demo_orchestrator
+        if orch is None:
+            return None
+        try:
+            return guide_and_presenter(orch.get_status())[1]
+        except Exception:
+            return None
+
     def style_framing_for(self, robot_id: str) -> str:
         """The visitor's style directive for this robot, or "" — best-effort.
 
@@ -814,12 +824,18 @@ class WebSocketGateway:
 
         target_id = result.action.robot_id
 
-        # The presenting robot taking its own question. Silent: it is the
-        # natural owner of whatever is being discussed, not a redirection, and
-        # announcing "Silbot can tell you more about that" every time the
-        # group is already standing at Silbot's station is noise. A live run
-        # emitted that line on every turn.
-        if result.mechanism == "presenter_fallback" and target_id:
+        # The robot already presenting taking a question about its own work.
+        # Silent: it is the natural owner of whatever is on the floor, not a
+        # redirection, and "ChatBox can tell you more about that" while the
+        # group is standing in front of ChatBox mid-talk is noise.
+        #
+        # Keyed on WHO the target is, not on which rule picked them. An
+        # earlier version only silenced presenter_fallback, so the same
+        # redundant announcement came back whenever the graph resolved the
+        # question confidently to the presenter — a question about ChatBox's
+        # own models, asked during ChatBox's own block, was announced as a
+        # hand-off to ChatBox.
+        if target_id and target_id == self._presenting_robot_id():
             target = self._registry.get(target_id)
             if target is not None:
                 return target, target_id, None
