@@ -93,6 +93,21 @@ def resolve_emphasis(
     return (), "none"
 
 
+DECLARED_COVERAGE = 0.9
+"""Visitor-interest coverage credited to a robot whose DECLARED area covers
+the topic, regardless of how little has been observed.
+
+High rather than 1.0: declaring a topic is the clearest signal that a block
+is what the visitor came for, but the hand-set default still gets its 35%
+say, so a project the lab considers unmissable is not automatically demoted
+below one the visitor mentioned in passing.
+
+The value has to clear the defaults' own spread to do anything. With defaults
+0.3/0.5/0.7 and the 0.35/0.65 blend, 0.9 lifts a declared block by 0.26 —
+comfortably more than the 0.2 between adjacent defaults, and far more than
+the 0.012 that unobserved declared edges produced before this existed."""
+
+
 def block_importance(
     graph: FlowGraph,
     defaults: Optional[dict] = None,
@@ -121,10 +136,30 @@ def block_importance(
     if visitor_topics and kg_edges is not None:
         from decision.kg_infer import infer
         edges, links = list(kg_edges), list(kg_links or [])
+        wanted = set(visitor_topics)
+        # Whose DECLARED area covers what the visitor asked about. This has to
+        # be read separately from infer(), which only counts edges carrying
+        # observations: on the live graph every declared edge sits at the
+        # prior with nothing behind it, so coverage came back 0.5188 for the
+        # robot that owns the topic against 0.5 for everyone else. Blended,
+        # that is a 0.012 difference against hand-set defaults spread 0.2
+        # apart — sixteen times too small to protect anything. A visitor could
+        # state an interest and watch that exact project get cut.
+        #
+        # Declaring the topic is the strongest possible statement that a block
+        # is the relevant one, and it is configuration, so it needs no
+        # evidence to count. Learned coverage still applies on top, which is
+        # what keeps an undeclared-but-demonstrated robot from scoring zero.
+        declared = {b.robot_id for b in graph.blocks
+                    if any(getattr(e, "specialised", False)
+                           and e.robot_id == b.robot_id and e.topic_id in wanted
+                           for e in edges)}
         for b in graph.blocks:
             posterior = infer(edges, links, b.robot_id, visitor_topics)
             scores = [posterior.get(t, PRIOR) for t in visitor_topics]
-            coverage[b.robot_id] = sum(scores) / len(scores) if scores else PRIOR
+            learned_cov = sum(scores) / len(scores) if scores else PRIOR
+            coverage[b.robot_id] = (max(DECLARED_COVERAGE, learned_cov)
+                                    if b.robot_id in declared else learned_cov)
 
     for b in graph.blocks:
         base = float(defaults.get(b.robot_id, DEFAULT_IMPORTANCE))

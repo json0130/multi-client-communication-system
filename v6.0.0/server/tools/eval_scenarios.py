@@ -66,6 +66,8 @@ TOPICS = [
     {"id": RAG, "label": "retrieval augmented generation"},
     {"id": NAV, "label": "social robot navigation"},
     {"id": NVI, "label": "non verbal interaction"},
+    {"id": "topic:text-to-speech", "label": "text to speech"},
+    {"id": "topic:robot-hardware", "label": "robot hardware"},
 ]
 
 # Plausible round numbers in the range of the 49 real measurements taken so
@@ -139,10 +141,31 @@ def _edge(robot: str, topic: str, n: int = 8, target: float = 1.0) -> RobotTopic
     return e
 
 
-# The competence graph the routing scenarios run against: each robot clearly
-# owns one topic. Deliberately unambiguous — these scenarios test whether
-# routing HAPPENS, not whether the graph can resolve a hard case.
-EDGES = [_edge(CHATBOX, RAG), _edge(NAVEL, NVI), _edge(SILBOT, NAV)]
+# An UNOWNED topic — in the live vocabulary, nothing declares text-to-speech,
+# speech-recognition or robot-hardware. Routing must decline these rather
+# than order robots on propagated noise.
+ORPHAN = "topic:text-to-speech"
+
+# The competence graph the routing scenarios run against.
+#
+# SHAPED LIKE PRODUCTION, which it was not. These edges used to be observed
+# ones at weight 0.979 with specialised=False, so every routing scenario
+# measured the LEARNED-WEIGHT path — while the live graph is 14 declared
+# edges at the 0.5 prior with a single observation between them, and decides
+# almost everything by declared scope. "Routing accuracy 100%" was scoring a
+# configuration the system no longer runs in.
+#
+# So scope is declared here, as it is live, and the one observed edge is kept
+# on an UNDECLARED topic, which is the only place a learned weight can still
+# decide anything once scope is exclusive.
+EDGES = [
+    RobotTopicEdge(robot_id=CHATBOX, topic_id=RAG, specialised=True),
+    RobotTopicEdge(robot_id=NAVEL, topic_id=NVI, specialised=True),
+    RobotTopicEdge(robot_id=SILBOT, topic_id=NAV, specialised=True),
+    # Undeclared, and observed strongly enough to clear MIN_EVIDENCE_MARGIN —
+    # the learned path, still reachable exactly where scope is silent.
+    _edge(CHATBOX, ORPHAN),
+]
 
 
 # ── Expectations ──────────────────────────────────────────────────────────────

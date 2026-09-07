@@ -309,3 +309,75 @@ class TestQaBudgetIsCommandable:
                     f"budget {budget}: declared feasible at "
                     f"{plan['estimate']['total_sec']}s"
                 )
+
+
+class TestDeclaredScopeCarriesVisitorInterest:
+    """
+    A stated interest is meant to protect the project it names. It could not,
+    because coverage came only from infer(), which counts observations — and
+    on the live graph every declared edge sits at the prior with nothing
+    behind it. The robot that OWNED the visitor's topic scored 0.5188 against
+    0.5 for everyone else: blended, a 0.012 difference against hand-set
+    defaults spread 0.2 apart. A visitor could state an interest and watch
+    that exact project get cut.
+
+    Caught by realigning the evaluation's graph to production's shape, which
+    is a reminder that a scenario suite running on a configuration the system
+    does not use will report a mechanism working while it is inert.
+    """
+
+    TOPIC = "topic:retrieval-augmented-generation"
+    DEFAULTS = {"chatbox_jetson_001": 0.3, "navel_001": 0.5, "silbot_01": 0.7}
+
+    def _graph(self):
+        return FlowGraph.from_script(build_script(GUIDE, [A, B, C]))
+
+    def _declared(self, robot, topic):
+        from decision.kg import RobotTopicEdge
+        return RobotTopicEdge(robot_id=robot, topic_id=topic, specialised=True)
+
+    def test_an_unobserved_declared_edge_still_carries_the_interest(self):
+        # The production shape: declared, at the prior, never observed.
+        imp = block_importance(
+            self._graph(), defaults=self.DEFAULTS, visitor_topics=[self.TOPIC],
+            kg_edges=[self._declared(A, self.TOPIC)], kg_links=[])
+        assert imp[A] > imp[B] and imp[A] > imp[C], (
+            f"declaring the visitor's topic did not protect the block: {imp}")
+
+    def test_it_beats_the_defaults_own_spread(self):
+        # A lifts from the LOWEST default to the highest importance, which is
+        # the only thing that changes which block gets cut.
+        imp = block_importance(
+            self._graph(), defaults=self.DEFAULTS, visitor_topics=[self.TOPIC],
+            kg_edges=[self._declared(A, self.TOPIC)], kg_links=[])
+        assert imp[A] > self.DEFAULTS["silbot_01"] - 0.05
+
+    def test_no_interest_leaves_the_defaults_untouched(self):
+        imp = block_importance(self._graph(), defaults=self.DEFAULTS,
+                               kg_edges=[self._declared(A, self.TOPIC)], kg_links=[])
+        assert imp[A] == pytest.approx(0.3)
+
+    def test_declaring_a_DIFFERENT_topic_gives_no_boost(self):
+        """Owning some other subject must not protect a block.
+
+        Asserted as ORDER, not as a value: stating any interest at all blends
+        every block toward neutral coverage (0.35*0.3 + 0.65*0.5 = 0.43), so
+        an absolute expectation here would be testing the blend rather than
+        the boost. What matters is that the default ranking survives
+        untouched — A stays bottom.
+        """
+        imp = block_importance(
+            self._graph(), defaults=self.DEFAULTS, visitor_topics=[self.TOPIC],
+            kg_edges=[self._declared(A, "topic:social-robot-navigation")],
+            kg_links=[])
+        assert imp[A] < imp[B] < imp[C], f"ordering disturbed: {imp}"
+
+    def test_a_strong_learned_edge_still_counts_without_a_declaration(self):
+        # The learned path must not be discarded by adding the declared one.
+        from decision.kg import Evidence, RobotTopicEdge
+        e = RobotTopicEdge(robot_id=A, topic_id=self.TOPIC)
+        for _ in range(8):
+            e = e.update(1.0, Evidence.SUPERVISOR)
+        imp = block_importance(self._graph(), defaults=self.DEFAULTS,
+                               visitor_topics=[self.TOPIC], kg_edges=[e], kg_links=[])
+        assert imp[A] > 0.3
