@@ -76,6 +76,67 @@ def looks_like_question(text: str) -> bool:
     return t.startswith(QUESTION_PREFIXES)
 
 
+ACKNOWLEDGEMENTS = (
+    "ok", "okay", "okay then", "alright", "right", "sure", "cool", "nice",
+    "great", "good", "i see", "oh i see", "ah i see", "got it", "gotcha",
+    "makes sense", "interesting", "wow", "thanks", "thank you", "cheers",
+    "sounds good", "sounds cool", "sounds interesting", "fair enough",
+    "no worries", "understood", "yep", "yeah", "mm", "mhm", "hmm",
+)
+"""Turns that acknowledge rather than ask. Matched after stripping leading
+filler and trailing punctuation, and only against the WHOLE utterance."""
+
+
+def _strip_lead(t: str) -> str:
+    """Drop a leading demonstrative: "that sounds cool" -> "sounds cool"."""
+    for lead in ("that ", "it ", "this ", "they "):
+        if t.startswith(lead):
+            return t[len(lead):].lstrip().rstrip(".!,;: ")
+    return t.rstrip(".!,;: ")
+
+
+def is_acknowledgement(text: str) -> bool:
+    """
+    True when the visitor is acknowledging, not asking or instructing.
+
+    Exists because prompt compliance was not enough. Told not to narrate the
+    tour, a 7B model still answered "okay thank you" with "Great, let us move
+    on to the next project!" — announcing a transition the script had not
+    reached, which then happened twice. A deterministic check in front of the
+    model is the same fix the question heuristic got: decide it in code, do
+    not ask the model to remember.
+
+    Whole-utterance only. "okay but how does the mapping work" contains an
+    acknowledgement and IS a question, so a substring test would swallow real
+    questions — which is the failure mode that matters here, and why this
+    strips fillers and then compares the entire remainder.
+    """
+    t = (text or "").strip().lower()
+    if not t or "?" in t:
+        return False
+    t = t.rstrip(".!,;: ")
+    for _ in range(4):
+        for filler in QUESTION_FILLERS:
+            if t.startswith(filler):
+                t = t[len(filler):].lstrip()
+                break
+        else:
+            break
+    t = _strip_lead(t)
+    if not t:
+        return False
+    # Allow a pair — "okay thanks", "great, got it" — but nothing longer, so
+    # a real sentence is never mistaken for a nod.
+    if t in ACKNOWLEDGEMENTS:
+        return True
+    for a in ACKNOWLEDGEMENTS:
+        if t.startswith(a + " "):
+            rest = _strip_lead(t[len(a) + 1:].strip())
+            if rest in ACKNOWLEDGEMENTS:
+                return True
+    return False
+
+
 class DemoRunTracker:
     """
     Per-run conversational bookkeeping.

@@ -43,7 +43,10 @@ STYLE_FRAMING = {
     "business": (
         " Frame this for a business audience: lead with practical value and "
         "real-world application, avoid technical jargon, and keep the "
-        "emphasis on outcomes rather than mechanism."
+        "emphasis on outcomes rather than mechanism. State it; do not offer "
+        "a demonstration or invite the visitor to try anything — closing "
+        "with \"interested in seeing this in action?\" belongs to the "
+        "interactive framing and blurs the two."
     ),
     "interactive": (
         " Frame this for a hands-on audience: invite the visitor to ask a "

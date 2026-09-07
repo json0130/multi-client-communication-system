@@ -49,6 +49,7 @@ from decision import (
     build_decision,
     build_observation,
     guide_and_presenter,
+    is_acknowledgement,
     looks_like_question,
 )
 
@@ -1037,6 +1038,22 @@ class WebSocketGateway:
                                 "require_ack": False,
                             })
                             return
+
+                    # A nod, not a question. Answered from a fixed line rather
+                    # than by the LLM: told not to narrate the tour, a 7B
+                    # model still replied to "okay thank you" with "Great,
+                    # let us move on to the next project!", announcing a
+                    # transition the script had not reached. Deciding this in
+                    # code is the same fix the question heuristic got —
+                    # prompt compliance was not enough. Also saves a
+                    # generation on a turn that needs none.
+                    if is_acknowledgement(message):
+                        self.send_to_robot(client_id, {
+                            "event": "chat_sentence",
+                            "text": "Of course.",
+                            "emotion_tag": "DEFAULT",
+                        })
+                        return
 
                     # Who actually answers. A confident competence-graph read
                     # can name a DIFFERENT connected robot than the one that

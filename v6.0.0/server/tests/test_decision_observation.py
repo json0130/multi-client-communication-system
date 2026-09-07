@@ -371,3 +371,54 @@ class TestSpokenQuestionsAreRecognised:
     def test_a_question_mark_still_short_circuits(self):
         from decision.observation import looks_like_question
         assert looks_like_question("really?")
+
+
+class TestAcknowledgementsAreCaughtBeforeTheModel:
+    """
+    Told not to narrate the tour, a 7B model still answered "okay thank you"
+    with "Great, let us move on to the next project!" — announcing a
+    transition the script had not reached, which then happened twice. Prompt
+    compliance was not enough, so the check runs in front of the model.
+
+    The dangerous direction is a real question swallowed as a nod, so the
+    match is whole-utterance after stripping filler, never a substring.
+    """
+
+    NODS = ("okay", "okay thank you", "okay that sounds cool", "oh i see",
+            "yeah thank you", "thanks", "got it", "great", "that makes sense",
+            "it sounds interesting", "yeah that sounds interesting", "cheers",
+            "mhm", "fair enough", "wow")
+
+    QUESTIONS = ("okay but how does the mapping work",
+                 "so which technique do you use",
+                 "that model you mentioned, how big is it",
+                 "this is the part i wanted to ask about",
+                 "what models do you use",
+                 "and how does it know where a person is going",
+                 "great, can you show me")
+
+    def test_nods_are_recognised(self):
+        from decision.observation import is_acknowledgement
+        for n in self.NODS:
+            assert is_acknowledgement(n), f"missed a nod: {n!r}"
+
+    def test_questions_are_never_swallowed(self):
+        from decision.observation import is_acknowledgement
+        for q in self.QUESTIONS:
+            assert not is_acknowledgement(q), f"swallowed a question: {q!r}"
+
+    def test_a_question_mark_is_decisive(self):
+        from decision.observation import is_acknowledgement
+        assert not is_acknowledgement("okay?")
+
+    def test_empty_input_is_not_an_acknowledgement(self):
+        from decision.observation import is_acknowledgement
+        assert not is_acknowledgement("") and not is_acknowledgement("   ")
+
+    def test_a_nod_and_a_question_together_is_a_question(self):
+        # The case a substring test would get wrong.
+        from decision.observation import is_acknowledgement
+        assert not is_acknowledgement("thanks, what about the sensors")
+
+    def test_it_is_exported(self):
+        from decision import is_acknowledgement          # noqa: F401

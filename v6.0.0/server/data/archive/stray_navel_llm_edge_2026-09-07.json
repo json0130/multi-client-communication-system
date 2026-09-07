@@ -1,0 +1,17 @@
+{
+  "archived_at": "2026-09-07T21:22:20.567796",
+  "reason": "off-scope outcome row from 2026-09-04, predates migrations 009 and 010; was deciding routing on all three orphan topics by a ~0.003 margin",
+  "rows": [
+    {
+      "robot_id": "navel_01",
+      "topic_id": "topic:large-language-models",
+      "weight": 0.575,
+      "n_supervisor": 0,
+      "n_outcome": 1,
+      "last_updated": "2026-09-04T02:42:53.238075+00:00",
+      "n_displaced": 0,
+      "eligible": true,
+      "specialised": false
+    }
+  ]
+}

@@ -81,6 +81,20 @@ VISITOR_SCRIPT = [
     # ChatBox's own subject while ChatBox presents.
     {"after": "chatbox_01_project_approach",
      "say": "what models do you use for that"},
+
+    # An ORPHAN topic — no robot declares text-to-speech. Routing cannot
+    # resolve it to a specialist, so this is the turn that gives the LLM
+    # delegation path something to do. Without it the graph answers
+    # everything and DelegationHandler is never exercised at all.
+    {"after": "chatbox_01_project_impact",
+     "say": "and which text to speech engine makes the voices"},
+
+    # A question whose answer is NOT in demo_topic_facts. The honesty rule
+    # should produce "I would have to check" rather than a plausible
+    # invention — this is the turn that proves grounding changed behaviour
+    # rather than just adding text to a prompt.
+    {"after": "silbot_01_project_impact",
+     "say": "what frame rate does the mapping run at"},
 ]
 
 AUDIENCES = {
@@ -182,6 +196,12 @@ def run_condition(style: str, out) -> dict:
             say("      -> advance: window closes, demo continues. No reply.\n\n")
             continue
 
+        from decision.observation import is_acknowledgement
+        if is_acknowledgement(utterance):
+            say("      -> acknowledgement: fixed reply, no generation "
+                "(deterministic, see is_acknowledgement)\n\n")
+            continue
+
         # A Q&A window is what an interruption opens; routing only runs inside one.
         orch._state = DemoState.QA_WINDOW
         gw.on_qa_window_open()
@@ -206,10 +226,20 @@ def run_condition(style: str, out) -> dict:
             gw.on_qa_window_close()
             continue
 
+        grounding = gw.grounding_for(target_id, utterance)
+        if grounding:
+            say(f"      -- grounded on {len(grounding)} stored fact(s)"
+                + (" [includes UNVERIFIED]\n"
+                   if any("UNVERIFIED" in g for g in grounding) else "\n"))
+        else:
+            say("      -- NO stored facts for this topic: the honesty rule "
+                "applies, specifics must be declined\n")
+
         replies: list = []
         result = target_inst.process_chat_stream(
             utterance, lambda t, _tag: replies.append(t),
-            style_framing=gw.style_framing_for(target_id))
+            style_framing=gw.style_framing_for(target_id),
+            grounded_facts=grounding)
         reply = " ".join(replies).strip()
         if reply:
             words += len(reply.split())

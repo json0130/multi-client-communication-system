@@ -48,6 +48,7 @@ from decision.observation import (
     DemoRunTracker,
     build_observation,
     guide_and_presenter,
+    is_acknowledgement,
     looks_like_question,
 )
 from decision.policy import (
@@ -104,5 +105,6 @@ __all__ = [
     "build_decision",
     "build_observation",
     "guide_and_presenter",
+    "is_acknowledgement",
     "looks_like_question",
 ]
