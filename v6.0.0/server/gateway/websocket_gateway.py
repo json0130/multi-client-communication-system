@@ -643,6 +643,30 @@ class WebSocketGateway:
             logger.warning(f"[WS Gateway] style framing lookup failed: {e}")
             return ""
 
+    def grounding_for(self, robot_id: str, utterance: str) -> list:
+        """Verified detail this robot may state about what was just asked.
+
+        Resolves the utterance to a topic with the same resolver routing
+        used, so the facts a robot is given are about the subject it was
+        actually routed on. Empty on any failure, or when nothing has been
+        recorded for the topic — which puts the robot back where it was
+        before the facts table existed: able to talk generally, and
+        instructed to decline specifics rather than invent them.
+        """
+        try:
+            router = self._kg_router_factory() if self._kg_router_factory else None
+            if router is None:
+                return []
+            topic_id = router.resolve_topic(utterance)
+            if not topic_id:
+                return []
+            from data import demo_facts_repo
+            from decision.grounding import format_facts
+            return format_facts(demo_facts_repo.facts_for(topic_id, robot_id))
+        except Exception as e:
+            logger.warning(f"[WS Gateway] grounding lookup failed: {e}")
+            return []
+
     def check_qa_auto_close(self, responding_robot_id: str, clean_text: str):
         """
         Decide, after a robot responds, whether the Q&A window should close.
@@ -1049,6 +1073,7 @@ class WebSocketGateway:
                     result = target_instance.process_chat_stream(
                         message, _on_sentence,
                         style_framing=self.style_framing_for(target_id),
+                        grounded_facts=self.grounding_for(target_id, message),
                     )
                     # Did the robot just sign off? If so the window closes on
                     # its own after a pause, instead of waiting for someone to

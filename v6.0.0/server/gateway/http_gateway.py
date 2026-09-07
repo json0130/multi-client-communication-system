@@ -370,6 +370,7 @@ def create_http_gateway(
         result = target_instance.process_chat_stream(
             message, _on_sentence,
             style_framing=ws_gateway.style_framing_for(target_id),
+            grounded_facts=ws_gateway.grounding_for(target_id, message),
         )
 
         # Did the robot just sign off ("let me know if you have any other

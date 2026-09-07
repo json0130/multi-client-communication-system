@@ -32,6 +32,7 @@ def build_delegation_prompt(
     user_message: str,
     active_robots: list[dict],          # [{"client_id": ..., "robot_name": ..., "robot_role": ...}]
     rag_context: Sequence[ClearedRecord],   # RBAC-cleared past user messages
+    grounded_facts: Sequence[str] = (),
 ) -> tuple[str, str]:
     """
     Build (system_prompt, user_message) for delegation mode.
@@ -49,6 +50,34 @@ def build_delegation_prompt(
     if cleared:
         lines = "\n".join(f'- "{c.text}"' for c in cleared)
         rag_block = f"\nThe user has previously told you:\n{lines}\n"
+
+    # Verified detail about the topic being asked about — see
+    # data/demo_topic_facts and decision/grounding.py. Without it a robot has
+    # nothing but its one-paragraph role, and a live run showed what fills
+    # that gap: invented model names ("Extended Kalman Filters", "BM25")
+    # stated confidently to visitors. The closing rule is the important half
+    # — grounding only helps if NOT having a fact changes the answer.
+    if grounded_facts:
+        listed = "\n".join(f"  - {f}" for f in grounded_facts)
+        facts_block = (
+            f"\n*** WHAT IS ACTUALLY TRUE OF YOUR WORK ***\n{listed}\n"
+            "These are the only specifics you may state. Anything marked "
+            "UNVERIFIED is a draft nobody has confirmed — describe it in "
+            "general terms and do not quote it as a precise result.\n"
+        )
+    else:
+        facts_block = ""
+
+    honesty_rule = (
+        "\n*** NEVER INVENT SPECIFICS ***\n"
+        "Do not name a model, algorithm, dataset, number or paper unless it "
+        "appears above. If the visitor asks for detail you do not have, say "
+        "so plainly and offer what you can — for example \"I can explain the "
+        "approach, but I would have to check the exact model before quoting "
+        "it.\" A visitor being told you would need to check is a good "
+        "outcome. A visitor being told a plausible-sounding name that turns "
+        "out to be wrong is not.\n"
+    )
 
     # Format active peers
     if active_robots:
@@ -82,7 +111,7 @@ def build_delegation_prompt(
 *** INCORRECT EXAMPLES (never do this) ***
 Hello! {example_tag} How are you?   <- text before the tag
 {example_tag} Sure! {example_tag} Let me help.  <- two tags
-{rag_block}
+{rag_block}{facts_block}{honesty_rule}
 *** TEAMMATES & DELEGATION ***
 {peers_block}
 

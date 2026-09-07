@@ -227,6 +227,7 @@ class RobotInstance:
         delegated_context: Optional[Sequence[MemoryRecord]] = None,
         task_id: Optional[str] = None,
         style_framing: str = "",
+        grounded_facts: Sequence[str] = (),
     ) -> ChatResult:
         """
         Like process_chat() but fires on_sentence(clean_text, emotion_tag) for each
@@ -266,6 +267,7 @@ class RobotInstance:
             system, user_msg = build_delegation_prompt(
                 self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context,
+                grounded_facts=grounded_facts,
             )
 
         if style_framing:
