@@ -70,6 +70,10 @@ def build_delegation_prompt(
    next project, introduce another robot, invite one to speak, or say the
    group is moving on — a separate script does all of that, and doing it
    here makes it happen twice.
+5. The visit is still going. Never sign off — no "have a great day", no
+   "goodbye", no "enjoy the rest of your visit". The visitors are standing
+   in front of you and the tour continues after this answer; a farewell in
+   the middle of it sounds like you think they are leaving.
 
 *** CORRECT EXAMPLES ***
 {example_tag} Hello! How can I help you today?

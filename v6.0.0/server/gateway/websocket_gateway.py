@@ -68,15 +68,15 @@ _looks_like_question = looks_like_question
 RECONNECT_DELAY = 5
 MAX_RECONNECT_ATTEMPTS = 10
 
-QA_AUTO_CLOSE_SEC = 5.0
+QA_AUTO_CLOSE_SEC = 3.0
 """Silence after a robot invites further questions before the tour moves on
 by itself.
 
 Measured from the end of GENERATION, not the end of speech — the server gets
-no end-of-TTS signal for streamed chat sentences. A short sign-off takes
-roughly two seconds to say, so this is about three seconds of real silence:
-long enough that a visitor who wants to speak has room, short enough that the
-tour does not stall on a question nobody was going to ask."""
+no end-of-TTS signal for streamed chat sentences — so the visitor's real
+silence is this minus however long the sign-off takes to say. Was 5s, which
+in a live run left a noticeable dead gap after the robot had audibly
+finished."""
 
 
 class RobotConnection:
@@ -434,8 +434,15 @@ class WebSocketGateway:
                 # no edge this turn belongs to. Recording it would be filing
                 # evidence against a guessed topic, which Segment.note_routed
                 # refuses for the same reason.
+                # ONLY for something that is actually a question. "okay",
+                # "okay thank you" and "wait" all resolve to no topic too, and
+                # rerouting those produced a handoff line on every single turn
+                # of a live run — "Silbot can tell you more about that" in
+                # answer to "thank you". An acknowledgement is not a question
+                # looking for an owner.
                 presenter = obs.presenting_robot_id
                 if (presenter and presenter != obs.decider_robot_id
+                        and looks_like_question(obs.user_utterance)
                         and self._registry.get(presenter) is not None):
                     logger.info(f"[KG route] '{obs.user_utterance[:40]}' -> no topic "
                                 f"-> presenter {presenter} answers")
@@ -637,7 +644,13 @@ class WebSocketGateway:
 
         self._tracker.note_robot_turn(responding_robot_id, clean_text)
 
-        guide_id = status.get("robot_id")
+        # The GUIDE, not status["robot_id"] — that field is the current STEP's
+        # robot, which during a project block IS the presenting robot. Using it
+        # here meant the guard fired on exactly the robot most likely to sign
+        # off: a live run had Silbot say "If you have more questions, feel free
+        # to ask" and the window stayed open, because Silbot happened to own
+        # the step. guide_and_presenter reads the real host off step 0.
+        guide_id, _presenter = guide_and_presenter(status)
         if guide_id and responding_robot_id == guide_id:
             return   # don't recurse on the guide's own responses
 
@@ -785,6 +798,16 @@ class WebSocketGateway:
             )
 
         target_id = result.action.robot_id
+
+        # The presenting robot taking its own question. Silent: it is the
+        # natural owner of whatever is being discussed, not a redirection, and
+        # announcing "Silbot can tell you more about that" every time the
+        # group is already standing at Silbot's station is noise. A live run
+        # emitted that line on every turn.
+        if result.mechanism == "presenter_fallback" and target_id:
+            target = self._registry.get(target_id)
+            if target is not None:
+                return target, target_id, None
 
         # Guide stepping in because the robot that owns this topic is away and
         # its block has already been cut — there is no station left to defer

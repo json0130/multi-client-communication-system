@@ -343,6 +343,40 @@ class TestUnresolvedQuestionsGoToThePresenter:
         gw.on_qa_window_close()
         assert observed == []
 
+    def test_an_acknowledgement_is_not_rerouted_at_all(self):
+        # The noise this gate removes: a live run emitted "Silbot can tell you
+        # more about that — let's hear from them!" in answer to "okay thank
+        # you", on every single turn. An acknowledgement is not a question
+        # looking for an owner.
+        observed = []
+        gw, registry = self._wire(observed)
+        for ack in ("okay thank you", "okay", "wait", "oh i see",
+                    "okay that sounds cool"):
+            result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(GUIDE), ack)
+            assert result.mechanism == Mechanism.RECEIVER, f"{ack!r} was rerouted"
+
+    def test_a_spoken_question_with_filler_still_reaches_the_presenter(self):
+        # Speech has no question marks and rarely starts on the question word.
+        observed = []
+        gw, registry = self._wire(observed)
+        for q in ("so which techniqe do you use",
+                  "hmmm then which technique or model do you use",
+                  "and how does that work"):
+            result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(GUIDE), q)
+            assert result.action.robot_id == A, f"{q!r} did not reach the presenter"
+            assert result.mechanism == "presenter_fallback"
+
+    def test_the_presenter_handover_is_silent(self):
+        # It is the natural owner of what is being discussed, not a
+        # redirection — announcing it every turn is what made the live log
+        # unreadable.
+        observed = []
+        gw, registry = self._wire(observed)
+        target_inst, target_id, handoff = gw.route_question(
+            registry.get(GUIDE), "so which techniqe do you use")
+        assert target_id == A
+        assert handoff is None
+
     def test_the_presenter_receiving_it_directly_is_not_rerouted(self):
         observed = []
         gw, registry = self._wire(observed)

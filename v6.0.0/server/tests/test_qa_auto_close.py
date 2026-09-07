@@ -206,3 +206,35 @@ class TestTheTimerDoesNotOutliveItsWindow:
             assert gw._auto_close_timer.daemon is True
         finally:
             gw.cancel_qa_auto_close()
+
+
+class TestTheGuardUsesTheRealGuide:
+    """
+    Regression: the guide guard read status["robot_id"], which is the CURRENT
+    STEP's robot, not the host. During a project block that IS the presenting
+    robot — so the guard fired on exactly the robot most likely to sign off,
+    and auto-close silently never ran. A live run had Silbot say "If you have
+    more questions, feel free to ask" and the tour sat there waiting.
+    """
+
+    def test_the_presenting_robot_can_close_its_own_window(self, wired, monkeypatch):
+        gw, orch, _, closed = wired
+        monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
+        # Park on A's own project step, so status["robot_id"] == A.
+        orch._idx = next(i for i, s in enumerate(orch._script)
+                         if s.block_robot_id == A and s.role == StepRole.PROJECT)
+        assert orch.get_status()["robot_id"] == A, "fixture must reproduce the trap"
+        gw.check_qa_auto_close(A, SIGN_OFF)
+        _settle()
+        assert closed == ["policy"]
+
+    def test_the_guide_is_still_guarded_from_its_own_words(self, wired, monkeypatch):
+        gw, orch, _, closed = wired
+        monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
+        gw.check_qa_auto_close(GUIDE, SIGN_OFF)
+        _settle()
+        assert closed == []
+
+    def test_the_interval_is_three_seconds(self):
+        from gateway.websocket_gateway import QA_AUTO_CLOSE_SEC
+        assert QA_AUTO_CLOSE_SEC == 3.0

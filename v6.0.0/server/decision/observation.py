@@ -37,14 +37,42 @@ QUESTION_PREFIXES = (
 )
 
 
+# Spoken openers that carry no meaning and hide the question word behind
+# them. Stripped before the prefix check, longest first, repeatedly — "hmmm
+# then which technique do you use" needs two removed before "which" is at the
+# front. Deliberately only fillers: "okay" and "thanks" are NOT here, because
+# an acknowledgement must never become a question by having a word removed.
+QUESTION_FILLERS = (
+    "so ", "and ", "but ", "then ", "well ", "hmm ", "hmmm ", "um ", "uh ",
+    "oh ", "actually ", "just ", "also ", "now ", "ok so ", "okay so ",
+)
+
+
 def looks_like_question(text: str) -> bool:
     """
-    Heuristic pre-filter, lifted verbatim from websocket_gateway._looks_like_question
-    so the behaviour is preserved exactly while gaining a single home.
+    Heuristic pre-filter for "is this a question?".
+
+    Was a bare prefix/`?` test lifted from the gateway. Speech has no question
+    marks and rarely starts on the question word: a live run had "so which
+    techniqe do you use" and "hmmm then which technique or model do you use"
+    both read as non-questions, so the presenting robot never got them. Filler
+    openers are stripped first, which makes the prefix list do the work it was
+    always meant to do.
+
+    Fillers are removed one at a time and only from the FRONT, so this can
+    only ever expose a question word that was already there — it cannot turn
+    "okay thank you" into a question.
     """
-    t = text.lower().strip()
+    t = (text or "").lower().strip()
     if "?" in t:
         return True
+    for _ in range(4):                      # bounded; four fillers is plenty
+        for filler in QUESTION_FILLERS:
+            if t.startswith(filler):
+                t = t[len(filler):].lstrip()
+                break
+        else:
+            break
     return t.startswith(QUESTION_PREFIXES)
 
 

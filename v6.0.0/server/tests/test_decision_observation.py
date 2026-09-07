@@ -313,3 +313,61 @@ class TestQuestionHeuristic:
     ])
     def test_matches_the_original_prefilter(self, text, expected):
         assert looks_like_question(text) is expected
+
+
+class TestSpokenQuestionsAreRecognised:
+    """
+    looks_like_question gates both the STAY heuristic and the presenter
+    fallback. Speech has no question marks and rarely starts on the question
+    word, so a bare prefix test read real questions as acknowledgements: a
+    live run had "so which techniqe do you use" fall through to the guide,
+    which invented an answer on the presenting robot's behalf.
+
+    Fillers are stripped only from the front and only from a fixed list, so
+    this can expose a question word that was already there but can never
+    manufacture one.
+    """
+
+    QUESTIONS = (
+        "so which techniqe do you use",
+        "hmmm then which technique or model do you use",
+        "and how does that work",
+        "well what about the sensors",
+        "um can you explain that again",
+        "what models do you use",
+        "how does emotion recognition work",
+    )
+
+    NOT_QUESTIONS = (
+        "okay thank you",
+        "okay",
+        "wait",
+        "oh i see",
+        "yeah thank you",
+        "no questions thank you",
+        "okay that sounds cool",
+        "oh nothing you can resume now",
+        "thanks",
+        "",
+    )
+
+    def test_spoken_questions_are_recognised(self):
+        from decision.observation import looks_like_question
+        for q in self.QUESTIONS:
+            assert looks_like_question(q), f"missed a question: {q!r}"
+
+    def test_acknowledgements_are_not(self):
+        from decision.observation import looks_like_question
+        for a in self.NOT_QUESTIONS:
+            assert not looks_like_question(a), f"read as a question: {a!r}"
+
+    def test_stripping_cannot_manufacture_a_question(self):
+        # "okay"/"thanks" are deliberately absent from the filler list — an
+        # acknowledgement must not become a question by losing a word.
+        from decision.observation import QUESTION_FILLERS
+        for banned in ("okay ", "ok ", "thanks ", "thank "):
+            assert banned not in QUESTION_FILLERS
+
+    def test_a_question_mark_still_short_circuits(self):
+        from decision.observation import looks_like_question
+        assert looks_like_question("really?")
