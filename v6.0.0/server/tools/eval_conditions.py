@@ -214,20 +214,31 @@ def run_route_case(case: dict, cond: Condition) -> list:
     e = case["expected"]
     receiver = ev.CHATBOX          # the group is at ChatBox's station
 
+    # No routing decision means no observation. Segment.note_routed needs a
+    # resolved topic, so a turn the graph did not decide has no edge to
+    # credit — the baseline records nothing, and neither does a no-opinion
+    # turn under KG routing. This said 1 for both, which credited the
+    # baseline for evidence it never produced.
     if not cond.use_kg_routing:
-        # The documented baseline: whoever heard the question answers it.
-        # It can never defer, and it records one observation for the turn.
+        # The documented baseline: whoever heard the question answers it,
+        # and it can never defer.
         actual = {"answering_robot": receiver, "deferred_to": None,
-                  "observations_written": 1}
+                  "observations_written": 0}
     else:
-        router = KGRouter(ev.EDGES, [], ev.TOPICS, explore=False,
+        # Eligibility is a structural filter like presence, so the ablation
+        # has to apply it or it scores cases whose setup it ignored.
+        from dataclasses import replace as _replace
+        barred = set(case.get("ineligible", ()))
+        edges = [_replace(x, eligible=False) if x.robot_id in barred else x
+                 for x in ev.EDGES]
+        router = KGRouter(edges, [], ev.TOPICS, explore=False,
                           absent_robot_ids=case["absent"])
         d = router.decide(case["utterance"], ev.PROJECTS,
                           remaining_block_ids=case["remaining"],
                           guide_robot_id=ev.GUIDE)
         if d is None:
-            actual = {"answering_robot": receiver, "deferred_to": None,
-                      "observations_written": 1}
+            actual = {"answering_robot": None, "deferred_to": None,
+                      "observations_written": 0}
         else:
             actual = {
                 "answering_robot": None if d.is_deferred else d.robot_id,
