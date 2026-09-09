@@ -314,21 +314,35 @@ def create_http_gateway(
         ws_gateway.check_plan_revision(instance, message)
 
         if advancing:
-            if decision.mechanism == Mechanism.LLM_CLASSIFIER:
-                ws_gateway.send_to_robot(client_id, {
-                    "event": "demo_step",
-                    "step_id": "_qa_classifier_done",
-                    "text": "[DEFAULT] Great! Let's continue with the demonstration then!",
-                    "require_ack": False,
-                })
-                return jsonify({
-                    "client_id": client_id,
-                    "response": "Resuming demonstration.",
-                    "emotion_tag": "",
-                    "clean_text": "Resuming demonstration.",
-                    "is_delegation": False,
-                    "delegation_target": None,
-                })
+            # EVERY advance mechanism ends the turn, not just the classifier.
+            # A phrase or time-pressure match used to fall through and
+            # generate a reply from whichever robot held the mic: a live run
+            # had a visitor tell Navel "I'm running out of time, can we skip"
+            # and Navel answer "Sure, let's skip it. What's next on your
+            # agenda?" — asking the visitor to run the tour while the clock
+            # they had complained about kept running. The window is closing;
+            # there is nothing to answer. See ADVANCE_ACK.
+            from decision import guide_and_presenter
+            from gateway.websocket_gateway import ADVANCE_ACK
+            guide_id = None
+            if ws_gateway._demo_orchestrator:
+                guide_id, _p = guide_and_presenter(
+                    ws_gateway._demo_orchestrator.get_status())
+            ws_gateway.send_to_robot(guide_id or client_id, {
+                "event": "demo_step",
+                "step_id": "_qa_advance_ack",
+                "text": ADVANCE_ACK.get(decision.mechanism,
+                                        ADVANCE_ACK["default"]),
+                "require_ack": False,
+            })
+            return jsonify({
+                "client_id": client_id,
+                "response": "Resuming demonstration.",
+                "emotion_tag": "",
+                "clean_text": "Resuming demonstration.",
+                "is_delegation": False,
+                "delegation_target": None,
+            })
 
         # Who actually answers. A confident competence-graph read can name a
         # DIFFERENT connected robot than the one that received this message —

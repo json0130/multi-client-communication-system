@@ -147,6 +147,18 @@ QA_CLOSING_PHRASES = [
     "proceed to the next",
     "sure thing",
     "great, moving",
+    # The guide's own "we're done here" phrasings. A live run had Pepper say
+    # "You're welcome! Let's continue with our tour." and the window stayed
+    # open until someone said "move on" out loud — the tour had audibly
+    # finished the exchange and was waiting to be told so.
+    "let's continue",
+    "lets continue",
+    "let us continue",
+    "continue with our tour",
+    "continue with the tour",
+    "continue the demonstration",
+    "back to the tour",
+    "carry on with",
 ]
 
 # ── PLAN_REVISE triggers ──────────────────────────────────────────────────────

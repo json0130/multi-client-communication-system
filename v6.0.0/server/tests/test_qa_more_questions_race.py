@@ -413,3 +413,53 @@ class TestUnresolvedQuestionsGoToThePresenter:
         result = gw._decide(DecisionPoint.QA_ROUTE, registry.get(A),
                             "so which techniqe do you use")
         assert result.mechanism == Mechanism.RECEIVER
+
+
+class TestAdvanceTurnsAreNotGenerated:
+    """
+    A turn that closes the Q&A window has nothing to answer, so nothing
+    should be generated for it.
+
+    Only the classifier path returned early; a phrase or time-pressure match
+    fell through to generation, and the reply came from whichever robot held
+    the mic. A live run had a visitor tell Navel "actually I am running out
+    of time so can we skip" — Navel answered "Sure, let's skip it. What's
+    next on your agenda?", asking the visitor to run the tour while the clock
+    they had just complained about kept going.
+    """
+
+    def test_time_pressure_does_not_generate(self, client):
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i am running out of time can we skip this"})
+        spoken = [d.get("text", "") for _c, d in client.sent
+                  if d.get("event") == "chat_sentence"]
+        assert not spoken, f"generated a reply on a closing turn: {spoken}"
+
+    def test_the_acknowledgement_comes_from_the_guide(self, client):
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i am running out of time can we skip this"})
+        acks = [(c, d) for c, d in client.sent
+                if d.get("step_id") == "_qa_advance_ack"]
+        assert acks, "no acknowledgement sent"
+        assert acks[0][0] == GUIDE, "the acknowledgement did not come from the guide"
+
+    def test_time_pressure_gets_its_own_wording(self, client):
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i am running out of time can we skip this"})
+        text = next(d["text"] for _c, d in client.sent
+                    if d.get("step_id") == "_qa_advance_ack")
+        assert "brief" in text.lower(), \
+            "time pressure should be acknowledged as time pressure"
+
+    def test_a_plain_advance_phrase_also_ends_the_turn(self, client):
+        client.post(f"/robots/{A}/chat", json={"message": "lets move on"})
+        spoken = [d.get("text", "") for _c, d in client.sent
+                  if d.get("event") == "chat_sentence"]
+        assert not spoken
+
+    def test_a_real_question_still_generates(self, client):
+        # The control — this must not swallow genuine questions.
+        client.post(f"/robots/{A}/chat", json={"message": "how accurate is it"})
+        spoken = [d.get("text", "") for _c, d in client.sent
+                  if d.get("event") == "chat_sentence"]
+        assert spoken, "a real question produced no answer"

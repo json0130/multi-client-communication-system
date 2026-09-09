@@ -523,6 +523,10 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
                            "— that is the robot's job — "
                            f"then turn to {robot_id} and invite them to greet the visitors. "
                            "Make it one connected thought, not two announcements. "
+                           "Speak ONLY your own words: do not write what the other "
+                           "robot says, and never put their name followed by a "
+                           "line of their dialogue — they greet the visitors "
+                           "themselves, immediately after you. "
                            "2-3 sentences. Use [POINT]."),
             generate    = True,
             timeout_sec = 60,

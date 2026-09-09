@@ -305,12 +305,34 @@ def lookup_subject(robot_id: str) -> str:
     Falls back to "" on any failure, which returns the instruction to its
     previous wording rather than blocking the demo.
     """
+    # The scenario profile's role FIRST. It is a concise area label —
+    # "Conversational AI researcher" — which is what an introduction wants.
+    # Joining the declared topics instead made the guide recite the
+    # vocabulary: "conversational memory, knowledge graphs, and large
+    # language models to enhance long-term interaction and retrieval
+    # augmented generation" was one real generation. Accurate, unusable.
+    try:
+        prof = _profiles_ref["p"]
+        if prof is not None:
+            entry = prof.find_robot(robot_id) if hasattr(prof, "find_robot") else None
+            if entry is None:
+                for sc in getattr(prof, "_by_scenario", {}).values():
+                    entry = sc.get(robot_id)
+                    if entry is not None:
+                        break
+            if entry is not None and getattr(entry, "role", ""):
+                return str(entry.role)
+    except Exception as e:
+        print(f"[App] profile role unavailable for {robot_id}: {e}")
+
+    # Fall back to the declared topics, capped — better a short list than a
+    # recitation, and better either than nothing.
     try:
         topics, edges, _links = _kg_snapshot()
         labels = {t["id"]: t.get("label", t["id"]) for t in topics}
-        declared = [labels.get(e.topic_id, e.topic_id) for e in edges
-                    if e.robot_id == robot_id and e.specialised]
-        return ", ".join(sorted(declared))
+        declared = sorted(labels.get(e.topic_id, e.topic_id) for e in edges
+                          if e.robot_id == robot_id and e.specialised)
+        return ", ".join(declared[:2])
     except Exception as e:
         print(f"[App] subject lookup failed for {robot_id}: {e}")
         return ""

@@ -113,12 +113,26 @@ class TestSignOffSchedulesAClose:
         _settle()
         assert closed == []
 
-    def test_the_guide_never_judges_its_own_response(self, wired, monkeypatch):
-        # The recursion guard: the guide is the one asking "any other
-        # questions?", so its own words must not be read as a sign-off.
+    def test_the_guide_IS_heard_when_it_says_a_closing_phrase(self, wired, monkeypatch):
+        """The guard covers the LLM moderator, not the phrase match.
+
+        It used to cover both, so the guide could say "Let's continue with
+        our tour" and nothing closed — the robot most likely to say a
+        wrap-up line was the one robot that could not trigger one. A string
+        match cannot recurse, so there is nothing to guard against.
+        """
         gw, orch, _, closed = wired
         monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
-        gw.check_qa_auto_close(orch.get_status().get("robot_id"), SIGN_OFF)
+        gw.check_qa_auto_close(GUIDE, "You're welcome! Let's continue with our tour.")
+        _settle()
+        assert closed == ["policy"]
+
+    def test_the_guide_is_still_guarded_from_the_moderator(self, wired, monkeypatch):
+        # Ordinary guide chatter with no closing phrase in it must not be
+        # handed to the wrap-up judge — that is the loop the guard exists for.
+        gw, orch, _, closed = wired
+        monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
+        gw.check_qa_auto_close(GUIDE, "Let me think about how best to explain that.")
         _settle()
         assert closed == []
 
@@ -228,12 +242,12 @@ class TestTheGuardUsesTheRealGuide:
         _settle()
         assert closed == ["policy"]
 
-    def test_the_guide_is_still_guarded_from_its_own_words(self, wired, monkeypatch):
+    def test_a_presenting_robots_sign_off_still_closes(self, wired, monkeypatch):
         gw, orch, _, closed = wired
         monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
-        gw.check_qa_auto_close(GUIDE, SIGN_OFF)
+        gw.check_qa_auto_close(A, SIGN_OFF)
         _settle()
-        assert closed == []
+        assert closed == ["policy"]
 
     def test_the_interval_is_three_seconds(self):
         from gateway.websocket_gateway import QA_AUTO_CLOSE_SEC
