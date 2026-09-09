@@ -874,21 +874,28 @@ class WebSocketGateway:
 
         target_id = result.action.robot_id
 
-        # The robot already presenting taking a question about its own work.
-        # Silent: it is the natural owner of whatever is on the floor, not a
-        # redirection, and "ChatBox can tell you more about that" while the
-        # group is standing in front of ChatBox mid-talk is noise.
+        # NOTE ON WHAT IS *NOT* HERE.
         #
-        # Keyed on WHO the target is, not on which rule picked them. An
-        # earlier version only silenced presenter_fallback, so the same
-        # redundant announcement came back whenever the graph resolved the
-        # question confidently to the presenter — a question about ChatBox's
-        # own models, asked during ChatBox's own block, was announced as a
-        # hand-off to ChatBox.
-        if target_id and target_id == self._presenting_robot_id():
-            target = self._registry.get(target_id)
-            if target is not None:
-                return target, target_id, None
+        # This used to silence the hand-off whenever the target was the robot
+        # currently presenting, on the reasoning that announcing a robot the
+        # group is already standing in front of is redundant. That was an
+        # over-correction. The real cause of the noise it was fixing was
+        # acknowledgements being routed at all ("okay thank you" producing
+        # "Silbot can tell you more about that"), and that is fixed upstream
+        # now by is_acknowledgement.
+        #
+        # With that gone, every surviving reroute is a real change of speaker,
+        # and the rule is simply: if the answer comes from a robot other than
+        # the one addressed, say so. Silence there is what made the dashboard
+        # confusing — a voice changing with no explanation. The
+        # target_id == receiver_id check below already covers the case that
+        # genuinely needs no announcement: you asked the robot that answers.
+        #
+        #   interrupt a project robot, ask about its work  -> it just answers
+        #   interrupt the guide, ask a technical question  -> the guide hands
+        #                                                     over out loud,
+        #                                                     then the
+        #                                                     specialist answers
 
         # Guide stepping in because the robot that owns this topic is away and
         # its block has already been cut — there is no station left to defer

@@ -436,6 +436,16 @@ def create_http_gateway(
 
         return jsonify({
             "client_id":         client_id,
+            # WHO ACTUALLY ANSWERED, which is not always who was addressed.
+            # The dashboard attributed every reply to the robot the operator
+            # typed to, so a question asked of Pepper and answered by ChatBox
+            # appeared as Pepper's — and was spoken in Pepper's voice. The
+            # reroute was working; the transcript was lying about it.
+            "answered_by":       target_id,
+            # What the receiver said out loud before handing over, if it did.
+            # The dashboard shows it as the receiver's own line so the
+            # transition is visible rather than a voice changing unexplained.
+            "handoff":           handoff or "",
             "response":          result.response,
             "emotion_tag":       result.emotion_tag,
             "clean_text":        clean_for_browser or result.clean_text,

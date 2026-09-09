@@ -369,21 +369,25 @@ class TestUnresolvedQuestionsGoToThePresenter:
             assert result.action.robot_id == A, f"{q!r} did not reach the presenter"
             assert result.mechanism == "presenter_fallback"
 
-    def test_a_confident_route_to_the_presenter_is_also_silent(self):
-        """Silence keys on WHO the target is, not on which rule picked them.
+    def test_interrupting_the_GUIDE_announces_the_hand_over(self):
+        """A change of speaker is always announced.
 
-        A question about ChatBox's own models, asked during ChatBox's own
-        block, resolves confidently by argmax rather than by the presenter
-        fallback — and was announced as "ChatBox can tell you more about
-        that" while the group stood in front of ChatBox mid-talk.
+        This once asserted the opposite — silence whenever the target was the
+        presenting robot. That was an over-correction: the noise it was
+        fixing came from acknowledgements being routed at all, which
+        is_acknowledgement now stops upstream. Silence here made the
+        dashboard confusing instead, because a visitor (and the operator)
+        heard a different voice with nothing explaining it. Reported from a
+        live run: ChatBox answered a question about its model and the
+        transcript showed Pepper.
         """
         observed = []
         gw, registry = self._wire(observed)
-        gw._kg_router_factory = lambda: _FakeKGRouter(A)   # argmax -> the presenter
+        gw._kg_router_factory = lambda: _FakeKGRouter(A)
         target_inst, target_id, handoff = gw.route_question(
             registry.get(GUIDE), "how does retrieval augmented generation work")
         assert target_id == A
-        assert handoff is None, "announced a hand-off to the robot already presenting"
+        assert handoff and "ChatBox" in handoff
 
     def test_a_route_to_a_DIFFERENT_robot_still_announces(self):
         # The line exists for a reason — moving the question to someone the
@@ -396,16 +400,25 @@ class TestUnresolvedQuestionsGoToThePresenter:
         assert target_id == B
         assert handoff and "Navel" in handoff
 
-    def test_the_presenter_handover_is_silent(self):
-        # It is the natural owner of what is being discussed, not a
-        # redirection — announcing it every turn is what made the live log
-        # unreadable.
+    def test_interrupting_the_PROJECT_ROBOT_needs_no_announcement(self):
+        # You asked the robot that answers, so there is no change of speaker
+        # to explain — it just answers. This is the only case that is silent.
         observed = []
         gw, registry = self._wire(observed)
         target_inst, target_id, handoff = gw.route_question(
-            registry.get(GUIDE), "so which techniqe do you use")
+            registry.get(A), "so which techniqe do you use")
         assert target_id == A
         assert handoff is None
+
+    def test_interrupting_the_guide_on_the_presenters_topic_still_announces(self):
+        # The presenter fallback also changes speaker when the guide held the
+        # mic, so it announces too.
+        observed = []
+        gw, registry = self._wire(observed)
+        _inst, target_id, handoff = gw.route_question(
+            registry.get(GUIDE), "so which techniqe do you use")
+        assert target_id == A
+        assert handoff, "the guide handed over silently"
 
     def test_the_presenter_receiving_it_directly_is_not_rerouted(self):
         observed = []

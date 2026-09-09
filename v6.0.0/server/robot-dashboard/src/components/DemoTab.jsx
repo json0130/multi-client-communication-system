@@ -662,10 +662,23 @@ export default function DemoTab() {
         const drId = robots.find(r => r.robot_name === dr.robot_name)?.client_id || ''
         if (ttsRef.current) browserSpeak(dr.clean_text, drId)
       } else {
+        // A question asked of one robot can be ANSWERED by another — the
+        // competence graph reroutes it. Attributing the reply to whoever was
+        // typed to made the transcript wrong and, worse, spoke ChatBox's
+        // answer in Pepper's voice. Use who actually answered.
+        const answeredId = res.answered_by || targetId
+        const answeredName =
+          robots.find(r => r.client_id === answeredId)?.robot_name || answeredId
+        // The receiver's hand-off line, shown as its own turn so the change
+        // of voice is explained rather than unaccountable.
+        if (res.handoff) {
+          addMsg({ role: 'robot', robot: name, text: res.handoff, time: ts() })
+          if (ttsRef.current) browserSpeak(res.handoff, targetId)
+        }
         const reply = (res.clean_text || res.response || '').trim()
         if (reply) {
-          addMsg({ role: 'robot', robot: name, text: reply, time: ts() })
-          if (ttsRef.current) browserSpeak(reply, targetId)
+          addMsg({ role: 'robot', robot: answeredName, text: reply, time: ts() })
+          if (ttsRef.current) browserSpeak(reply, answeredId)
         }
       }
     } catch (e) {
