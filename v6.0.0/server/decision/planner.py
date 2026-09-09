@@ -114,7 +114,6 @@ def block_importance(
     visitor_topics: Optional[Sequence[str]] = None,
     kg_edges: Optional[Iterable] = None,
     kg_links: Optional[Iterable] = None,
-    learned: Optional[dict] = None,
 ) -> dict:
     """
     {robot_id: importance in [0,1]} for this run.
@@ -129,7 +128,6 @@ def block_importance(
     and must not degrade into everything scoring the same.
     """
     defaults = defaults or {}
-    learned = learned or {}
     out = {}
 
     coverage = {}
@@ -168,8 +166,6 @@ def block_importance(
             # not erase it — a project the lab considers unmissable stays hard to
             # cut even for a visitor who did not ask for it.
             base = 0.35 * base + 0.65 * coverage[b.robot_id]
-        if b.robot_id in learned:
-            base = 0.5 * base + 0.5 * float(learned[b.robot_id])
         out[b.robot_id] = round(max(0.0, min(1.0, base)), 4)
     return out
 

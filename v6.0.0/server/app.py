@@ -124,6 +124,10 @@ _duration_cache: dict = {"at": 0.0, "durations": {}}
 # a mutable cell set once create_app() has built the orchestrator.
 _orchestrator_ref: dict = {"o": None}
 
+# Same shape, for the scenario profile: build_flow_plan is referenced by name
+# before create_app() has loaded the profiles.
+_profiles_ref: dict = {"p": None}
+
 
 def _kg_snapshot():
     """(topics, edges, links) from the current competence graph.
@@ -346,8 +350,8 @@ def build_flow_plan(obs) -> Optional[dict]:
     # implicit in what happened to be computed here:
     #   1. a freshly stated interest THIS TURN
     #   2. the pre-demo visitor profile's standing interest
-    #   3. neither — layer-1 hand-set defaults apply alone (defaults={} below;
-    #      there is no per-project config surface for those yet)
+    #   3. neither — the lab's own per-project priorities apply alone, read
+    #      from the scenario profile's `importance:` key
     utterance_topics = None
     if topics and obs.user_utterance:
         from decision.kg_policy import KGRouter
@@ -362,7 +366,19 @@ def build_flow_plan(obs) -> Optional[dict]:
     if visitor_topics:
         print(f"[App] PLAN_REVISE emphasis source: {emphasis_source} ({visitor_topics})")
 
-    importance = block_importance(graph, defaults={},
+    # The lab's own per-project priorities, from the scenario profile. This
+    # was defaults={}, so every block scored DEFAULT_IMPORTANCE, the sort
+    # fell through to its (importance, robot_id) tie-break, and which project
+    # a visitor lost under time pressure was decided by robot_id spelling.
+    # Still {} if the profile declares none — tools/check_cold_start.py
+    # reports that as INERT rather than letting it pass silently.
+    defaults = {}
+    try:
+        defaults = _profiles_ref["p"].importance_defaults() if _profiles_ref["p"] else {}
+    except Exception as e:
+        print(f"[App] per-project importance unavailable: {e}")
+
+    importance = block_importance(graph, defaults=defaults,
                                   visitor_topics=visitor_topics or None,
                                   kg_edges=edges, kg_links=links)
 
@@ -377,6 +393,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     """
     # ── RBAC (before the registry — instances are built with these) ───────────
     profiles, rbac, grants = build_rbac()
+    _profiles_ref["p"] = profiles
 
     # ── Core objects (order matters — registry first) ─────────────────────────
     registry   = RobotRegistry(rbac=rbac, grants=grants, profiles=profiles)

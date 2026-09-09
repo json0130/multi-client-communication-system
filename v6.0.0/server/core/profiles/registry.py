@@ -49,6 +49,16 @@ class RobotProfileEntry:
     access_level: AccessLevel
     default_visibility: str = Visibility.LOCAL.value
     persona: Optional[str] = None
+    # How much this project matters to the LAB, independent of any visitor —
+    # the planner's first importance layer, and the only thing that decides
+    # which block is cut when nobody has stated an interest. None means
+    # unset, which the planner reads as neutral.
+    #
+    # It has to be declared SOMEWHERE deliberate: production called
+    # block_importance with defaults={}, so every block scored the same and
+    # the skip order fell through to the alphabetical tie-break. Which
+    # project a visitor loses was decided by robot_id spelling.
+    importance: Optional[float] = None
 
     @property
     def is_manager(self) -> bool:
@@ -139,12 +149,29 @@ def parse_profile(raw: object, source_path: Optional[str] = None) -> ScenarioPro
                 f"{', '.join(v.value for v in Visibility)}."
             ) from e
 
+        raw_imp = item.get("importance")
+        importance = None
+        if raw_imp is not None:
+            try:
+                importance = float(raw_imp)
+            except (TypeError, ValueError):
+                raise ProfileError(
+                    f"Scenario '{scenario_id}'{where}: robot '{robot_id}' has a "
+                    f"non-numeric importance {raw_imp!r}."
+                )
+            if not 0.0 <= importance <= 1.0:
+                raise ProfileError(
+                    f"Scenario '{scenario_id}'{where}: robot '{robot_id}' has "
+                    f"importance {importance}, which is outside [0, 1]."
+                )
+
         entries.append(RobotProfileEntry(
             id=robot_id,
             role=str(item.get("role") or ""),
             access_level=level,
             default_visibility=visibility.value,
             persona=item.get("persona"),
+            importance=importance,
         ))
 
     profile = ScenarioProfile(
@@ -233,6 +260,24 @@ class ProfileRegistry:
         self._by_scenario[profile.scenario_id] = profile
 
     # ── Lookup ────────────────────────────────────────────────────────────────
+
+    def importance_defaults(self, scenario_id: str = "") -> dict:
+        """{robot_id: importance} for every robot that declares one.
+
+        Empty when nothing does, which the planner reads as neutral — and
+        which is what production silently had: block_importance was called
+        with defaults={}, so every block tied and the skip order fell to the
+        alphabetical tie-break.
+        """
+        out = {}
+        profiles = ([self._by_scenario[scenario_id]]
+                    if scenario_id and scenario_id in self._by_scenario
+                    else list(self._by_scenario.values()))
+        for prof in profiles:
+            for e in prof.robots:
+                if e.importance is not None:
+                    out[e.id] = e.importance
+        return out
 
     def get_scenario(self, scenario_id: str) -> Optional[ScenarioProfile]:
         return self._by_scenario.get(scenario_id)

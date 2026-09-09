@@ -23,6 +23,12 @@ from decision.models import PlanOpKind, StepRole
 from decision.planner import QA_FLOOR_SEC, block_importance, plan_for_budget
 from demo.demo_script import build_script
 
+def _server_path(rel: str) -> str:
+    import os
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))), rel)
+
+
 GUIDE = "pepper_01"
 A, B, C = "chatbox_jetson_001", "navel_001", "silbot_01"
 
@@ -128,12 +134,42 @@ class TestImportance:
                                visitor_topics=["topic:x"], kg_edges=[e], kg_links=[])
         assert got[A] > 0.3
 
-    def test_the_learned_layer_is_absent_not_stubbed(self, graph):
-        # Layer 3 contributes only when passed. A placeholder silently scoring
-        # zero would be indistinguishable from a working one with no data.
-        base = block_importance(graph, defaults={A: 0.8})
-        with_learned = block_importance(graph, defaults={A: 0.8}, learned={A: 0.0})
-        assert with_learned[A] < base[A]
+    def test_every_importance_layer_is_actually_supplied_somewhere(self):
+        """No parameter that no caller passes.
+
+        `learned` was a third layer nothing ever supplied, so it could not
+        change a decision — inert by construction, and indistinguishable in
+        the source from a working layer with no data yet. It is removed. This
+        guards the general case: a parameter here that production never fills
+        is a mechanism that does nothing, which is the failure signature
+        tools/check_cold_start.py exists to hunt.
+        """
+        import inspect
+        params = set(inspect.signature(block_importance).parameters) - {"graph"}
+        supplied = set()
+        for mod in ("app.py", "gateway/flow_gateway.py"):
+            src = open(_server_path(mod)).read()
+            for p in params:
+                if f"{p}=" in src:
+                    supplied.add(p)
+        assert params == supplied, (
+            f"block_importance takes {sorted(params - supplied)} that no "
+            f"production caller supplies — an inert layer")
+
+    def test_production_supplies_hand_set_priorities(self):
+        """defaults={} was the live call, so every block tied at
+        DEFAULT_IMPORTANCE and the skip order fell to the (importance,
+        robot_id) tie-break — which project a visitor lost was decided by
+        robot_id spelling."""
+        import re
+        src = open(_server_path("app.py")).read()
+        # Strip comments — the prose here legitimately quotes the old call
+        # while explaining why it was wrong, and matching that would make the
+        # test fail on its own documentation.
+        code = "\n".join(re.sub(r"#.*$", "", ln) for ln in src.splitlines())
+        assert "defaults={}" not in code, \
+            "production is calling block_importance with no priorities again"
+        assert "importance_defaults" in code
 
 
 # ── The ladder ────────────────────────────────────────────────────────────────
