@@ -456,13 +456,47 @@ class TestAdvanceTurnsAreNotGenerated:
         assert acks, "no acknowledgement sent"
         assert acks[0][0] == GUIDE, "the acknowledgement did not come from the guide"
 
-    def test_time_pressure_gets_its_own_wording(self, client):
+    def test_the_ack_names_what_the_tour_just_lost(self, client):
+        """A revision the visitor is not told about is indistinguishable from
+        being ignored.
+
+        A live run had a visitor ask to skip because they were short of time.
+        The skip WAS applied — and all they heard was "Of course, we'll keep
+        it brief", which reads as agreement, not as a project being dropped
+        from their tour. revise_script edits the script silently, so this
+        acknowledgement is the only place the change becomes audible.
+        """
         client.post(f"/robots/{A}/chat",
                     json={"message": "i am running out of time can we skip this"})
         text = next(d["text"] for _c, d in client.sent
                     if d.get("step_id") == "_qa_advance_ack")
-        assert "brief" in text.lower(), \
-            "time pressure should be acknowledged as time pressure"
+        assert "skip" in text.lower(), f"the ack did not say what was cut: {text!r}"
+
+    def test_an_advance_that_changes_nothing_is_just_the_courtesy(self, client):
+        """"lets move on" closes the window and revises nothing, so there is
+        nothing to announce.
+
+        Note that "we are running out of time" is NOT this case — it still
+        compresses the remaining blocks, and the ack correctly says so. Which
+        is the point of naming the change rather than the mechanism: the same
+        phrase family produces different edits, and the visitor should hear
+        which one they got.
+        """
+        client.post(f"/robots/{A}/chat", json={"message": "lets move on"})
+        text = next(d["text"] for _c, d in client.sent
+                    if d.get("step_id") == "_qa_advance_ack")
+        low = text.lower()
+        assert "skip" not in low and "wrap-up" not in low, \
+            f"announced a change that did not happen: {text!r}"
+
+    def test_plain_time_pressure_announces_the_compression(self, client):
+        # Time pressure with no explicit skip still tightens the tour, and
+        # the visitor is told which way.
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "we are running out of time"})
+        text = next(d["text"] for _c, d in client.sent
+                    if d.get("step_id") == "_qa_advance_ack")
+        assert "short" in text.lower() or "brief" in text.lower(), text
 
     def test_a_plain_advance_phrase_also_ends_the_turn(self, client):
         client.post(f"/robots/{A}/chat", json={"message": "lets move on"})

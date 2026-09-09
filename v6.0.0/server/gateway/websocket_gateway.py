@@ -81,6 +81,16 @@ ADVANCE_ACK = {
         "[DEFAULT] Of course, let's move on.",
 }
 
+# Used INSTEAD of the above when PLAN_REVISE changed the tour on the same
+# turn, because the change is the substance and the pleasantry should not
+# crowd it: "Of course — we'll keep it brief and move along — we'll skip
+# Silbot and carry on from there" says the same thing twice before getting to
+# the point.
+ADVANCE_ACK_WITH_CHANGE = {
+    Mechanism.TIME_PRESSURE: "[DEFAULT] Understood",
+    "default":               "[DEFAULT] Of course",
+}
+
 QA_AUTO_CLOSE_SEC = 3.0
 """Silence after a robot invites further questions before the tour moves on
 by itself.
@@ -369,6 +379,7 @@ class WebSocketGateway:
         # them, so the robot they should speak as travels out of band.
         self._scratch.decider_id = getattr(decider, "client_id", None)
         self._scratch.wrap_up_text = None
+        self._scratch.plan_change = None
         # Cleared per decision, not just set on the defer path: _scratch is
         # thread-local and a Flask worker handles many turns, so a defer on
         # one turn would otherwise still be readable on the next one.
@@ -813,8 +824,15 @@ class WebSocketGateway:
         Runs after the advance decision so an explicit "move on" is still just
         an advance, not a plan edit.
 
-        Returns True if the script was changed.
+        Returns True if the script was changed. What CHANGED is stashed for
+        the caller to announce — see _scratch.plan_change and
+        describe_plan_change. A revision the visitor is not told about is
+        indistinguishable from being ignored: a live run had a visitor ask to
+        skip because they were short of time, the skip was applied, and all
+        they heard was "Of course — we'll keep it brief", which does not say
+        that a project had just been dropped from their tour.
         """
+        self._scratch.plan_change = None
         if not self._demo_orchestrator or not user_text:
             return False
 
@@ -825,7 +843,54 @@ class WebSocketGateway:
         result = self._demo_orchestrator.revise_script(
             action.ops, source="policy", reason=user_text[:200]
         )
-        return bool(result.get("applied"))
+        applied = bool(result.get("applied"))
+        if applied:
+            self._scratch.plan_change = self.describe_plan_change(action.ops)
+        return applied
+
+    def advance_ack_text(self, mechanism: str) -> str:
+        """What the guide says when a visitor's turn closes the window.
+
+        If PLAN_REVISE changed the tour on this same turn, the change is named
+        here. That is the only place the visitor learns about it: revise_script
+        edits the script silently, so a dropped project would otherwise just
+        not happen, and "Of course — we'll keep it brief" reads as agreement
+        rather than as an itinerary change. A visitor who asked to skip
+        something is entitled to hear what was skipped.
+        """
+        change = getattr(self._scratch, "plan_change", None)
+        if not change:
+            return ADVANCE_ACK.get(mechanism, ADVANCE_ACK["default"])
+        lead = ADVANCE_ACK_WITH_CHANGE.get(mechanism,
+                                           ADVANCE_ACK_WITH_CHANGE["default"])
+        return f"{lead} — {change}."
+
+    def describe_plan_change(self, ops) -> str:
+        """One clause naming what the tour just lost, for the guide to say.
+
+        Named for the visitor, not for the log: "skip" is an op kind, but what
+        a visitor needs to hear is which project they will no longer see. Uses
+        robot NAMES for the same reason.
+        """
+        from decision.models import PlanOpKind
+
+        def name(rid):
+            inst = self._registry.get(rid) if rid else None
+            return (getattr(inst, "robot_name", None) or rid) if rid else ""
+
+        dropped = [name(o.robot_id) for o in ops
+                   if o.kind is PlanOpKind.SKIP and o.robot_id]
+        if any(o.kind is PlanOpKind.DROP_REMAINING for o in ops):
+            return "we'll head straight to the wrap-up"
+        if dropped:
+            joined = dropped[0] if len(dropped) == 1 else \
+                ", ".join(dropped[:-1]) + " and " + dropped[-1]
+            return f"we'll skip {joined} and carry on from there"
+        if any(o.kind is PlanOpKind.COMPRESS for o in ops):
+            return "I'll keep the introductions short from here"
+        if any(o.kind is PlanOpKind.SET_QA_BUDGET for o in ops):
+            return "we'll keep the question rounds shorter"
+        return ""
 
     def route_question(self, instance, message: str):
         """
@@ -1083,8 +1148,7 @@ class WebSocketGateway:
                         self.send_to_robot(guide_id or client_id, {
                             "event": "demo_step",
                             "step_id": "_qa_advance_ack",
-                            "text": ADVANCE_ACK.get(result.mechanism,
-                                                    ADVANCE_ACK["default"]),
+                            "text": self.advance_ack_text(result.mechanism),
                             "require_ack": False,
                         })
                         return

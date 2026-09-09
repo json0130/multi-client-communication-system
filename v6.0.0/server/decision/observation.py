@@ -43,8 +43,19 @@ QUESTION_PREFIXES = (
 # front. Deliberately only fillers: "okay" and "thanks" are NOT here, because
 # an acknowledgement must never become a question by having a word removed.
 QUESTION_FILLERS = (
+    # Discourse openers.
     "so ", "and ", "but ", "then ", "well ", "hmm ", "hmmm ", "um ", "uh ",
     "oh ", "actually ", "just ", "also ", "now ", "ok so ", "okay so ",
+    # ACKNOWLEDGE-THEN-ASK, which is how people actually speak: "oh i see,
+    # which model do you use then". A live run had exactly that reach the
+    # guide instead of the presenting robot, because the question word sat
+    # behind "i see" and nothing stripped it. Safe to include even though
+    # these are also acknowledgements — looks_like_question needs a question
+    # PREFIX after stripping, so "oh i see thank you" reduces to "thank you"
+    # and is still not a question.
+    "i see ", "right ", "sure ", "cool ", "nice ", "great ",
+    "yeah ", "yep ", "ah ", "got it ", "makes sense ", "interesting ",
+    "okay ", "ok ", "alright ",
 )
 
 
@@ -66,13 +77,7 @@ def looks_like_question(text: str) -> bool:
     t = (text or "").lower().strip()
     if "?" in t:
         return True
-    for _ in range(4):                      # bounded; four fillers is plenty
-        for filler in QUESTION_FILLERS:
-            if t.startswith(filler):
-                t = t[len(filler):].lstrip()
-                break
-        else:
-            break
+    t = _strip_fillers(t)
     return t.startswith(QUESTION_PREFIXES)
 
 
@@ -85,6 +90,26 @@ ACKNOWLEDGEMENTS = (
 )
 """Turns that acknowledge rather than ask. Matched after stripping leading
 filler and trailing punctuation, and only against the WHOLE utterance."""
+
+
+def _strip_fillers(t: str) -> str:
+    """Remove leading discourse fillers, tolerating the comma people put
+    after them — "great, can you show me" must reduce to "can you show me".
+
+    Front only, from a fixed list, so it can expose a question word that was
+    already there and never invent one.
+    """
+    for _ in range(4):                      # bounded; four fillers is plenty
+        stripped = t.lstrip(",. ")
+        for filler in QUESTION_FILLERS:
+            word = filler.rstrip()
+            if stripped.startswith(filler) or stripped.startswith(word + ","):
+                t = stripped[len(word):].lstrip(",. ")
+                break
+        else:
+            t = stripped
+            break
+    return t
 
 
 def _strip_lead(t: str) -> str:
@@ -115,13 +140,7 @@ def is_acknowledgement(text: str) -> bool:
     if not t or "?" in t:
         return False
     t = t.rstrip(".!,;: ")
-    for _ in range(4):
-        for filler in QUESTION_FILLERS:
-            if t.startswith(filler):
-                t = t[len(filler):].lstrip()
-                break
-        else:
-            break
+    t = _strip_fillers(t)
     t = _strip_lead(t)
     if not t:
         return False

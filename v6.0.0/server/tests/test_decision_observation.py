@@ -362,11 +362,26 @@ class TestSpokenQuestionsAreRecognised:
             assert not looks_like_question(a), f"read as a question: {a!r}"
 
     def test_stripping_cannot_manufacture_a_question(self):
-        # "okay"/"thanks" are deliberately absent from the filler list — an
-        # acknowledgement must not become a question by losing a word.
-        from decision.observation import QUESTION_FILLERS
-        for banned in ("okay ", "ok ", "thanks ", "thank "):
-            assert banned not in QUESTION_FILLERS
+        """No acknowledgement becomes a question by losing a leading word.
+
+        This used to assert that "okay"/"thanks" were absent from the filler
+        list, which was guarding the property by forbidding a mechanism. The
+        mechanism turned out to be needed — "okay but what about the sensors"
+        and "oh i see, which model do you use then" are real questions that
+        hid behind exactly those words — and the property survives without
+        the ban, because a question needs a question PREFIX after stripping.
+        "okay thank you" reduces to "thank you", which is not one.
+
+        So the property is asserted directly, over every filler crossed with
+        every acknowledgement.
+        """
+        from decision.observation import (ACKNOWLEDGEMENTS, QUESTION_FILLERS,
+                                          looks_like_question)
+        for filler in QUESTION_FILLERS:
+            for ack in ACKNOWLEDGEMENTS:
+                utterance = f"{filler}{ack}"
+                assert not looks_like_question(utterance), \
+                    f"{utterance!r} was read as a question"
 
     def test_a_question_mark_still_short_circuits(self):
         from decision.observation import looks_like_question

@@ -509,12 +509,26 @@ class BasicClient:
         emotion = data.get("emotion_tag", "")
         if emotion:
             self.on_emotion_detected(emotion)
-        if clean:
-            for module in self.output_modules.values():
-                try:
-                    module.process_output({"text": clean})
-                except Exception as e:
-                    logger.error(f"[Modules] chat_sentence output error: {e}")
+        if not clean:
+            return
+        # Logged because "the robot never said it" is otherwise
+        # indistinguishable from "the server never sent it" — a reported
+        # hand-off that was visible in the server log and inaudible in the
+        # room could have been either, and there was nothing on the client
+        # side to tell them apart. One line per sentence, naming the modules
+        # that accepted it.
+        spoke = []
+        for name, module in self.output_modules.items():
+            try:
+                module.process_output({"text": clean})
+                spoke.append(name)
+            except Exception as e:
+                logger.error(f"[Modules] chat_sentence output error ({name}): {e}")
+        if spoke:
+            logger.info(f"[TTS] chat_sentence -> {', '.join(spoke)}: {clean[:60]}")
+        else:
+            logger.warning(f"[TTS] chat_sentence had NO output module to speak "
+                           f"it: {clean[:60]}")
 
     def _on_tts_stop(self, _data: dict):
         """

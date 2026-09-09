@@ -323,7 +323,6 @@ def create_http_gateway(
             # they had complained about kept running. The window is closing;
             # there is nothing to answer. See ADVANCE_ACK.
             from decision import guide_and_presenter
-            from gateway.websocket_gateway import ADVANCE_ACK
             guide_id = None
             if ws_gateway._demo_orchestrator:
                 guide_id, _p = guide_and_presenter(
@@ -331,8 +330,7 @@ def create_http_gateway(
             ws_gateway.send_to_robot(guide_id or client_id, {
                 "event": "demo_step",
                 "step_id": "_qa_advance_ack",
-                "text": ADVANCE_ACK.get(decision.mechanism,
-                                        ADVANCE_ACK["default"]),
+                "text": ws_gateway.advance_ack_text(decision.mechanism),
                 "require_ack": False,
             })
             return jsonify({
