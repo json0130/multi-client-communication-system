@@ -75,9 +75,22 @@ class TestThePromptRule:
         for word in ("model", "algorithm", "dataset", "number", "paper"):
             assert word in p.lower(), f"the rule does not mention {word}"
 
-    def test_it_offers_declining_as_the_good_outcome(self):
+    def test_declining_is_framed_as_the_good_outcome(self):
         # Without this the model reads the rule as "be vague", not "say so".
-        assert "would have to check" in prompt()
+        assert "would need to check" in prompt()
+
+    def test_the_rule_puts_the_answer_before_the_caveat(self):
+        """Leading with the disclaimer is its own failure.
+
+        The rule worked but produced "I can explain the approach, but I would
+        have to check the exact model" as an OPENING line, twice in a row, to
+        a visitor who had asked a simple question. Being honest about a gap is
+        right; spending the first sentence on it is not — the visitor came for
+        the answer, and the facts above usually contain most of one.
+        """
+        p = prompt()
+        assert "LEAD WITH WHAT YOU DO KNOW" in p
+        assert "not open with a disclaimer" in p.lower()
 
     def test_facts_reach_the_prompt(self):
         assert "Plans socially-aware paths." in prompt(format_facts([row()]))

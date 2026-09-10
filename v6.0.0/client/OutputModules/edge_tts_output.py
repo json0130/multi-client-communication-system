@@ -33,7 +33,19 @@ class EdgeTTSOutputModule(OutputModule):
         self._rate       = self.config.get('rate', '+0%')
 
         # Speaker output (hardcoded to USB speaker; override in config if needed)
-        self._audio_cmd = self.config.get('audio_cmd', ['aplay', '-D', 'plughw:2,0'])
+        # ALSA's 'default', not a card number. This was pinned to
+        # plughw:2,0 — the built-in analog output on the machine it was
+        # written for — so on any other machine, or after plugging in a
+        # headset, the robots kept talking to the PC speakers while the
+        # listener's actual output device stayed silent. Observed exactly
+        # that: system default sink was the USB headset on card 3, audio went
+        # to card 2.
+        #
+        # 'default' follows whatever PipeWire/PulseAudio is set to, which is
+        # what a person means by "my headphones". A real robot with a fixed
+        # sound card should override it — set `audio_device` (or the whole
+        # `audio_cmd`) in that robot's client config.
+        self._audio_cmd = self.config.get('audio_cmd') or self._default_audio_cmd()
 
         self.tts_queue  = queue.Queue()
         self.tts_thread = None
@@ -41,6 +53,7 @@ class EdgeTTSOutputModule(OutputModule):
 
         self._interrupt_event = threading.Event()
         self._aplay_proc: Optional[subprocess.Popen] = None
+        self._warned_playback = False   # so a failing player says why, once
         self._aplay_lock  = threading.Lock()
         self._sim_speed   = self.config.get('sim_speed', 1.0)
 
@@ -75,6 +88,28 @@ class EdgeTTSOutputModule(OutputModule):
             self.tts_queue.put(None)
             if self.tts_thread:
                 self.tts_thread.join(timeout=2)
+
+    def _default_audio_cmd(self) -> list:
+        """How to play a wav, preferring whatever follows the system's own
+        output setting.
+
+        `paplay` is a PulseAudio/PipeWire client, so it always plays to the
+        CURRENT default sink — which is what a person means by "my
+        headphones". `aplay -D default` normally reaches the same place
+        through ALSA's pulse bridge, and bare `aplay` is the last resort.
+
+        A robot with a fixed sound card should not rely on any of this: set
+        `audio_cmd` in its client config and this is skipped entirely.
+        """
+        import shutil
+        device = self.config.get('audio_device')
+        if device:
+            return ['aplay', '-D', device]
+        if shutil.which('paplay'):
+            return ['paplay']
+        if shutil.which('pw-play'):
+            return ['pw-play']
+        return ['aplay', '-D', 'default']
 
     def process_output(self, data: Any) -> bool:
         if not self.enabled:
@@ -304,11 +339,28 @@ class EdgeTTSOutputModule(OutputModule):
                         return
                     self._aplay_proc = subprocess.Popen(
                         self._audio_cmd + [wav],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                        stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
                     )
                 self._aplay_proc.wait()
 
                 if self._aplay_proc.returncode != 0 and not self._interrupt_event.is_set():
+                    # Say WHY once. A silent fallback is how the missing
+                    # ffmpeg went unnoticed for a whole run of tours: every
+                    # sentence failed and the module still logged "TTS
+                    # completed", so the only symptom was a quiet room.
+                    if not self._warned_playback:
+                        self._warned_playback = True
+                        detail = ""
+                        try:
+                            err = (self._aplay_proc.stderr.read() or b"").decode(
+                                "utf-8", "replace").strip()
+                            detail = f" — {err.splitlines()[0]}" if err else ""
+                        except Exception:
+                            pass
+                        logger.warning(
+                            f"[TTS] {' '.join(self._audio_cmd)} failed"
+                            f"{detail}. Falling back to plain aplay; audio may "
+                            f"be going to the wrong device.")
                     with self._aplay_lock:
                         self._aplay_proc = subprocess.Popen(
                             ['aplay', wav],

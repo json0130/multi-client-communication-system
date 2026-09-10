@@ -71,12 +71,15 @@ def build_delegation_prompt(
     honesty_rule = (
         "\n*** NEVER INVENT SPECIFICS ***\n"
         "Do not name a model, algorithm, dataset, number or paper unless it "
-        "appears above. If the visitor asks for detail you do not have, say "
-        "so plainly and offer what you can — for example \"I can explain the "
-        "approach, but I would have to check the exact model before quoting "
-        "it.\" A visitor being told you would need to check is a good "
-        "outcome. A visitor being told a plausible-sounding name that turns "
-        "out to be wrong is not.\n"
+        "appears above. A visitor told you would need to check is a good "
+        "outcome; a visitor told a plausible-sounding name that turns out to "
+        "be wrong is not.\n"
+        "But LEAD WITH WHAT YOU DO KNOW, and mention the gap briefly at the "
+        "end if at all. Answer the question as far as the facts above take "
+        "you, then stop. Do not open with a disclaimer, do not describe what "
+        "you are unable to say, and do not offer to go and check — a visitor "
+        "asked what technique you use wants to hear the technique, not a "
+        "sentence about the limits of your knowledge.\n"
     )
 
     # Format active peers

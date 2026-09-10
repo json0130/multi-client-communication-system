@@ -88,7 +88,11 @@ class FakeInstance:
         # Record the framing so a test can assert the visitor's style reached
         # the Q&A path, not only the scripted steps.
         self.last_style_framing = style_framing
-        text = f"[{self.client_id}] Great, let's move on!"
+        # Deliberately says nothing that invites further questions. The
+        # "more questions?" prompt is now suppressed when the robot already
+        # asked, so a fake reply containing a closing phrase would suppress
+        # it in the very tests checking that it fires.
+        text = f"[{self.client_id}] The answer is forty two."
         on_sentence(text, "DEFAULT")
         return _ChatResult(text)
 

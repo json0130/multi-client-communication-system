@@ -25,6 +25,7 @@ from flask import Flask, request, jsonify, Blueprint
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
 from decision import ActionKind, Mechanism
+from decision.policy import QA_CLOSING_PHRASES, _matches
 from data import robot_repo
 
 
@@ -375,6 +376,11 @@ def create_http_gateway(
         def _on_sentence(clean_text, emotion_tag):
             if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
                 return
+            # A chunk that is only an emotion tag is not speech — see
+            # websocket_gateway._spoken_text.
+            from gateway.websocket_gateway import _spoken_text
+            if not _spoken_text(clean_text):
+                return
             ws_gateway.send_to_robot(target_id, {
                 "event": "chat_sentence",
                 "text": clean_text,
@@ -422,7 +428,18 @@ def create_http_gateway(
         # was closing. A real run had exactly this: the same "lets move on"
         # phrase needed saying twice for one robot and once for another —
         # not a per-robot difference, a race the faster reply happened to lose.
-        if ws_gateway._demo_orchestrator and not advancing and not delegation_result:
+        #
+        # AND not when the robot just asked the same thing itself. A live run
+        # put "Do you have any other questions, or shall we continue the
+        # demonstration?" after every single answer, including one that had
+        # already ended "Is there anything specific about the model you'd
+        # like to know?" — the visitor was asked twice, in two voices, in a
+        # row. The closing-phrase list already knows what an invitation to
+        # ask more sounds like, so reuse it rather than inventing a second
+        # notion of the same thing.
+        already_invited = _matches(result.clean_text or "", QA_CLOSING_PHRASES)
+        if (ws_gateway._demo_orchestrator and not advancing
+                and not delegation_result and not already_invited):
             if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
                 ws_gateway.send_to_robot(target_id, {
                     "event": "demo_step",

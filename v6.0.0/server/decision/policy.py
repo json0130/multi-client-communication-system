@@ -137,6 +137,16 @@ QA_CLOSING_PHRASES = [
     "please don't hesitate",
     "happy to answer more",
     "if you'd like to know more",
+    # Broader forms of the same invitation. "Is there anything SPECIFIC about
+    # the model you'd like to know?" slipped past "is there anything else",
+    # and the guide then asked the visitor the same question again in a
+    # different voice, one line later.
+    "is there anything",
+    "you'd like to know",
+    "you would like to know",
+    "like to know more",
+    "want to know more",
+    "anything else you",
     # Pepper acknowledging a "move on" request from the visitor
     "let us move on",
     "let's move on",

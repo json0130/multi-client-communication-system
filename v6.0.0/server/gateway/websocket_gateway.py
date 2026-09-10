@@ -98,6 +98,15 @@ hear the end of. Matches tools/demo_harness.py's SPEAKING_RATE so the offline
 harness and the live server model the same robot."""
 
 
+def _spoken_text(text: str) -> str:
+    """What a listener would actually hear: the text minus emotion tags.
+
+    Empty when a chunk is nothing but a tag, which is how a blank turn
+    reached the transcript under a robot's name.
+    """
+    return re.sub(r"\[[A-Z_]+\]", "", text or "").strip()
+
+
 def _speaking_seconds(text: str) -> float:
     """How long `text` will take to say, near enough to wait for.
 
@@ -327,7 +336,9 @@ class WebSocketGateway:
         and the synthetic `_qa_*` steps the policy generates.
         """
         event = data.get("event")
-        text = (data.get("text") or "").strip()
+        # Judge emptiness on what a listener would HEAR: "[DEFAULT]" is a
+        # directive, not a line, and recording it printed a blank turn.
+        text = _spoken_text(data.get("text") or "")
         if not text:
             return
         step_id = data.get("step_id") or ""
@@ -344,7 +355,7 @@ class WebSocketGateway:
                 "robot_name": getattr(inst, "robot_name", None) or client_id,
                 # Strip the emotion tag the robot reads as a directive, not
                 # as speech — the dashboard shows what a visitor would hear.
-                "text": re.sub(r"^\s*\[[A-Z_]+\]\s*", "", text),
+                "text": text,
                 "kind": step_id or event,
                 "at": time.time(),
             })
@@ -1317,6 +1328,13 @@ class WebSocketGateway:
 
                     def _on_sentence(clean_text, emotion_tag):
                         if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
+                            return
+                        # A chunk that is only an emotion tag is not speech.
+                        # The model sometimes emits a trailing "[DEFAULT]" of
+                        # its own, and it was sent as a sentence: the robot
+                        # got a line with nothing to say and the transcript
+                        # showed a blank turn under its name.
+                        if not _spoken_text(clean_text):
                             return
                         self.send_to_robot(target_id, {
                             "event": "chat_sentence",
