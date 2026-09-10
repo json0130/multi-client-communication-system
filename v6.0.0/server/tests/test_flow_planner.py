@@ -417,3 +417,127 @@ class TestDeclaredScopeCarriesVisitorInterest:
         imp = block_importance(self._graph(), defaults=self.DEFAULTS,
                                visitor_topics=[self.TOPIC], kg_edges=[e], kg_links=[])
         assert imp[A] > 0.3
+
+
+class _AllocBlock:
+    def __init__(self, robot_id, windows=1):
+        self.robot_id = robot_id
+        self.qa_steps = [None] * windows
+
+
+class TestQATimeIsAllocatedNotJustCut:
+    """
+    Importance decided only what got CUT. A visitor who came for the emotion
+    work protected Navel from being skipped and got exactly the same question
+    round as everyone else until the tour was already in trouble.
+
+    Distributing the time the tour HAS is something it can do before anything
+    is cut at all, and a longer Navel window bought with shorter others costs
+    the visitor nothing they came for — where cutting always costs somebody
+    something.
+    """
+
+    BLOCKS = [_AllocBlock("chatbox_01"), _AllocBlock("silbot_01"),
+              _AllocBlock("navel_01")]
+    LAB = {"chatbox_01": 0.8, "silbot_01": 0.6, "navel_01": 0.4}
+
+    def _alloc(self, pool=360.0, measured=None, importance=None, floor=10.0):
+        from decision.planner import allocate_qa
+        return allocate_qa(self.BLOCKS, pool, measured, importance, floor)
+
+    def test_it_redistributes_and_never_expands(self):
+        # The whole safety of putting this before the ladder: allocation
+        # cannot make an infeasible tour feasible or the reverse.
+        got = self._alloc(measured={"silbot_01": 60.0}, importance=self.LAB)
+        assert sum(got.values()) == pytest.approx(360.0, abs=1.0)
+
+    def test_uniform_inputs_reproduce_the_flat_split(self):
+        # Parity: with nothing to go on, allocation is the division it
+        # replaced, so turning it on changes nothing until there is a signal.
+        got = self._alloc()
+        assert set(got.values()) == {120.0}
+
+    def test_importance_alone_moves_the_split(self):
+        # The first run of a new deployment: no durations yet, but the lab's
+        # priorities and the visitor's stated interest are known on day one.
+        got = self._alloc(importance=self.LAB)
+        assert got["chatbox_01"] > got["silbot_01"] > got["navel_01"]
+
+    def test_a_block_whose_questions_run_longer_is_given_longer(self):
+        got = self._alloc(measured={"chatbox_01": 18.0, "silbot_01": 32.0,
+                                    "navel_01": 19.0})
+        assert got["silbot_01"] > got["chatbox_01"]
+
+    def test_a_stated_interest_buys_time_from_the_others(self):
+        # The case the whole feature is for.
+        measured = {"chatbox_01": 18.1, "silbot_01": 32.1, "navel_01": 19.2}
+        before = self._alloc(measured=measured, importance=self.LAB)
+        after = self._alloc(measured=measured,
+                            importance={**self.LAB, "navel_01": 0.95})
+        assert after["navel_01"] > before["navel_01"]
+        assert after["chatbox_01"] < before["chatbox_01"]
+        assert sum(after.values()) == pytest.approx(sum(before.values()), abs=1.0)
+
+    def test_an_unmeasured_block_is_not_starved(self):
+        # Absent from `measured` means "nothing known", not "runs to zero".
+        got = self._alloc(measured={"silbot_01": 32.0}, importance=None)
+        assert got["navel_01"] > 0
+        assert got["chatbox_01"] == pytest.approx(got["navel_01"])
+
+    def test_no_window_is_cut_below_the_floor(self):
+        got = self._alloc(pool=150.0, importance={"chatbox_01": 0.99,
+                                                  "silbot_01": 0.01,
+                                                  "navel_01": 0.01}, floor=45.0)
+        assert min(got.values()) >= 45.0
+
+    def test_a_pool_too_small_to_split_gives_everyone_the_floor(self):
+        got = self._alloc(pool=60.0, importance=self.LAB, floor=45.0)
+        assert set(got.values()) == {45.0}
+
+    def test_blocks_with_more_windows_take_a_proportionate_share(self):
+        from decision.planner import allocate_qa
+        blocks = [_AllocBlock("a", windows=2), _AllocBlock("b", windows=1)]
+        got = allocate_qa(blocks, 300.0, None, None, 10.0)
+        # Same allowance per window, so a two-window block costs twice.
+        assert got["a"] == pytest.approx(got["b"])
+        assert got["a"] * 2 + got["b"] == pytest.approx(300.0, abs=1.0)
+
+    def test_nothing_to_allocate_is_not_an_error(self):
+        from decision.planner import allocate_qa
+        assert allocate_qa([], 300.0) == {}
+        assert allocate_qa(self.BLOCKS, 0.0) == {}
+
+
+class TestTighteningHoldsTheEmphasis:
+    """
+    Being short of time should shrink the question round, not flatten it. The
+    block the visitor came for keeps its larger share of a smaller round.
+    """
+
+    MEASURED = {A: 18.1, C: 32.1, B: 19.2}
+    IMP = {A: 0.8, C: 0.6, B: 0.95}
+
+    def _plan(self, budget, allocate, importance):
+        graph = FlowGraph.from_script(build_script(GUIDE, [A, B, C]))
+        return plan_for_budget(graph, budget, durations={},
+                               importance=importance,
+                               measured_qa=self.MEASURED,
+                               allocate=allocate)
+
+    def _budgets(self, plan):
+        from decision.models import PlanOpKind
+        return {o.robot_id: o.seconds for o in plan["ops"]
+                if o.kind is PlanOpKind.SET_QA_BUDGET}
+
+    def test_the_emphasised_block_still_leads_after_tightening(self):
+        plan = self._plan(600, allocate=True, importance=self.IMP)
+        got = self._budgets(plan)
+        assert got, "no allocation emitted"
+        assert got[B] > got[A]
+
+    def test_allocation_is_off_unless_asked_for(self):
+        # Every existing caller keeps the ladder it had.
+        plan = self._plan(600, allocate=False, importance=self.IMP)
+        got = self._budgets(plan)
+        assert len(set(got.values())) <= 1, \
+            "flat tightening emitted per-block budgets"

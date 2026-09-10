@@ -104,6 +104,61 @@ def qa_windows(limit: int = 5000) -> list[dict]:
         return []
 
 
+def _visitor_ended(rows) -> tuple[dict, int]:
+    """({block_robot_id: [seconds]}, how many were dropped) — the one place the
+    "not the system's own constants" rule is written down.
+
+    Every estimator built on window length has to apply it, and the moment two
+    of them apply it separately one of them will drift. A window closed by
+    `timeout` ran out its own allocation: it measures the allocation, is
+    right-censored with respect to what the visitor wanted, and feeding it back
+    into a figure that SETS allocations closes a loop. See
+    suggested_qa_budget's docstring for the corpus this was found in.
+    """
+    out: dict = {}
+    censored = 0
+    for r in rows or ():
+        block = r.get("block_robot_id")
+        if not block:
+            continue                    # open floor, not a project Q&A window
+        if (r.get("closed_by") or "") == "timeout":
+            censored += 1
+            continue
+        try:
+            out.setdefault(block, []).append(float(r["seconds"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+    return out, censored
+
+
+MIN_BLOCK_WINDOWS = 5
+"""Visitor-ended windows for ONE block before its own median is used.
+
+Lower than MIN_WINDOWS_TO_TRUST because the question is easier: a per-block
+figure only has to beat the pooled one, not stand alone, and a block with no
+median of its own simply takes the pool's flat share."""
+
+
+def qa_median_by_block(rows=None) -> dict:
+    """{block_robot_id: median visitor-ended window seconds} — the BASE that
+    decision.planner.allocate_qa distributes on.
+
+    Only blocks with enough of their own windows appear; the rest are absent
+    rather than defaulted, so the planner can tell "this block runs long" from
+    "nothing is known about this block".
+    """
+    by_block, _ = _visitor_ended(rows if rows is not None else qa_windows())
+    out = {}
+    for block, secs in by_block.items():
+        if len(secs) < MIN_BLOCK_WINDOWS:
+            continue
+        secs.sort()
+        mid = len(secs) // 2
+        out[block] = round(secs[mid] if len(secs) % 2
+                           else (secs[mid - 1] + secs[mid]) / 2, 1)
+    return out
+
+
 MIN_WINDOWS_TO_TRUST = 20
 """Usable windows before an observed budget replaces the constant.
 
@@ -144,19 +199,8 @@ def suggested_qa_budget(default_sec: float = 90.0) -> dict:
     not a project Q&A at all, returned as "observed" on the strength of 46.
     Only windows belonging to a project block count, for the same reason.
     """
-    rows = qa_windows()
-    usable, censored = [], 0
-    for r in rows:
-        if not r.get("block_robot_id"):
-            continue                    # open floor, not a project Q&A window
-        if (r.get("closed_by") or "") == "timeout":
-            censored += 1
-            continue
-        try:
-            usable.append(float(r["seconds"]))
-        except (TypeError, ValueError, KeyError):
-            continue
-
+    by_block, censored = _visitor_ended(qa_windows())
+    usable = [s for secs in by_block.values() for s in secs]
     out = {"windows": len(usable), "self_terminated": censored}
     if len(usable) < MIN_WINDOWS_TO_TRUST:
         return {**out, "budget_sec": default_sec, "basis": "default"}

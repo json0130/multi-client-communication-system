@@ -251,3 +251,30 @@ class TestTheBudgetIsNotLearnedFromItsOwnConstants:
                           + [{"seconds": None, "closed_by": "policy",
                               "block_robot_id": "chatbox_01"}])
         assert repo.suggested_qa_budget()["budget_sec"] == 30.0
+
+    def test_per_block_medians_apply_the_same_exclusion(self, monkeypatch):
+        # The loop guard has to hold everywhere a window length feeds a
+        # figure that SETS window lengths, and the moment two estimators
+        # apply it separately one of them drifts. _visitor_ended is the one
+        # place it is written down.
+        from data import demo_duration_repo
+        rows = ([self._w(40.0, "policy", "silbot_01") for _ in range(6)]
+                + [self._w(5.0, "timeout", "silbot_01") for _ in range(50)])
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        assert demo_duration_repo.qa_median_by_block()["silbot_01"] == 40.0
+
+    def test_a_thinly_observed_block_is_absent_rather_than_guessed(self, monkeypatch):
+        # The planner can then tell "this block runs long" from "nothing is
+        # known about this block", and default the second to the flat share.
+        from data import demo_duration_repo
+        rows = ([self._w(40.0, "policy", "silbot_01") for _ in range(6)]
+                + [self._w(90.0, "policy", "navel_01")])
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        got = demo_duration_repo.qa_median_by_block()
+        assert "silbot_01" in got and "navel_01" not in got
+
+    def test_the_open_floor_is_excluded_here_too(self, monkeypatch):
+        from data import demo_duration_repo
+        rows = [self._w(40.0, "policy", None) for _ in range(20)]
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        assert demo_duration_repo.qa_median_by_block() == {}

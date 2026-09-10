@@ -222,13 +222,23 @@ class FlowGraph:
         durations = durations or {}
         compressed, skipped = set(compressed), set(skipped)
         fixed = self.fixed_seconds(durations)
+        # A scalar means every window gets the same allowance, which is what
+        # this took before Q&A time was allocated rather than divided. A
+        # mapping means the planner has decided per block — see
+        # decision.planner.allocate_qa — and a block it does not mention
+        # falls back to the default rather than to nothing.
+        def _qa_for(robot_id: str) -> float:
+            if isinstance(qa_budget, dict):
+                return float(qa_budget.get(robot_id, DEFAULT_QA_BUDGET_SEC))
+            return float(qa_budget)
+
         per_block, qa_total, scripted_total = {}, 0.0, 0.0
         for b in self.blocks:
             if b.robot_id in skipped:
                 per_block[b.robot_id] = 0.0
                 continue
             scripted = b.scripted_seconds(durations, b.robot_id in compressed)
-            qa = qa_budget * len(b.qa_steps)
+            qa = _qa_for(b.robot_id) * len(b.qa_steps)
             per_block[b.robot_id] = scripted + qa
             scripted_total += scripted
             qa_total += qa

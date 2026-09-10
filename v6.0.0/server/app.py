@@ -404,8 +404,27 @@ def build_flow_plan(obs) -> Optional[dict]:
                                   visitor_topics=visitor_topics or None,
                                   kg_edges=edges, kg_links=links)
 
+    # How long a window of each block ACTUALLY runs, from visitor-ended
+    # windows only. demo_duration_repo enforces that exclusion in one place
+    # (_visitor_ended) because setting a window's length from observed window
+    # lengths is the same shape as the loop already found and fixed once: a
+    # window cut to 5s recorded 5s, which pulled the estimate down, which cut
+    # more windows. Passing a mean over everything here would rebuild it.
+    measured_qa = {}
+    try:
+        from data.demo_duration_repo import qa_median_by_block
+        measured_qa = qa_median_by_block()
+    except Exception as e:
+        print(f"[App] per-block Q&A medians unavailable: {e}")
+
+    # allocate=True: the same total Q&A time, split by measured length and
+    # this run's importance, BEFORE the ladder cuts anything. A visitor who
+    # came for the emotion work gets a longer Navel round paid for by shorter
+    # others, which costs them nothing they came for — where cutting always
+    # costs somebody something.
     return plan_for_budget(graph, remaining_budget, durations=durations,
-                           importance=importance)
+                           importance=importance, measured_qa=measured_qa,
+                           allocate=True)
 
 
 def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:

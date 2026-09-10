@@ -172,6 +172,102 @@ def block_importance(
 
 # ── The ladder ────────────────────────────────────────────────────────────────
 
+def allocate_qa(
+    blocks: Sequence,
+    pool_sec: float,
+    measured: Optional[dict] = None,
+    importance: Optional[dict] = None,
+    floor: float = QA_FLOOR_SEC,
+) -> dict:
+    """
+    Split a fixed pool of Q&A time between blocks. {robot_id: seconds per window}.
+
+    THE GENTLER LEVER. Importance decided only what got CUT: a visitor who came
+    for the emotion work protected Navel from being skipped and got exactly the
+    same question round as everyone else until the tour was already in trouble.
+    Distributing the time it has is something the tour can do before anything is
+    cut at all, and a longer Navel window bought with shorter others costs the
+    visitor nothing they came for.
+
+    REDISTRIBUTION, NEVER EXPANSION. The pool is whatever the caller already
+    had; this only decides whose it is. So allocation cannot make an infeasible
+    tour feasible or the reverse, and the ladder below is unaffected — it is a
+    strictly separate question from how much total time there is.
+
+    Share is proportional to base x importance:
+
+      base        what a window of THIS block actually runs to, measured. A
+                  block whose questions genuinely run longer should be given
+                  longer, before anyone's preferences are consulted.
+      importance  the run's layered value (block_importance): hand-set project
+                  priority, raised where the visitor stated an interest.
+
+    A block with no measurement falls back to the pool's flat share, so an
+    unmeasured tour still allocates on importance alone — which is the case on
+    the first run of any new deployment.
+
+    THE MEASUREMENT MUST EXCLUDE BUDGET-TERMINATED WINDOWS. Setting a window's
+    length from observed lengths is the same shape as the loop already found
+    and fixed once: a window cut to 5s recorded 5s, which pulled the estimate
+    down, which cut more windows. demo_duration_repo excludes windows closed
+    by timeout for exactly this reason, and a caller that passes in a mean over
+    everything rebuilds the loop here in a new place. See
+    demo_duration_repo.qa_median_by_block, which is the supported source.
+
+    Every block clears `floor` or the allocation is not worth making — a
+    window below it is a gesture at a question round rather than one.
+    """
+    measured, importance = measured or {}, importance or {}
+    live = [b for b in blocks if getattr(b, "qa_steps", None)]
+    if not live or pool_sec <= 0:
+        return {}
+
+    windows = {b.robot_id: len(b.qa_steps) for b in live}
+    total_windows = sum(windows.values())
+    if not total_windows:
+        return {}
+
+    flat = pool_sec / total_windows
+    # Below the floor there is nothing to distribute: hand every window the
+    # same short allowance and let the ladder decide what to do about it.
+    if flat <= floor:
+        return {b.robot_id: floor for b in live}
+
+    weights = {
+        b.robot_id: max(1e-9, float(measured.get(b.robot_id, flat)))
+                    * max(1e-9, float(importance.get(b.robot_id, DEFAULT_IMPORTANCE)))
+        for b in live
+    }
+
+    out: dict = {}
+    remaining = set(weights)
+    pool = float(pool_sec)
+    # Blocks pinned to the floor stop taking a share, and what they would have
+    # taken goes back to the others. Iterated because lifting one block to the
+    # floor can push another below it.
+    while remaining:
+        denom = sum(weights[r] * windows[r] for r in remaining)
+        if denom <= 0:
+            for r in remaining:
+                out[r] = pool / max(1, sum(windows[x] for x in remaining))
+            break
+        scale = pool / denom
+        pinned = {r for r in remaining if weights[r] * scale < floor}
+        if not pinned:
+            for r in remaining:
+                out[r] = weights[r] * scale
+            break
+        for r in pinned:
+            out[r] = floor
+            pool -= floor * windows[r]
+        remaining -= pinned
+        if pool <= 0:
+            for r in remaining:
+                out[r] = floor
+            break
+    return {r: round(v, 1) for r, v in out.items()}
+
+
 def plan_for_budget(
     graph: FlowGraph,
     budget_sec: float,
@@ -179,6 +275,8 @@ def plan_for_budget(
     importance: Optional[dict] = None,
     qa_budget: float = DEFAULT_QA_BUDGET_SEC,
     qa_floor: float = QA_FLOOR_SEC,
+    measured_qa: Optional[dict] = None,
+    allocate: bool = False,
 ) -> dict:
     """
     Fit the remaining tour into `budget_sec`. Returns ops plus the reasoning.
@@ -186,6 +284,11 @@ def plan_for_budget(
     Reports `feasible` rather than silently doing its best: a 5-minute budget
     for a tour whose opening and closing alone take 8 cannot be met, and a
     planner that returns a plan anyway has told the operator nothing.
+
+    `allocate` turns on per-block Q&A distribution (see allocate_qa): the same
+    total time, split by measured length and this run's importance, before the
+    ladder touches anything. Off by default so the ladder's behaviour is
+    unchanged for every existing caller and the two can be measured apart.
     """
     durations = durations or {}
     importance = importance or {}
@@ -193,6 +296,21 @@ def plan_for_budget(
     trace: list = []
 
     current_qa = qa_budget
+    # The pool the ladder is working with, and what allocation divides. Held
+    # as a total rather than a per-window figure so that tightening and
+    # allocating are the same operation applied to different splits.
+    live_windows = sum(len(b.qa_steps) for b in graph.blocks if b.qa_steps)
+    allocation: Optional[dict] = None
+    if allocate and live_windows:
+        allocation = allocate_qa(graph.blocks, qa_budget * live_windows,
+                                 measured_qa, importance, qa_floor)
+        if allocation:
+            current_qa = allocation
+            for rid, secs in sorted(allocation.items()):
+                ops.append(PlanOp(PlanOpKind.SET_QA_BUDGET,
+                                  robot_id=rid, seconds=round(secs)))
+            trace.append("Q&A allocated by measured length x importance: "
+                         + ", ".join(f"{r} {v:.0f}s" for r, v in sorted(allocation.items())))
     compressed: set = set()
     skipped: set = set()
 
@@ -201,12 +319,44 @@ def plan_for_budget(
 
     start = estimate()
     if start["total_sec"] <= budget_sec:
-        return {"ops": [], "feasible": True, "fits_already": True,
-                "estimate": start, "trace": ["already fits"],
+        # The allocation still stands. A tour that fits is exactly when
+        # distributing Q&A time is worth doing — nothing has to be cut, so
+        # the visitor's emphasis costs them nothing at all. Returning ops=[]
+        # here threw the allocation away in the only case where it was pure
+        # gain, and left it applying solely to tours already in trouble.
+        return {"ops": ops, "feasible": True, "fits_already": True,
+                "estimate": start,
+                "trace": trace + ["already fits"],
                 "measured_coverage": round(graph.measured_coverage(durations), 3)}
 
     # ── Rung 1: tighten Q&A ──────────────────────────────────────────────────
-    if current_qa > qa_floor:
+    # With an allocation in force, tightening shrinks the POOL and re-splits
+    # it, so the visitor's emphasis survives being short of time — the block
+    # they came for keeps its larger share of a smaller round rather than
+    # every window collapsing to the same figure.
+    if allocation is not None:
+        needed = start["total_sec"] - budget_sec
+        windows = sum(len(b.qa_steps) for b in graph.blocks
+                      if b.robot_id not in skipped and b.qa_steps)
+        pool = sum(allocation.get(b.robot_id, qa_budget) * len(b.qa_steps)
+                   for b in graph.blocks if b.robot_id not in skipped and b.qa_steps)
+        if windows and pool > qa_floor * windows:
+            tightened = allocate_qa(
+                [b for b in graph.blocks if b.robot_id not in skipped],
+                max(qa_floor * windows, pool - needed),
+                measured_qa, importance, qa_floor)
+            if tightened and tightened != allocation:
+                allocation = tightened
+                current_qa = allocation
+                ops = [o for o in ops if o.kind is not PlanOpKind.SET_QA_BUDGET]
+                for rid, secs in sorted(allocation.items()):
+                    ops.append(PlanOp(PlanOpKind.SET_QA_BUDGET,
+                                      robot_id=rid, seconds=round(secs)))
+                trace.append("Q&A pool tightened, split held: "
+                             + ", ".join(f"{r} {v:.0f}s"
+                                         for r, v in sorted(allocation.items()))
+                             + f" ({estimate()['total_sec']:.0f}s)")
+    elif current_qa > qa_floor:
         needed = start["total_sec"] - budget_sec
         windows = sum(len(b.qa_steps) for b in graph.blocks if b.robot_id not in skipped)
         if windows:
