@@ -129,3 +129,65 @@ class TestRepositoryScoping:
         # likely to be invented.
         from data.demo_facts_repo import KIND_ORDER
         assert KIND_ORDER[0] == "limitation"
+
+
+class TestCaveatsCannotCrowdOutTheSpecifics:
+    """
+    Sorting flat by KIND_ORDER and truncating looks right until a topic has
+    more material than fits. Limitations lead, so a topic with several of them
+    spends the whole budget before the first method — and the named model, the
+    dataset, the hardware, the measured number are exactly what gets cut.
+
+    Those are the rows that stopped the robots inventing "GraphSLAM and
+    FastSLAM" and "a retrieval model like BM25". Losing them to an abundance
+    of honest caveats would reintroduce the original bug by way of the fix
+    for it. Real trigger: a researcher supplied 111 method and limitation
+    rows in one go.
+    """
+
+    def _rows(self, spec):
+        # spec: list of (kind, verified) in insertion order
+        return [{"id": i, "kind": k, "fact": f"{k} {i}", "verified": v,
+                 "robot_id": "r1"}
+                for i, (k, v) in enumerate(spec)]
+
+    def _spread(self, rows, limit):
+        from data.demo_facts_repo import _spread, KIND_ORDER
+        rows = sorted(rows, key=lambda r: (
+            KIND_ORDER.index(r["kind"]) if r["kind"] in KIND_ORDER else 99,
+            not r["verified"], r["id"]))
+        return _spread(rows, limit)
+
+    def test_a_named_model_survives_a_pile_of_limitations(self):
+        rows = self._rows([("limitation", False)] * 20 + [("model", True)])
+        out = self._spread(rows, 8)
+        assert any(r["kind"] == "model" for r in out), \
+            "the one row naming a real model was crowded out by caveats"
+
+    def test_a_limitation_still_leads(self):
+        rows = self._rows([("model", True), ("limitation", True)])
+        assert self._spread(rows, 8)[0]["kind"] == "limitation"
+
+    def test_every_kind_present_gets_a_slot_before_any_kind_repeats(self):
+        rows = self._rows([("limitation", True)] * 3 + [("method", True)] * 3
+                          + [("model", True), ("hardware", True)])
+        out = self._spread(rows, 4)
+        assert [r["kind"] for r in out] == \
+            ["limitation", "method", "model", "hardware"]
+
+    def test_the_limit_is_respected(self):
+        rows = self._rows([("limitation", True)] * 30)
+        assert len(self._spread(rows, 8)) == 8
+
+    def test_it_does_not_loop_forever_on_fewer_rows_than_the_limit(self):
+        rows = self._rows([("method", True), ("model", True)])
+        assert len(self._spread(rows, 50)) == 2
+
+    def test_verified_rows_still_come_first_within_a_kind(self):
+        rows = self._rows([("method", False), ("method", True)])
+        assert self._spread(rows, 8)[0]["verified"] is True
+
+    def test_an_unknown_kind_is_kept_rather_than_dropped(self):
+        rows = self._rows([("method", True), ("anecdote", True)])
+        kinds = [r["kind"] for r in self._spread(rows, 8)]
+        assert "anecdote" in kinds and kinds[0] == "method"

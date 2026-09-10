@@ -25,8 +25,45 @@ KIND_ORDER = ("limitation", "method", "model", "metric",
               "dataset", "hardware", "publication")
 
 
+def _spread(rows: list[dict], limit: int) -> list[dict]:
+    """The `limit` most useful rows, with a SPREAD of kinds rather than a run
+    of the first one.
+
+    Sorting flat by KIND_ORDER and truncating looks right until a topic has
+    more material than fits. Limitations lead, so a topic with five of them
+    and a limit of eight spends five slots before the first method — and the
+    named model, the dataset, the hardware, the measured number are exactly
+    what got cut. Those are the rows that stopped the robots inventing
+    "GraphSLAM and FastSLAM" and "a retrieval model like BM25"; losing them
+    to an abundance of honest caveats would reintroduce the original bug by
+    way of the fix for it.
+
+    So fill by rounds: the best limitation, then the best method, the best
+    model, and so on through KIND_ORDER, then round again. A limitation still
+    comes first, and a topic that HAS a named model can no longer fail to
+    mention it.
+    """
+    by_kind: dict[str, list[dict]] = {}
+    for r in rows:
+        by_kind.setdefault(r.get("kind") or "", []).append(r)
+    order = list(KIND_ORDER) + sorted(k for k in by_kind if k not in KIND_ORDER)
+    out: list[dict] = []
+    while len(out) < limit:
+        took = False
+        for kind in order:
+            group = by_kind.get(kind)
+            if group:
+                out.append(group.pop(0))
+                took = True
+                if len(out) >= limit:
+                    break
+        if not took:
+            break
+    return out
+
+
 def facts_for(topic_id: str, robot_id: Optional[str] = None,
-              limit: int = 8) -> list[dict]:
+              limit: int = 10) -> list[dict]:
     """Facts to ground one answer: this robot's own, plus topic-general ones.
 
     Another robot's facts about the same topic are deliberately excluded —
@@ -47,7 +84,7 @@ def facts_for(topic_id: str, robot_id: Optional[str] = None,
         not r.get("verified"),          # confirmed facts first
         r.get("id", 0),
     ))
-    return mine[:limit]
+    return _spread(mine, limit)
 
 
 def facts_for_robot(robot_id: str, limit: int = 10) -> list[dict]:
@@ -70,7 +107,7 @@ def facts_for_robot(robot_id: str, limit: int = 10) -> list[dict]:
     rows.sort(key=lambda r: (
         KIND_ORDER.index(r["kind"]) if r["kind"] in KIND_ORDER else 99,
         not r.get("verified"), r.get("id", 0)))
-    return rows[:limit]
+    return _spread(rows, limit)
 
 
 def coverage() -> list[dict]:
