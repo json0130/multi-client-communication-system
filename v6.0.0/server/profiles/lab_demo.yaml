@@ -29,16 +29,18 @@ robots:
   # visitor. It is the planner's first layer and the ONLY thing that decides
   # which block gets cut when nobody has stated an interest.
   #
-  # ALL THREE ARE 0.5, WHICH MEANS THIS IS NOT YET SET. Equal values tie, and
-  # the planner's (importance, robot_id) sort then falls through to the
-  # alphabet — so today a project is cut because of how its client_id is
-  # spelled. Production previously passed no priorities at all, which had the
-  # same effect less visibly. `python3 tools/check_cold_start.py` reports this
-  # as INERT until the values differ.
+  # Set by the lab, 2026-09-10, in the order a rushed visitor should keep
+  # them: conversational AI first, human-aware navigation second,
+  # emotion-aware interaction last to be protected. Values are spaced 0.2
+  # apart so a single stated visitor interest (worth ~0.39 in
+  # check_cold_start) can still reorder them — a lab priority is the standing
+  # default, not an override of what the visitor in the room actually asked
+  # for.
   #
-  # Set them deliberately: which project the lab would least like a rushed
-  # visitor to miss should be highest. This is a lab judgement, not a
-  # technical default, which is why it ships unset rather than guessed.
+  # These were all 0.5 before, which is the same as unset: equal values tie
+  # and the planner's (importance, robot_id) sort falls through to the
+  # alphabet, so a project was cut because of how its client_id is spelled.
+  # `python3 tools/check_cold_start.py` reported it as INERT.
   #
   # Specialist robots. Workers: local isolation — each retrieves only its own
   # interaction history and cannot read what another platform generated.
@@ -50,16 +52,16 @@ robots:
     role: "Conversational AI researcher"
     access_level: local
     default_visibility: global
-    importance: 0.5
+    importance: 0.8
 
   - id: navel_01
     role: "Emotion-aware interaction researcher"
     access_level: local
     default_visibility: global
-    importance: 0.5
+    importance: 0.4
 
   - id: silbot_01
     role: "Human-aware navigation researcher"
     access_level: local
     default_visibility: global
-    importance: 0.5
+    importance: 0.6

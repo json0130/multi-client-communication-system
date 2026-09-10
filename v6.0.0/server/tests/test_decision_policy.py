@@ -378,6 +378,47 @@ class TestPlanRevision:
         # Q&A is budgeted first — the cut a visitor is least likely to notice.
         assert kinds[0] is PlanOpKind.SET_QA_BUDGET
 
+    def test_a_skip_request_closes_the_window(self):
+        # It is a request ABOUT THE TOUR, not a question for a robot. Phrased
+        # as a question it used to reach looks_like_question, which said STAY
+        # — so the plan revision fired, the tour moved on, and on the way the
+        # robot holding the mic answered the itinerary question anyway.
+        r = decide(visitor_turn("i dont have much time so can we skip this project?"))
+        assert r.action.kind is ActionKind.ADVANCE
+
+    def test_a_bare_skip_request_closes_the_window(self):
+        # Without any time complaint attached, so the skip rule is what fires.
+        r = decide(visitor_turn("can we skip this one?"))
+        assert r.action.kind is ActionKind.ADVANCE
+        assert r.mechanism == Mechanism.SKIP_REQUEST
+
+    def test_time_pressure_still_owns_an_utterance_stating_both(self):
+        # "running out of time, can we skip this" is explained by the time
+        # complaint; the mechanism should name the reason, not the remedy.
+        r = decide(visitor_turn("we are running out of time so can we skip this"))
+        assert r.mechanism == Mechanism.TIME_PRESSURE
+
+    @pytest.mark.parametrize("phrase", SKIP_PHRASES)
+    def test_every_skip_phrase_also_closes_the_window(self, phrase):
+        r = decide(visitor_turn(f"{phrase} project"))
+        assert r.action.kind is ActionKind.ADVANCE
+
+    def test_a_real_question_is_still_a_question(self):
+        # The control: skip detection must not swallow genuine curiosity.
+        r = decide(visitor_turn("how do you skip obstacles while navigating?"))
+        assert r.action.kind is ActionKind.STAY
+
+    def test_saying_there_is_plenty_of_time_is_not_time_pressure(self):
+        # "t have much time" carries the negation so the opposite statement
+        # cannot match it.
+        r = decide(visitor_turn("we have much time, tell us more"))
+        assert r.mechanism != Mechanism.TIME_PRESSURE
+
+    def test_the_visitors_own_phrasing_reads_as_time_pressure(self):
+        r = decide(visitor_turn("i dont have much time"),
+                   point=DecisionPoint.PLAN_REVISE)
+        assert r.mechanism != Mechanism.NO_REVISION
+
     def test_skip_request_targets_the_named_robot(self):
         r = decide(
             visitor_turn("let's skip the Navel part"),

@@ -200,6 +200,14 @@ TIME_PRESSURE_PHRASES = [
     "pressed for time",
     "running late",
     "not much time",
+    # "i dont have much time" — the way a visitor actually says it, and it
+    # matched none of the above: "not much time" is not a substring of "don't
+    # have much time". Carries the negation ("t have") so that "we have much
+    # time" — the opposite statement — cannot match it, and covers both
+    # elisions, because visitors type as they speak.
+    "t have much time",
+    "havent got much time",
+    "haven't got much time",
     "little time",
     "keep it brief",
     "keep it short",
@@ -374,6 +382,27 @@ class HeuristicPolicy:
 
             if _matches(obs.user_utterance, TIME_PRESSURE_PHRASES):
                 return PolicyResult(Action.advance(), Mechanism.TIME_PRESSURE)
+
+            # An explicit request to skip closes the window too, and for the
+            # same reason time pressure does: it is a request ABOUT THE TOUR,
+            # not a question for a robot to answer. Checked after time
+            # pressure so an utterance stating both keeps the mechanism that
+            # explains the whole sentence.
+            #
+            # SKIP_PHRASES were only ever wired into PLAN_REVISE, and the
+            # natural phrasing is a question — "I don't have much time so can
+            # we skip this project?" ends in a question mark, so it sailed
+            # past every rule above into looks_like_question, which said STAY.
+            # The plan revision fired correctly and the tour did move on; but
+            # the window stayed open on the way, so the robot holding the mic
+            # generated an answer to it. A live run had Silbot reply "Of
+            # course, let's move on to the next project that might be more
+            # relevant for you. Is there anything specific you'd like to
+            # explore instead?" — a project robot fielding a question about
+            # the itinerary, and handing the running of the tour back to the
+            # visitor who had just said they were short of time.
+            if _matches(obs.user_utterance, SKIP_PHRASES):
+                return PolicyResult(Action.advance(), Mechanism.SKIP_REQUEST)
 
             if looks_like_question(obs.user_utterance):
                 return PolicyResult(Action.stay(), Mechanism.QUESTION_HEURISTIC)

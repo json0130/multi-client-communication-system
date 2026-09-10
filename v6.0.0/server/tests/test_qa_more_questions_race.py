@@ -495,6 +495,34 @@ class TestAdvanceTurnsAreNotGenerated:
                   if d.get("event") == "chat_sentence"]
         assert not spoken, f"generated a reply on a closing turn: {spoken}"
 
+    def test_a_skip_request_is_not_answered_by_the_project_robot(self, client):
+        """The reported run, verbatim.
+
+        A visitor typed "i dont have much time so can we skip this proejct?"
+        and Silbot replied "Of course, let's move on to the next project that
+        might be more relevant for you. Is there anything specific you'd like
+        to explore instead?" — a project robot fielding a question about the
+        itinerary, and handing the running of the tour back to the visitor who
+        had just said they were short of time.
+
+        Two rules missed it: "not much time" is not a substring of "dont have
+        much time", and SKIP_PHRASES were wired only into PLAN_REVISE, so the
+        question mark carried the whole utterance into looks_like_question.
+        """
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i dont have much time so can we skip this proejct?"})
+        spoken = [d.get("text", "") for _c, d in client.sent
+                  if d.get("event") == "chat_sentence"]
+        assert not spoken, f"a project robot answered an itinerary question: {spoken}"
+
+    def test_the_guide_is_the_one_who_answers_a_skip_request(self, client):
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i dont have much time so can we skip this proejct?"})
+        acks = [(c, d) for c, d in client.sent
+                if d.get("step_id") == "_qa_advance_ack"]
+        assert acks, "nobody answered the visitor"
+        assert acks[0][0] == GUIDE
+
     def test_the_acknowledgement_comes_from_the_guide(self, client):
         client.post(f"/robots/{A}/chat",
                     json={"message": "i am running out of time can we skip this"})

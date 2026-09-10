@@ -1080,8 +1080,8 @@ class WebSocketGateway:
             # and hear nothing at all — so they said it again, and again.
             # Even when nothing about the plan can change, they get told the
             # tour heard them.
-            if mechanism == Mechanism.TIME_PRESSURE:
-                return ADVANCE_ACK[Mechanism.TIME_PRESSURE]
+            if mechanism in (Mechanism.TIME_PRESSURE, Mechanism.SKIP_REQUEST):
+                return ADVANCE_ACK.get(mechanism, ADVANCE_ACK["default"])
 
             # Otherwise say nothing. A visitor who says "no more questions"
             # then hears the guide say "Great! Let's continue with the
