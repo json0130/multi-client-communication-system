@@ -39,5 +39,6 @@
     "E": 0.9,
     "A": 0.9,
     "N": 0.2
-  }
+  },
+  "tts_voice": "en-GB-SoniaNeural"
 }

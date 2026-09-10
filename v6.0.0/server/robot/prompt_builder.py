@@ -61,7 +61,13 @@ def build_delegation_prompt(
         listed = "\n".join(f"  - {f}" for f in grounded_facts)
         facts_block = (
             f"\n*** WHAT IS ACTUALLY TRUE OF YOUR WORK ***\n{listed}\n"
-            "These are the only specifics you may state. Anything marked "
+            "USE THESE. They are the specifics a visitor came for, and they "
+            "are confirmed — name the method, the model, the index, the "
+            "numbers, rather than paraphrasing them into something vaguer. "
+            "Asked how the retrieval works, \"a FAISS index searched by "
+            "vector similarity\" is the answer; \"we build an index of past "
+            "conversations\" is the same sentence with the content removed.\n"
+            "They are also the ONLY specifics you may state. Anything marked "
             "UNVERIFIED is a draft nobody has confirmed — describe it in "
             "general terms and do not quote it as a precise result.\n"
         )

@@ -569,3 +569,62 @@ class TestTheHandOffIsNotRepeated:
         handoff = gw.route_question(registry.get(GUIDE), "how does emotion work")[2]
         assert handoff and "Navel" in handoff, \
             "a genuine change of speaker must still be announced"
+
+
+class TestTheMoreQuestionsPromptIsAskedOnce:
+    """
+    "Do you have any other questions, or shall we continue the demonstration?"
+    fired after every single reply — five times in one Q&A round in a live
+    run. The visitor is being asked to decide something they already know
+    they can do, and after the first time it reads as the robot wanting them
+    to stop.
+    """
+
+    def test_only_the_first_answer_invites_more(self, client):
+        for q in ("how does it work", "and what about latency",
+                  "does it scale"):
+            client.post(f"/robots/{A}/chat", json={"message": q})
+        prompts = [d for _c, d in client.sent
+                   if d.get("step_id") == "_qa_more_questions"]
+        assert len(prompts) == 1, f"asked {len(prompts)} times in one window"
+
+    def test_a_new_window_asks_again(self, client):
+        # The gate is per WINDOW, not per run — a fresh Q&A round is a fresh
+        # context and the visitor may not have heard the first invitation.
+        from gateway.websocket_gateway import WebSocketGateway  # noqa: F401
+        client.post(f"/robots/{A}/chat", json={"message": "how does it work"})
+        assert len([d for _c, d in client.sent
+                    if d.get("step_id") == "_qa_more_questions"]) == 1
+
+
+class TestDecliningClosesTheWindow:
+    """
+    "no its okay" answering "any other questions?" plainly means done. It
+    reached ChatBox as a prompt to keep explaining: the robot replied "Got
+    it! So, to explain further, we use a large language model called
+    Qwen2.5..." to a visitor who had just said they had no more questions.
+    """
+
+    DECLINES = ("no its okay", "no thanks", "nope", "all good thanks",
+                "no thank you", "no more questions")
+
+    def test_each_decline_advances(self, client):
+        from decision.policy import QA_ADVANCE_PHRASES, _matches
+        for phrase in self.DECLINES:
+            assert _matches(phrase, QA_ADVANCE_PHRASES), f"{phrase!r} did not close"
+
+    def test_a_bare_no_does_not(self):
+        # "no" answering "shall we continue?" means STAY — the negative
+        # family is excluded from BARE_AFFIRMATIONS for exactly this reason.
+        from decision.policy import QA_ADVANCE_PHRASES, _matches
+        assert not _matches("no", QA_ADVANCE_PHRASES)
+
+    def test_a_decline_followed_by_a_question_does_not(self):
+        from decision.policy import QA_ADVANCE_PHRASES, _matches
+        assert not _matches("no but how does it work", QA_ADVANCE_PHRASES)
+
+    def test_declining_generates_no_reply(self, client):
+        client.post(f"/robots/{A}/chat", json={"message": "no its okay"})
+        spoken = [d.get("text", "") for _c, d in client.sent
+                  if d.get("event") == "chat_sentence"]
+        assert not spoken, f"kept talking after being told to stop: {spoken}"

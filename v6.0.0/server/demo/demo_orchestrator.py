@@ -194,6 +194,10 @@ class DemoOrchestrator:
         # {"step_id", "queued_at", "turns_at_queue"} for at most one queued
         # resume at a time — see note_interrupted_step / _drop_if_stale_resume.
         self._pending_resume: Optional[dict] = None
+        # Set when a Q&A window closes, so the next step of that same block
+        # opens by acknowledging that it is carrying on. See _resuming_hint.
+        self._resume_after_qa = False
+        self._qa_block: Optional[str] = None
 
         self._runner: Optional[threading.Thread] = None
 
@@ -274,6 +278,8 @@ class DemoOrchestrator:
             self._visitor_profile    = visitor_profile
             self._last_block_robot_id = None
             self._pending_resume      = None
+            self._resume_after_qa     = False
+            self._qa_block            = None
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
@@ -1152,6 +1158,38 @@ class DemoOrchestrator:
             logger.info(f"[Demo] '{block_robot_id}' already engaged ad-hoc "
                        f"({engagement['turns']} turns) — compressed its scripted intro.")
 
+    RESUMING_HINT = (
+        " You are picking up your presentation after a visitor's question "
+        "interrupted it. Open with a short, natural line acknowledging that "
+        "you are carrying on — \"Let me carry on\", \"Where I left off\", "
+        "\"Coming back to the project\" — then continue with the content. "
+        "One clause, not a paragraph, and do not re-answer the question or "
+        "recap what you already said."
+    )
+
+    def _resuming_hint(self, step: DemoStep) -> str:
+        """A lead-in for the first step after a Q&A window closed.
+
+        Without it the tour simply resumed mid-thought: a visitor asked
+        something, got an answer, and then the robot's next scripted sentence
+        began with no acknowledgement that the detour had ended — which reads
+        as the robot having forgotten the exchange rather than returning from
+        it.
+
+        Consumed once, so only the first step back carries it and the rest of
+        the block continues normally.
+        """
+        with self._lock:
+            if not self._resume_after_qa:
+                return ""
+            if step.block_robot_id and step.block_robot_id != self._qa_block:
+                # A different block entirely — the guide's transition already
+                # covers the change, so there is nothing to pick up.
+                self._resume_after_qa = False
+                return ""
+            self._resume_after_qa = False
+        return self.RESUMING_HINT
+
     def framing_for_robot(self, robot_id: str) -> str:
         """The style directive for `robot_id` under the CURRENT run's visitor
         profile, or "" when no profile is set.
@@ -1214,7 +1252,9 @@ class DemoOrchestrator:
             # is a property of the visitor, not of any one robot.
             with self._lock:
                 profile = self._visitor_profile
-            instruction = step.text + self._framing_for(step.robot_id, profile)
+            instruction = (step.text
+                           + self._resuming_hint(step)
+                           + self._framing_for(step.robot_id, profile))
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
             generated = self._ws.generate_demo_step(step.robot_id, instruction)
             # Compare against INSTRUCTION, not step.text: generate_demo_step's
@@ -1260,10 +1300,18 @@ class DemoOrchestrator:
                     f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
 
         self._notify_window("open")
+        with self._lock:
+            # Whose block this window belongs to, so the resuming lead-in is
+            # only added when that same robot picks its presentation back up.
+            self._qa_block = step.block_robot_id
         opened_at = time.time()
         closed_naturally = self._qa_end_event.wait(timeout=timeout)
         elapsed = time.time() - opened_at
         self._notify_window("close")
+        with self._lock:
+            # The next step of this block should open by acknowledging that
+            # it is carrying on — see _resuming_hint.
+            self._resume_after_qa = True
 
         # 'timeout' means the allocated budget ran out with nobody closing it —
         # distinct from an operator or the policy deciding to move on, and the

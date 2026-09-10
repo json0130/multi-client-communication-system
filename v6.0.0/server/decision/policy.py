@@ -113,6 +113,25 @@ QA_ADVANCE_PHRASES = [
     "i am good",   # "no i am good" misclassified by the LLM as 'continue' in
                    # a real run — "i'm good"/"im good" were already covered,
                    # the un-contracted form was not
+    # DECLINING the invitation. "no its okay" answering "any other
+    # questions?" plainly means done, and it reached ChatBox as a prompt to
+    # keep explaining: the robot replied "Got it! So, to explain further, we
+    # use a large language model called Qwen2.5..." to a visitor who had just
+    # said they had no more questions.
+    #
+    # These are full phrases, never a bare "no" — the negative family is
+    # excluded from BARE_AFFIRMATIONS for a reason, since "no" answering
+    # "shall we continue?" means STAY. "no its okay" cannot be read that way.
+    "no its okay",
+    "no it's okay",
+    "no it is okay",
+    "no thanks",
+    "no im ok",
+    "no i'm ok",
+    "nope",
+    "nah im good",
+    "nah i'm good",
+    "all good thanks",
     "that's fine",
     "that's okay",
     "it's okay",

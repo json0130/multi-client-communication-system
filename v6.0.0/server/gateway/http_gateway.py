@@ -25,6 +25,7 @@ from flask import Flask, request, jsonify, Blueprint
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
 from decision import ActionKind, Mechanism
+from gateway.websocket_gateway import _speaking_seconds
 from decision.policy import QA_CLOSING_PHRASES, _matches
 from data import robot_repo
 
@@ -373,7 +374,19 @@ def create_http_gateway(
                 "delegation_target": None,
             })
 
+        # Let the hand-off be HEARD before the answer starts. They go to two
+        # different robots with two different speakers, so nothing serialises
+        # them: a live run had Pepper's "ChatBox can tell you more about
+        # that" and ChatBox's first sentence playing over each other, because
+        # generation finished faster than the hand-off took to say.
+        #
+        # Only the first sentence waits; the rest stream normally behind it.
+        _handoff_wait = {"left": _speaking_seconds(handoff) if handoff else 0.0}
+
         def _on_sentence(clean_text, emotion_tag):
+            if _handoff_wait["left"] > 0:
+                time.sleep(_handoff_wait["left"])
+                _handoff_wait["left"] = 0.0
             if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
                 return
             # A chunk that is only an emotion tag is not speech — see
@@ -437,9 +450,15 @@ def create_http_gateway(
         # row. The closing-phrase list already knows what an invitation to
         # ask more sounds like, so reuse it rather than inventing a second
         # notion of the same thing.
+        # ONCE PER WINDOW, not once per answer. A live run put "Do you have
+        # any other questions, or shall we continue the demonstration?" after
+        # every single reply — five times in one Q&A round. The visitor is
+        # being asked to decide something they already know they can do, and
+        # after the first time it reads as the robot wanting them to stop.
         already_invited = _matches(result.clean_text or "", QA_CLOSING_PHRASES)
         if (ws_gateway._demo_orchestrator and not advancing
-                and not delegation_result and not already_invited):
+                and not delegation_result and not already_invited
+                and ws_gateway.claim_more_questions_prompt()):
             if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
                 ws_gateway.send_to_robot(target_id, {
                     "event": "demo_step",

@@ -38,5 +38,6 @@
     "E": 0.8,
     "A": 0.95,
     "N": 0.2
-  }
+  },
+  "tts_voice": "en-AU-NatashaNeural"
 }

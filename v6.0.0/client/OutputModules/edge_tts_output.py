@@ -31,6 +31,14 @@ class EdgeTTSOutputModule(OutputModule):
         self._language   = self.config.get('language', 'en')
         self._gender     = self.config.get('gender', 'female')   # stored, informs future providers
         self._rate       = self.config.get('rate', '+0%')
+        # A NAMED neural voice, so four robots do not sound like one.
+        # edge-tts is installed and this module is named after it, but every
+        # utterance was going through gTTS — which has no voice selection at
+        # all, so Pepper, ChatBox, Navel and Silbot shared a single voice and
+        # a visitor could not tell by ear who was speaking. Set `tts_voice`
+        # per robot in its client config; gTTS remains the fallback when
+        # edge-tts is unavailable or fails.
+        self._voice      = self.config.get('tts_voice', '')
 
         # Speaker output (hardcoded to USB speaker; override in config if needed)
         # ALSA's 'default', not a card number. This was pinned to
@@ -54,6 +62,7 @@ class EdgeTTSOutputModule(OutputModule):
         self._interrupt_event = threading.Event()
         self._aplay_proc: Optional[subprocess.Popen] = None
         self._warned_playback = False   # so a failing player says why, once
+        self._warned_voice = False      # and a missing voice, once
         self._aplay_lock  = threading.Lock()
         self._sim_speed   = self.config.get('sim_speed', 1.0)
 
@@ -197,6 +206,9 @@ class EdgeTTSOutputModule(OutputModule):
             if 'language' in voice_config:
                 self._language = voice_config['language']
                 logger.info(f"[TTS] Language → {self._language}")
+            if 'tts_voice' in voice_config:
+                self._voice = voice_config['tts_voice']
+                logger.info(f"[TTS] Voice → {self._voice}")
             if 'gender' in voice_config:
                 self._gender = voice_config['gender']
                 logger.info(f"[TTS] Gender   → {self._gender}")
@@ -303,8 +315,21 @@ class EdgeTTSOutputModule(OutputModule):
         tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
         tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
         try:
-            tts = gTTS(text=text, lang=language)
-            tts.save(tmp_mp3)
+            with self._voice_lock:
+                voice = self._voice
+            made = False
+            if voice:
+                try:
+                    import edge_tts
+                    edge_tts.Communicate(text, voice, rate=self._rate).save_sync(tmp_mp3)
+                    made = os.path.exists(tmp_mp3) and os.path.getsize(tmp_mp3) > 0
+                except Exception as e:
+                    if not self._warned_voice:
+                        self._warned_voice = True
+                        logger.warning(f"[TTS] voice {voice!r} unavailable ({e}); "
+                                       f"falling back to gTTS for this robot.")
+            if not made:
+                gTTS(text=text, lang=language).save(tmp_mp3)
             result = subprocess.run([
                 'ffmpeg', '-i', tmp_mp3,
                 '-filter:a', f'atempo={self.talking_speed}',

@@ -37,5 +37,6 @@
     "E": 0.7,
     "A": 0.8,
     "N": 0.3
-  }
+  },
+  "tts_voice": "en-US-GuyNeural"
 }

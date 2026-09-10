@@ -308,3 +308,44 @@ class TestSpeakingTimeIsWaitedOut:
         gw.check_qa_auto_close(A, self.LONG)
         _settle(0.3)
         assert closed == [], "closed while the robot was still speaking"
+
+
+class TestPickingUpAfterAQuestion:
+    """
+    When a Q&A window closes, the robot's next scripted sentence used to
+    begin with no acknowledgement that the detour had ended — which reads as
+    the robot having forgotten the exchange rather than returning from it.
+    """
+
+    def _orch(self):
+        from demo.demo_orchestrator import DemoOrchestrator, DemoStep
+
+        class Stub:
+            def send_to_robot(self, *a, **k): pass
+        o = DemoOrchestrator(Stub())
+        o.load_script([DemoStep(step_id="s", robot_id=A, text="Explain.",
+                                block_robot_id=A)])
+        return o, o._script[0]
+
+    def test_no_hint_before_any_question(self):
+        o, step = self._orch()
+        assert o._resuming_hint(step) == ""
+
+    def test_the_same_block_picks_up(self):
+        o, step = self._orch()
+        o._resume_after_qa, o._qa_block = True, A
+        assert "carrying on" in o._resuming_hint(step)
+
+    def test_it_is_consumed_once(self):
+        # Only the first step back carries it; the rest of the block runs
+        # normally.
+        o, step = self._orch()
+        o._resume_after_qa, o._qa_block = True, A
+        assert o._resuming_hint(step)
+        assert o._resuming_hint(step) == ""
+
+    def test_a_different_block_does_not_pick_up(self):
+        # The guide's transition already covers a change of project.
+        o, step = self._orch()
+        o._resume_after_qa, o._qa_block = True, "someone_else"
+        assert o._resuming_hint(step) == ""

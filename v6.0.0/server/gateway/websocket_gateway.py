@@ -294,6 +294,8 @@ class WebSocketGateway:
         # front of every answer from the same robot. Cleared when a Q&A
         # window opens or closes — see route_question.
         self._handed_off_to = None
+        # Whether this window has already invited further questions.
+        self._asked_more_questions = False
 
         # Pending auto-close of the Q&A window after a robot signs off.
         # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
@@ -402,6 +404,7 @@ class WebSocketGateway:
         self._tracker.open_window()
         self._segment.reset()
         self._handed_off_to = None
+        self._asked_more_questions = False
         # A timer left over from the previous window would close this one
         # almost as soon as it opened.
         self.cancel_qa_auto_close("new window opened")
@@ -420,6 +423,7 @@ class WebSocketGateway:
         """
         self._tracker.close_window()
         self._handed_off_to = None
+        self._asked_more_questions = False
         self.cancel_qa_auto_close("window closed")
         try:
             observations = self._segment.observations()
@@ -728,6 +732,19 @@ class WebSocketGateway:
         with self._auto_close_lock:
             self._auto_close_timer = timer
         timer.start()
+
+    def claim_more_questions_prompt(self) -> bool:
+        """True the FIRST time this Q&A window asks "any other questions?".
+
+        Reset when a window opens or closes. The prompt exists so a visitor
+        knows they can keep going; saying it after every answer tells them
+        nothing new and starts to read as impatience.
+        """
+        with self._utterance_lock:
+            if self._asked_more_questions:
+                return False
+            self._asked_more_questions = True
+            return True
 
     def _presenting_robot_id(self):
         """Whose block the tour is currently in, or None outside a demo."""
@@ -1326,7 +1343,15 @@ class WebSocketGateway:
                     if target_instance is None:
                         return
 
+                    # Let the hand-off be HEARD before the answer starts —
+                    # see the same guard in http_gateway. Two robots, two
+                    # speakers, nothing else serialising them.
+                    _wait = {"left": _speaking_seconds(handoff) if handoff else 0.0}
+
                     def _on_sentence(clean_text, emotion_tag):
+                        if _wait["left"] > 0:
+                            time.sleep(_wait["left"])
+                            _wait["left"] = 0.0
                         if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
                             return
                         # A chunk that is only an emotion tag is not speech.
