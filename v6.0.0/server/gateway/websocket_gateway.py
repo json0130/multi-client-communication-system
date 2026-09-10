@@ -31,6 +31,7 @@ Requires: pip install websocket-client
 from __future__ import annotations
 import json
 import logging
+import re
 import threading
 import time
 from typing import Optional, Callable, TYPE_CHECKING
@@ -90,6 +91,22 @@ ADVANCE_ACK_WITH_CHANGE = {
     Mechanism.TIME_PRESSURE: "[DEFAULT] Understood",
     "default":               "[DEFAULT] Of course",
 }
+
+SPEAKING_WORDS_PER_SEC = 2.4
+"""Rough speaking rate, used only to wait out a sentence the server cannot
+hear the end of. Matches tools/demo_harness.py's SPEAKING_RATE so the offline
+harness and the live server model the same robot."""
+
+
+def _speaking_seconds(text: str) -> float:
+    """How long `text` will take to say, near enough to wait for.
+
+    Capped: a long generation should not park the tour indefinitely if the
+    estimate is wrong, and 20s is already far beyond any sign-off.
+    """
+    words = len((text or "").split())
+    return min(20.0, words / SPEAKING_WORDS_PER_SEC) if words else 0.0
+
 
 QA_AUTO_CLOSE_SEC = 3.0
 """Silence after a robot invites further questions before the tour moves on
@@ -250,6 +267,25 @@ class WebSocketGateway:
         from decision.presence import PresenceTracker
         self._presence = PresenceTracker()
 
+        # What the robots have actually been told to say, newest last. The
+        # dashboard builds its transcript from /demo/status, which only knows
+        # the CURRENT SCRIPTED STEP — so every Q&A exchange driven by speech
+        # was invisible to the operator. During a voice-led tour that is the
+        # entire conversation. Recorded here because send_to_robot is the one
+        # choke point every utterance passes through.
+        #
+        # Bounded: a tour is minutes long and this is a debugging surface, not
+        # storage. The decision log is the durable record.
+        from collections import deque
+        self._utterances = deque(maxlen=400)
+        self._utterance_seq = 0
+        self._utterance_lock = threading.Lock()
+
+        # Who the last hand-off named, so the same line is not repeated in
+        # front of every answer from the same robot. Cleared when a Q&A
+        # window opens or closes — see route_question.
+        self._handed_off_to = None
+
         # Pending auto-close of the Q&A window after a robot signs off.
         # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
         self._auto_close_timer = None
@@ -281,6 +317,44 @@ class WebSocketGateway:
     @property
     def tracker(self) -> DemoRunTracker:
         return self._tracker
+
+    def _record_utterance(self, client_id: str, data: dict) -> None:
+        """Note something a robot was told to say, for the operator's view.
+
+        Scripted demo steps are skipped — the dashboard already shows those
+        from /demo/status, and recording them here would double every line.
+        What it captures is exactly what was missing: streamed Q&A sentences
+        and the synthetic `_qa_*` steps the policy generates.
+        """
+        event = data.get("event")
+        text = (data.get("text") or "").strip()
+        if not text:
+            return
+        step_id = data.get("step_id") or ""
+        if event == "demo_step" and not step_id.startswith("_qa"):
+            return
+        if event not in ("demo_step", "chat_sentence"):
+            return
+        inst = self._registry.get(client_id)
+        with self._utterance_lock:
+            self._utterance_seq += 1
+            self._utterances.append({
+                "seq": self._utterance_seq,
+                "robot_id": client_id,
+                "robot_name": getattr(inst, "robot_name", None) or client_id,
+                # Strip the emotion tag the robot reads as a directive, not
+                # as speech — the dashboard shows what a visitor would hear.
+                "text": re.sub(r"^\s*\[[A-Z_]+\]\s*", "", text),
+                "kind": step_id or event,
+                "at": time.time(),
+            })
+
+    def utterances_since(self, seq: int = 0) -> dict:
+        """Everything said after `seq`. The dashboard polls with its last seq."""
+        with self._utterance_lock:
+            rows = [u for u in self._utterances if u["seq"] > seq]
+            latest = self._utterance_seq
+        return {"utterances": rows, "seq": latest}
 
     @property
     def presence(self):
@@ -316,6 +390,7 @@ class WebSocketGateway:
         """Called by DemoOrchestrator when a Q&A window opens."""
         self._tracker.open_window()
         self._segment.reset()
+        self._handed_off_to = None
         # A timer left over from the previous window would close this one
         # almost as soon as it opened.
         self.cancel_qa_auto_close("new window opened")
@@ -333,6 +408,7 @@ class WebSocketGateway:
         cannot reintroduce hollow observations by taking a different path.
         """
         self._tracker.close_window()
+        self._handed_off_to = None
         self.cancel_qa_auto_close("window closed")
         try:
             observations = self._segment.observations()
@@ -744,7 +820,19 @@ class WebSocketGateway:
             return
 
         if action.kind is ActionKind.ADVANCE:
-            self._schedule_qa_auto_close(QA_AUTO_CLOSE_SEC)
+            # The clock starts when GENERATION finishes, not when the robot
+            # stops talking — the server gets no end-of-TTS signal for
+            # streamed sentences. So the visitor's real silence is this minus
+            # however long the sign-off takes to say, and a robot that ends
+            # by ASKING something ("Is there anything else you'd like to
+            # know?") was being answered by the tour moving on before the
+            # question had finished playing. Reported exactly that way.
+            #
+            # Estimating the speaking time and waiting for it first makes the
+            # pause mean what it says: three seconds of silence AFTER the
+            # robot finishes, not three seconds from the middle of a sentence.
+            self._schedule_qa_auto_close(
+                QA_AUTO_CLOSE_SEC + _speaking_seconds(clean_text))
             return
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
@@ -985,6 +1073,22 @@ class WebSocketGateway:
             return instance, receiver_id, None
 
         target_name = getattr(target, "robot_name", None) or target_id
+
+        # ONCE PER RUN OF QUESTIONS TO THE SAME ROBOT. A live run put the
+        # identical line in front of three consecutive answers — "ChatBox can
+        # tell you more about that" before each of three questions the
+        # visitor had already watched ChatBox answer. After the first, the
+        # visitor knows who is speaking; repeating it is the guide narrating
+        # something everyone can see.
+        #
+        # Reset when the target changes or the window reopens, so a genuine
+        # switch of speaker is still announced.
+        with self._utterance_lock:
+            already = self._handed_off_to == target_id
+            self._handed_off_to = target_id
+        if already:
+            return target, target_id, None
+
         handoff = f"{target_name} can tell you more about that — let's hear from them!"
         return target, target_id, handoff
 
@@ -1054,6 +1158,14 @@ class WebSocketGateway:
         elif event == "speech_response":
             extra = f" | transcription=\"{data.get('transcription', '')[:40]}\""
         print(f"[→ {client_id}] {event}{extra}")
+
+        # Mirror it to the operator's transcript. Best-effort and never in
+        # the way of actually sending: a bookkeeping failure must not stop a
+        # robot speaking.
+        try:
+            self._record_utterance(client_id, data)
+        except Exception as e:
+            logger.warning(f"[WS Gateway] could not record utterance: {e}")
 
         with self._lock:
             conn = self._connections.get(client_id)

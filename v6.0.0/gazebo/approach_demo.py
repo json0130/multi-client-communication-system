@@ -10,17 +10,12 @@ import math
 class TourGuideDemo(Node):
     def __init__(self):
         super().__init__('tour_guide')
-        # Isolate velocity commands to Robot 1
         self.publisher_ = self.create_publisher(Twist, '/robot1/cmd_vel', 10)
-        
-        # Service clients for world and entity resets
         self.reset_world_client = self.create_client(Empty, '/reset_world')
         self.state_client = self.create_client(SetEntityState, '/set_entity_state')
         
-        # Reset world state and teleport robots back to base coordinates
         self.reset_gazebo_environment()
         time.sleep(1.0)
-        
         self.run_tour()
 
     def reset_gazebo_environment(self):
@@ -29,10 +24,10 @@ class TourGuideDemo(Node):
             req = Empty.Request()
             self.reset_world_client.call_async(req)
         
-        # Teleport all robots to their designated starting coordinates
-        self.teleport_robot('robot1', 0.0, 0.0, 0.0)      # Room 1 Start (Facing East)
-        self.teleport_robot('robot2', 4.0, -3.0, 3.14)    # Room 2 Start (Facing West)
-        self.teleport_robot('robot3', 2.0, -6.0, 1.57)    # Room 3 Start (Facing North)
+        # Teleport entities to designated coordinates
+        self.teleport_robot('robot1', 0.092, 5.528, 0.0)      # Room 1 Fixed Start (Facing East)
+        self.teleport_robot('robot2', 9.695, 1.035, 3.140)    # Corridor Right (Facing West)
+        self.teleport_robot('robot3', 8.128, -5.582, 1.570)   # Lower Corridor (Facing North)
 
     def teleport_robot(self, robot_name, x, y, yaw):
         if not self.state_client.wait_for_service(timeout_sec=1.0):
@@ -48,7 +43,7 @@ class TourGuideDemo(Node):
         req.state = state
         
         future = self.state_client.call_async(req)
-        rclpy.spin_until_future_complete(self, future)  # Force execution
+        rclpy.spin_until_future_complete(self, future)
 
     def publish_twist(self, linear, angular, duration):
         msg = Twist()
@@ -56,13 +51,11 @@ class TourGuideDemo(Node):
         msg.angular.z = float(angular)
         
         start_time = time.time()
-        # Continuously stream velocity commands at 10 Hz for the target duration
         while (time.time() - start_time) < duration:
             self.publisher_.publish(msg)
-            rclpy.spin_once(self, timeout_sec=0)  # Process ROS 2 network events and services
-            time.sleep(0.1)        # 10 Hz rate
+            rclpy.spin_once(self, timeout_sec=0)
+            time.sleep(0.1)
         
-        # Explicitly publish stop command
         msg.linear.x = 0.0
         msg.angular.z = 0.0
         self.publisher_.publish(msg)
@@ -70,34 +63,46 @@ class TourGuideDemo(Node):
         time.sleep(0.5)
 
     def run_tour(self):
-        TURN_90 = 1.57 
-        TURN_180 = 3.14
+        TURN_90_LEFT = (0.0, 0.5, 3.14)
+        TURN_90_RIGHT = (0.0, -0.5, 3.14)
+        TURN_180 = (0.0, 0.5, 6.28)
 
-        self.get_logger().info('--- Navigating to Robot 2 ---')
-        self.publish_twist(0.3, 0.0, 3.0) 
-        self.publish_twist(0.0, -1.0, TURN_90)  # Turn Right (South)
-        self.publish_twist(0.4, 0.0, 5.0)       # Corridor
-        self.publish_twist(0.0, 1.0, TURN_90)   # Turn Left (East into Room 2)
-        self.publish_twist(0.3, 0.0, 3.0)
+        # --- STEP 1: APPROACH DOOR ---
+        self.get_logger().info('--- Approaching Door ---')
+        self.publish_twist(*TURN_90_LEFT)       # Turn Left 90° (Facing North towards door)
+        self.publish_twist(0.3, 0.0, 4.3)       # Drive North to Doorway
+        self.get_logger().info('Arrived at Door. Pausing...')
+        time.sleep(2.0)
+
+        # --- STEP 2: HEAD DOWN & TURN LEFT TO ROBOT 2 ---
+        self.get_logger().info('--- 180 Turn and Heading Down to Corridor ---')
+        self.publish_twist(*TURN_180)           # Turn 180° (Facing South)
+        self.publish_twist(0.3, 0.0, 19.2)      # Drive South down hall to main corridor
+        self.get_logger().info('--- Turning Left to Approach Robot 2 ---')
+        self.publish_twist(*TURN_90_LEFT)       # Turn Left 90° (Facing East)
+        self.publish_twist(0.3, 0.0, 32.0)      # Drive East along corridor to Robot 2
         self.get_logger().info('Arrived at Robot 2. Pausing...')
         time.sleep(3.0)
 
+        # --- STEP 3: NAVIGATE TO ROBOT 3 ---
         self.get_logger().info('--- Navigating to Robot 3 ---')
-        self.publish_twist(0.0, 1.0, TURN_180)  # Turn Around 180
-        self.publish_twist(0.3, 0.0, 3.0)       # Exit Room 2
-        self.publish_twist(0.0, 1.0, TURN_90)   # Turn Left (South)
-        self.publish_twist(0.3, 0.0, 6.0)       # Drive to Robot 3
+        self.publish_twist(*TURN_180)           # Turn 180° (Facing West)
+        self.publish_twist(0.3, 0.0, 5.2)       # Drive West to Robot 3 Hallway Junction
+        self.publish_twist(*TURN_90_LEFT)       # Turn Left 90° (Facing South)
+        self.publish_twist(0.3, 0.0, 22.1)      # Drive South to Robot 3
         self.get_logger().info('Arrived at Robot 3. Pausing...')
         time.sleep(3.0)
 
-        self.get_logger().info('--- Returning to Start ---')
-        self.publish_twist(0.0, 1.0, TURN_180)  # Turn Around 180 (North)
-        self.publish_twist(0.3, 0.0, 6.0)       # Drive up
-        self.publish_twist(0.0, 1.0, TURN_90)   # Turn Left (West)
-        self.publish_twist(0.4, 0.0, 5.0)       # Corridor
-        self.publish_twist(0.0, -1.0, TURN_90)  # Turn Right (North)
-        self.publish_twist(0.3, 0.0, 3.0)       # Final drive
-        self.get_logger().info('Tour Complete. Ready for next run.')
+        # --- STEP 4: RETURN TO START ---
+        self.get_logger().info('--- Returning to Start Pose ---')
+        self.publish_twist(*TURN_180)           # Turn 180° (Facing North)
+        self.publish_twist(0.3, 0.0, 22.1)      # Drive North to Main Corridor
+        self.publish_twist(*TURN_90_LEFT)       # Turn Left 90° (Facing West)
+        self.publish_twist(0.3, 0.0, 26.8)      # Drive West to Room 1 Hallway Junction
+        self.publish_twist(*TURN_90_RIGHT)      # Turn Right 90° (Facing North into Room 1)
+        self.publish_twist(0.3, 0.0, 15.0)      # Drive North to Start position
+        self.publish_twist(*TURN_90_RIGHT)      # Turn Right 90° (Facing East to reset orientation)
+        self.get_logger().info('Tour Complete. Returned to base pose.')
 
 def main(args=None):
     rclpy.init(args=args)

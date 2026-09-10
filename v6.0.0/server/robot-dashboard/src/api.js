@@ -45,6 +45,10 @@ export const deletePersona  = (id)       => req('DELETE', `/personas/${id}`)
 // decision/ on the server. Leaving it blank is fine: the timestamp and step
 // already say what was wrong, and an operator mid-demo has no time to type.
 export const getDemoStatus = ()              => req('GET',  '/demo/status')
+// What the robots were actually told to say. /demo/status only knows the
+// current SCRIPTED step, so Q&A driven by speech never reached the feed.
+export const getDemoTranscript = (since = 0) =>
+  req('GET', `/demo/transcript?since=${since}`)
 export const startDemo     = (robotIds = [], timeBudgetSec = null,
                               visitorInterest = '', visitorStyle = 'general') => req(
   'POST', '/demo/start',

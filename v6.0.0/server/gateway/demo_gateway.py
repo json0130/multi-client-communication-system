@@ -34,7 +34,7 @@ def _reason(data: dict) -> str:
     return str((data or {}).get("reason") or "")[:500]
 
 
-def create_demo_gateway(orchestrator) -> Blueprint:
+def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
     """
     Factory — pass the DemoOrchestrator instance.
     Called from app.py after the orchestrator is created.
@@ -118,6 +118,25 @@ def create_demo_gateway(orchestrator) -> Blueprint:
         data = request.get_json(silent=True) or {}
         orchestrator.manual_next(source="operator", reason=_reason(data))
         return jsonify({"message": "Advanced to next step.", **orchestrator.get_status()})
+
+    @bp.route("/demo/transcript", methods=["GET"])
+    def transcript():
+        """What the robots have actually been told to say.
+
+        The dashboard built its feed from /demo/status, which only knows the
+        current SCRIPTED step — so every Q&A exchange driven by speech was
+        invisible to the operator. On a voice-led tour that is the whole
+        conversation, and it is exactly when an operator needs to see it.
+
+        Cursor-based: pass ?since=<seq> and get only what is new.
+        """
+        try:
+            since = int(request.args.get("since", 0))
+        except (TypeError, ValueError):
+            since = 0
+        if ws_gateway is None:
+            return jsonify({"utterances": [], "seq": 0})
+        return jsonify(ws_gateway.utterances_since(since))
 
     @bp.route("/demo/status", methods=["GET"])
     def status():

@@ -510,3 +510,56 @@ class TestAdvanceTurnsAreNotGenerated:
         spoken = [d.get("text", "") for _c, d in client.sent
                   if d.get("event") == "chat_sentence"]
         assert spoken, "a real question produced no answer"
+
+
+class TestTheHandOffIsNotRepeated:
+    """
+    A live run put the identical line in front of three consecutive answers —
+    "ChatBox can tell you more about that" before each of three questions the
+    visitor had already watched ChatBox answer. After the first, the visitor
+    knows who is speaking; repeating it is the guide narrating something
+    everyone can see.
+    """
+
+    def _wire(self):
+        registry = FakeRegistry([
+            FakeInstance(GUIDE, "Pepper", "Lab guide", AccessLevel.GLOBAL),
+            FakeInstance(A, "ChatBox", "RAG research"),
+            FakeInstance(B, "Navel", "Emotion research"),
+        ])
+        gw = WebSocketGateway(registry, recorder=DecisionRecorder(MemoryDecisionSink()),
+                              kg_router_factory=lambda: _FakeKGRouter(A))
+        orch = DemoOrchestrator(gw, session_context=gw.session_context)
+        orch.load_script(build_script(GUIDE, [A, B]))
+        gw.set_demo_orchestrator(orch)
+        orch._state = DemoState.QA_WINDOW
+        gw.send_to_robot = lambda cid, d: None
+        return gw, registry
+
+    def test_only_the_first_question_is_announced(self):
+        gw, registry = self._wire()
+        gw.on_qa_window_open()
+        first = gw.route_question(registry.get(GUIDE), "how does RAG work")[2]
+        second = gw.route_question(registry.get(GUIDE), "which model is it")[2]
+        third = gw.route_question(registry.get(GUIDE), "why locally served")[2]
+        assert first, "the first hand-off must be announced"
+        assert second is None and third is None, \
+            "repeated the hand-off the visitor had already heard"
+
+    def test_a_new_window_announces_again(self):
+        # A fresh Q&A round is a fresh context; the visitor may have missed it.
+        gw, registry = self._wire()
+        gw.on_qa_window_open()
+        gw.route_question(registry.get(GUIDE), "how does RAG work")
+        gw.on_qa_window_close()
+        gw.on_qa_window_open()
+        assert gw.route_question(registry.get(GUIDE), "and again")[2]
+
+    def test_switching_target_announces_the_new_robot(self):
+        gw, registry = self._wire()
+        gw.on_qa_window_open()
+        assert gw.route_question(registry.get(GUIDE), "how does RAG work")[2]
+        gw._kg_router_factory = lambda: _FakeKGRouter(B)
+        handoff = gw.route_question(registry.get(GUIDE), "how does emotion work")[2]
+        assert handoff and "Navel" in handoff, \
+            "a genuine change of speaker must still be announced"

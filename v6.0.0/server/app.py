@@ -470,7 +470,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 
-    demo_blueprint = create_demo_gateway(orchestrator)
+    demo_blueprint = create_demo_gateway(orchestrator, ws_gateway)
     app.register_blueprint(demo_blueprint)
 
     project_blueprint = create_project_gateway()

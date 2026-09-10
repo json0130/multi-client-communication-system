@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
-  getDemoStatus,
+  getDemoStatus, getDemoTranscript,
   startDemo, stopDemo, pauseDemo, resumeDemo, nextDemoStep,
   startQaMode, endQaMode, reviseDemo,
   getRobots, chatRobot,
@@ -165,8 +165,9 @@ const STATE_COLORS = {
   error:       { bg: '#991b1b', text: '#fee2e2' },
 }
 
-function ts() {
-  return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+function ts(when) {
+  return (when || new Date()).toLocaleTimeString(
+    [], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 // ── Sub-components ────────────────────────────────────────────────────────────
@@ -509,6 +510,10 @@ export default function DemoTab() {
   const inputRef     = useRef(null)
   const currentRef   = useRef(null)
   const lastStepKey  = useRef(null)
+  // Cursor into /demo/transcript. Q&A spoken to a robot never reached this
+  // feed — status only reports the current scripted step — so on a
+  // voice-led tour the operator saw the script and none of the conversation.
+  const lastUtterance = useRef(0)
 
   // ── Poll connected robots ────────────────────────────────────────────────────
   // Was a one-shot fetch on mount. That was fine when switching tabs remounted
@@ -584,6 +589,30 @@ export default function DemoTab() {
       addMsg({ role: 'system', text: 'Demo completed ✓', time: ts() })
     }
   }, [status, addMsg])
+
+  // ── Mirror what the robots were actually told to say ───────────────────────
+  // Scripted steps still arrive via the status effect above; this carries the
+  // Q&A the operator could not otherwise see.
+  useEffect(() => {
+    let stop = false
+    const poll = async () => {
+      try {
+        const res = await getDemoTranscript(lastUtterance.current)
+        if (stop) return
+        for (const u of res.utterances || []) {
+          lastUtterance.current = Math.max(lastUtterance.current, u.seq)
+          addMsg({ role: 'robot', robot: u.robot_name, text: u.text,
+                   time: ts(new Date(u.at * 1000)), qa: true })
+        }
+        if (typeof res.seq === 'number') {
+          lastUtterance.current = Math.max(lastUtterance.current, res.seq)
+        }
+      } catch { /* transient — the next poll retries */ }
+    }
+    poll()
+    const id = setInterval(poll, 1500)
+    return () => { stop = true; clearInterval(id) }
+  }, [addMsg])
 
   // ── Auto-scroll chat feed ───────────────────────────────────────────────────
   useEffect(() => {

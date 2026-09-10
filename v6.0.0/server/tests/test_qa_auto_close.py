@@ -64,6 +64,25 @@ class FakeRegistry:
         return [i for i in self._by_id.values() if i.client_id != exclude_id]
 
 
+# Captured before any test patches the module attribute, so the pure-function
+# tests below measure the real estimator rather than the autouse stub.
+from gateway.websocket_gateway import _speaking_seconds as REAL_SPEAKING_SECONDS
+
+
+@pytest.fixture(autouse=True)
+def _instant_speech(monkeypatch):
+    """Neutralise the speaking-time allowance for every test here.
+
+    The scheduled delay is speaking time + QA_AUTO_CLOSE_SEC, because the
+    server cannot hear the end of a sentence. These tests are about the
+    cancellation and guard logic, so they patch the constant to milliseconds
+    — leaving the ~4s speaking estimate in would just make them slow and
+    flaky. TestSpeakingTimeIsWaitedOut covers the allowance itself.
+    """
+    monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                        lambda _t: 0.0)
+
+
 @pytest.fixture
 def wired():
     registry = FakeRegistry([
@@ -252,3 +271,40 @@ class TestTheGuardUsesTheRealGuide:
     def test_the_interval_is_three_seconds(self):
         from gateway.websocket_gateway import QA_AUTO_CLOSE_SEC
         assert QA_AUTO_CLOSE_SEC == 3.0
+
+
+class TestSpeakingTimeIsWaitedOut:
+    """
+    The countdown starts when GENERATION finishes, not when the robot stops
+    talking — there is no end-of-TTS signal for streamed sentences. So a
+    robot that signs off by ASKING something ("Is there anything else you'd
+    like to know?") had the tour move on before the question finished
+    playing. Reported exactly that way.
+
+    The fix waits out an estimate of the speech first, so the pause means
+    what it says: silence AFTER the robot finishes.
+    """
+
+    LONG = ("Great! Is there anything else you'd like to know about how I "
+            "work in real-life situations?")
+
+    def test_a_longer_sign_off_waits_longer(self):
+        assert (REAL_SPEAKING_SECONDS(self.LONG)
+                > REAL_SPEAKING_SECONDS("Thanks!"))
+
+    def test_the_estimate_is_capped(self):
+        # A wrong estimate must not park the tour indefinitely.
+        assert REAL_SPEAKING_SECONDS("word " * 5000) <= 20.0
+
+    def test_empty_text_costs_nothing(self):
+        assert REAL_SPEAKING_SECONDS("") == 0.0
+
+    def test_the_allowance_is_added_to_the_pause(self, wired, monkeypatch):
+        # With speaking time restored, a sign-off that takes seconds to say
+        # must not close within the bare pause.
+        gw, orch, _, closed = wired
+        monkeypatch.undo()   # drop the autouse zeroing for this one
+        monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
+        gw.check_qa_auto_close(A, self.LONG)
+        _settle(0.3)
+        assert closed == [], "closed while the robot was still speaking"
