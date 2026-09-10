@@ -851,13 +851,26 @@ class WebSocketGateway:
         recorded for the topic — which puts the robot back where it was
         before the facts table existed: able to talk generally, and
         instructed to decline specifics rather than invent them.
+
+        Then FOLLOWS THE TOPIC LINKS one hop. The graph was doing two jobs
+        unevenly: links generalised a routing correction to neighbouring
+        topics (decision/kg.py), but retrieval read a single node and
+        stopped, so the structured relationships existed and were never
+        traversed to answer anything. A visitor asking how retrieval works
+        gets an answer grounded in retrieval alone, when the graph already
+        records that large language models, conversational memory and
+        knowledge graphs are part of the same answer.
+
+        One hop, strong links only, a handful of rows — see
+        decision/grounding.py. Own-topic facts are never displaced.
         """
         try:
             router = self._kg_router_factory() if self._kg_router_factory else None
             if router is None:
                 return []
-            from data import demo_facts_repo
-            from decision.grounding import format_facts
+            from data import demo_facts_repo, demo_kg_repo
+            from decision.grounding import (NEIGHBOUR_MIN_WEIGHT, format_facts,
+                                            with_related)
             topic_id = router.resolve_topic(utterance)
             if not topic_id:
                 # No topic, so no targeted facts — but handing the model
@@ -865,9 +878,39 @@ class WebSocketGateway:
                 # asked during a robot's own block is almost certainly about
                 # its work, so ground on everything that robot may state.
                 return format_facts(demo_facts_repo.facts_for_robot(robot_id))
-            return format_facts(demo_facts_repo.facts_for(topic_id, robot_id))
+
+            own = demo_facts_repo.facts_for(topic_id, robot_id)
+            related = self._related_facts(topic_id, robot_id, NEIGHBOUR_MIN_WEIGHT)
+            return format_facts(with_related(own, related))
         except Exception as e:
             logger.warning(f"[WS Gateway] grounding lookup failed: {e}")
+            return []
+
+    def _related_facts(self, topic_id: str, robot_id: str, min_weight: float):
+        """[(topic_label, rows)] for the linked topics worth reading, strongest
+        link first.
+
+        Best-effort and separate from grounding_for so a failure here costs
+        the expansion, not the grounding: the robot still gets everything
+        recorded about the subject it was actually asked about.
+        """
+        from data import demo_facts_repo, demo_kg_repo
+        try:
+            neighbours = [(tid, float(w))
+                          for tid, w in demo_kg_repo.neighbours(topic_id)
+                          if float(w) >= min_weight]
+            if not neighbours:
+                return []
+            neighbours.sort(key=lambda nw: -nw[1])
+            labels = {t["id"]: t.get("label") or t["id"]
+                      for t in demo_kg_repo.all_topics()}
+            by_topic = demo_facts_repo.facts_for_topics(
+                [tid for tid, _ in neighbours], robot_id)
+            return [(labels.get(tid, tid), by_topic.get(tid) or [])
+                    for tid, _ in neighbours
+                    if by_topic.get(tid)]
+        except Exception as e:
+            logger.warning(f"[WS Gateway] topic-link expansion failed: {e}")
             return []
 
     def check_qa_auto_close(self, responding_robot_id: str, clean_text: str):

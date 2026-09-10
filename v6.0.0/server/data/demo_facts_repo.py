@@ -87,6 +87,44 @@ def facts_for(topic_id: str, robot_id: Optional[str] = None,
     return _spread(mine, limit)
 
 
+def facts_for_topics(topic_ids: list[str], robot_id: Optional[str] = None,
+                     per_topic: int = 4) -> dict[str, list[dict]]:
+    """facts_for over several topics in ONE query, keyed by topic id.
+
+    Used for topic-link expansion, where the caller has three or four
+    neighbouring topics to read. A query each would put four Supabase round
+    trips between a visitor finishing their question and the robot starting
+    to answer, which is a live demonstration's most expensive currency.
+
+    Same robot scoping as facts_for, and it matters more here: a neighbouring
+    topic usually belongs to a DIFFERENT robot — social robot navigation sits
+    next to social signals, which is Navel's — and following a link must not
+    become a way for one robot to narrate another's results. Only this
+    robot's own rows and topic-general ones cross the hop.
+    """
+    ids = [t for t in (topic_ids or []) if t]
+    if not ids:
+        return {}
+    try:
+        rows = (get_client().table(TABLE).select("*")
+                .in_("topic_id", ids).execute().data or [])
+    except Exception as e:
+        print(f"[demo_facts_repo] facts_for_topics error: {e}")
+        return {}
+    out: dict[str, list[dict]] = {}
+    for tid in ids:
+        mine = [r for r in rows
+                if r.get("topic_id") == tid
+                and (not r.get("robot_id") or r.get("robot_id") == robot_id)]
+        mine.sort(key=lambda r: (
+            KIND_ORDER.index(r["kind"]) if r["kind"] in KIND_ORDER else 99,
+            not r.get("verified"),
+            r.get("id", 0),
+        ))
+        out[tid] = _spread(mine, per_topic)
+    return out
+
+
 def facts_for_robot(robot_id: str, limit: int = 10) -> list[dict]:
     """Everything this robot may state, across all of its own topics.
 

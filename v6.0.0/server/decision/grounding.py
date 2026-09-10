@@ -41,5 +41,66 @@ def format_facts(rows: Iterable[dict]) -> list[str]:
         kind = (r.get("kind") or "").strip()
         mark = "" if r.get("verified") else f" [{UNVERIFIED}]"
         scope = "" if r.get("robot_id") else " (background, not your own result)"
-        out.append(f"{kind}: {text}{scope}{mark}")
+        # Reached by following a topic link rather than by being about the
+        # subject asked. Named, because a fact about large language models
+        # offered in answer to a question about retrieval is useful context
+        # and a wrong answer to the question — the robot has to be able to
+        # tell the difference, and so does the visitor.
+        related = (r.get("related_topic") or "").strip()
+        rel = f" (related topic: {related})" if related else ""
+        out.append(f"{kind}: {text}{rel}{scope}{mark}")
+    return out
+
+
+NEIGHBOUR_MIN_WEIGHT = 0.5
+"""How strongly two topics must be linked before one grounds an answer about
+the other.
+
+The seeded link graph spans 0.40 to 0.85. At 0.5 a question about retrieval
+reaches large language models (0.80), conversational memory (0.70) and
+knowledge graphs (0.65) — the neighbours a visitor would consider part of the
+same answer — while robot hardware / text-to-speech (0.40) stays out."""
+
+NEIGHBOUR_FACT_LIMIT = 3
+"""How many related-topic facts may join an answer.
+
+Small on purpose. The topic asked about supplies up to ten lines already, and
+these are additive: the point is to reach a fact the neighbouring node holds,
+not to hand the model a second topic's worth of material to drift into."""
+
+
+def with_related(own: list[dict], related: list[tuple[str, list[dict]]],
+                 limit: int = NEIGHBOUR_FACT_LIMIT) -> list[dict]:
+    """Own-topic rows, then up to `limit` rows reached through topic links.
+
+    `related` is [(topic_label, rows)] in descending link weight — strongest
+    neighbour first, and one row taken from each before any neighbour offers
+    a second, so a single well-connected topic cannot fill the whole
+    allowance.
+
+    Own rows are never displaced. They are what the visitor asked about; a
+    neighbour's fact earns its place only in space the answer was not already
+    using.
+    """
+    out = list(own)
+    seen = {r.get("id") for r in own}
+    queues = [(label, [r for r in rows if r.get("id") not in seen])
+              for label, rows in related]
+    taken = 0
+    while taken < limit:
+        moved = False
+        for label, queue in queues:
+            if not queue:
+                continue
+            row = queue.pop(0)
+            if row.get("id") in seen:
+                continue
+            seen.add(row.get("id"))
+            out.append({**row, "related_topic": label})
+            taken += 1
+            moved = True
+            if taken >= limit:
+                break
+        if not moved:
+            break
     return out

@@ -191,3 +191,113 @@ class TestCaveatsCannotCrowdOutTheSpecifics:
         rows = self._rows([("method", True), ("anecdote", True)])
         kinds = [r["kind"] for r in self._spread(rows, 8)]
         assert "anecdote" in kinds and kinds[0] == "method"
+
+
+class TestFollowingTheTopicLinks:
+    """
+    The graph was doing its two jobs unevenly. Topic links generalised a
+    routing correction to neighbouring topics (decision/kg.py), but retrieval
+    read a single node and stopped — so the structured relationships existed
+    and were never traversed to answer anything.
+
+    A visitor asking how retrieval works got an answer grounded in retrieval
+    alone, when the graph already recorded that large language models,
+    conversational memory and knowledge graphs are part of the same answer.
+    """
+
+    def _row(self, i, kind="method", robot="chatbox_01", verified=True):
+        return {"id": i, "kind": kind, "fact": f"fact {i}",
+                "robot_id": robot, "verified": verified}
+
+    def test_own_facts_come_first_and_are_all_kept(self):
+        from decision.grounding import with_related
+        own = [self._row(1), self._row(2)]
+        out = with_related(own, [("llm", [self._row(9)])])
+        assert [r["id"] for r in out[:2]] == [1, 2]
+
+    def test_a_related_fact_is_named_as_related(self):
+        # A fact about large language models offered in answer to a question
+        # about retrieval is useful context and a wrong answer to the
+        # question. The robot has to be able to tell the difference.
+        from decision.grounding import format_facts, with_related
+        out = with_related([self._row(1)], [("large language models", [self._row(9)])])
+        lines = format_facts(out)
+        assert "related topic: large language models" in lines[1]
+        assert "related topic" not in lines[0]
+
+    def test_the_allowance_is_shared_between_neighbours(self):
+        # One well-connected topic must not fill the whole allowance while a
+        # weaker link with something relevant to say gets nothing.
+        from decision.grounding import with_related
+        out = with_related(
+            [],
+            [("a", [self._row(10), self._row(11), self._row(12)]),
+             ("b", [self._row(20)]),
+             ("c", [self._row(30)])],
+            limit=3,
+        )
+        assert [r["related_topic"] for r in out] == ["a", "b", "c"]
+
+    def test_the_strongest_link_goes_first(self):
+        from decision.grounding import with_related
+        out = with_related([], [("strong", [self._row(10)]),
+                                ("weak", [self._row(20)])], limit=2)
+        assert [r["related_topic"] for r in out] == ["strong", "weak"]
+
+    def test_related_facts_are_capped(self):
+        from decision.grounding import with_related
+        out = with_related([self._row(1)],
+                           [("a", [self._row(i) for i in range(10, 40)])],
+                           limit=3)
+        assert len(out) == 4
+
+    def test_a_fact_already_present_is_not_repeated(self):
+        from decision.grounding import with_related
+        own = [self._row(1)]
+        out = with_related(own, [("a", [self._row(1), self._row(2)])], limit=3)
+        assert [r["id"] for r in out] == [1, 2]
+
+    def test_no_neighbours_changes_nothing(self):
+        from decision.grounding import with_related
+        own = [self._row(1), self._row(2)]
+        assert with_related(own, []) == own
+
+    def test_the_threshold_excludes_the_weakest_links(self):
+        # The seeded link graph spans 0.40 to 0.85. Retrieval should reach
+        # large language models (0.80), not robot hardware (0.40).
+        from decision.grounding import NEIGHBOUR_MIN_WEIGHT
+        assert 0.40 < NEIGHBOUR_MIN_WEIGHT <= 0.65
+
+
+class TestALinkIsNotALicenceToQuoteAColleague:
+    """
+    A neighbouring topic usually belongs to a DIFFERENT robot — social robot
+    navigation sits next to social signals, which is Navel's. facts_for
+    already refuses to hand one robot another's results; following a link
+    must not become a way around it.
+    """
+
+    def test_only_own_and_general_rows_cross_the_hop(self, monkeypatch):
+        from data import demo_facts_repo
+
+        rows = [
+            {"id": 1, "topic_id": "t:sig", "robot_id": "navel_01",
+             "kind": "method", "fact": "navel's own result", "verified": True},
+            {"id": 2, "topic_id": "t:sig", "robot_id": None,
+             "kind": "method", "fact": "general background", "verified": True},
+            {"id": 3, "topic_id": "t:sig", "robot_id": "silbot_01",
+             "kind": "method", "fact": "silbot's own result", "verified": True},
+        ]
+
+        class _Table:
+            def select(self, *a): return self
+            def in_(self, *a): return self
+            def execute(self): return type("R", (), {"data": rows})()
+
+        monkeypatch.setattr(demo_facts_repo, "get_client",
+                            lambda: type("C", (), {"table": lambda s, t: _Table()})())
+        got = demo_facts_repo.facts_for_topics(["t:sig"], "silbot_01")
+        facts = [r["fact"] for r in got["t:sig"]]
+        assert "navel's own result" not in facts
+        assert "general background" in facts
+        assert "silbot's own result" in facts
