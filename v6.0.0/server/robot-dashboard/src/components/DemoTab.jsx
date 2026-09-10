@@ -494,8 +494,12 @@ export default function DemoTab() {
   const [reason,       setReason]       = useState('')
 
   // ── TTS state ───────────────────────────────────────────────────────────────
-  const [ttsEnabled, setTtsEnabled] = useState(true)
-  const ttsRef = useRef(true)                          // readable inside effects without re-running them
+  // Browser TTS is OFF by default. The robot clients speak through their own
+  // audio; with this on as well, every line played twice — once from the
+  // headset and once from the machine running the dashboard. The toggle stays
+  // for working without robots attached, where the browser is the only voice.
+  const [ttsEnabled, setTtsEnabled] = useState(false)
+  const ttsRef = useRef(false)                         // readable inside effects without re-running them
   useEffect(() => { ttsRef.current = ttsEnabled }, [ttsEnabled])
 
   // ── Chat state ──────────────────────────────────────────────────────────────
@@ -683,33 +687,13 @@ export default function DemoTab() {
     const name = robots.find(r => r.client_id === targetId)?.robot_name || targetId
     setThinking({ robot: name, time: ts() })
     try {
-      const res = await chatRobot(targetId, text)
-      if (res.delegation_result) {
-        // Delegation: hide Pepper's internal handoff message; show only the target's answer.
-        const dr = res.delegation_result
-        addMsg({ role: 'robot', robot: dr.robot_name, text: dr.clean_text, time: ts() })
-        const drId = robots.find(r => r.robot_name === dr.robot_name)?.client_id || ''
-        if (ttsRef.current) browserSpeak(dr.clean_text, drId)
-      } else {
-        // A question asked of one robot can be ANSWERED by another — the
-        // competence graph reroutes it. Attributing the reply to whoever was
-        // typed to made the transcript wrong and, worse, spoke ChatBox's
-        // answer in Pepper's voice. Use who actually answered.
-        const answeredId = res.answered_by || targetId
-        const answeredName =
-          robots.find(r => r.client_id === answeredId)?.robot_name || answeredId
-        // The receiver's hand-off line, shown as its own turn so the change
-        // of voice is explained rather than unaccountable.
-        if (res.handoff) {
-          addMsg({ role: 'robot', robot: name, text: res.handoff, time: ts() })
-          if (ttsRef.current) browserSpeak(res.handoff, targetId)
-        }
-        const reply = (res.clean_text || res.response || '').trim()
-        if (reply) {
-          addMsg({ role: 'robot', robot: answeredName, text: reply, time: ts() })
-          if (ttsRef.current) browserSpeak(reply, answeredId)
-        }
-      }
+      // Deliberately adds NOTHING to the feed. Every robot line — the
+      // hand-off, the answer, a delegated reply — reaches the transcript
+      // poll, because they all go through send_to_robot. Adding them here
+      // too printed each one twice, and printed the API's internal
+      // "Resuming demonstration." placeholder as if ChatBox had said it.
+      // One source, and it is the one that also covers spoken questions.
+      await chatRobot(targetId, text)
     } catch (e) {
       addMsg({ role: 'system', text: `Error: ${e.message}`, time: ts() })
     } finally {
@@ -768,7 +752,9 @@ export default function DemoTab() {
           {/* TTS toggle */}
           <button
             className={`btn btn-sm ${ttsEnabled ? 'btn-tts-on' : ''}`}
-            title={ttsEnabled ? 'Mute browser TTS' : 'Unmute browser TTS'}
+            title={ttsEnabled
+              ? 'Mute browser TTS — the robots are already speaking'
+              : 'Speak here too (for working without robots attached)'}
             onClick={() => {
               if (ttsEnabled) window.speechSynthesis?.cancel()
               setTtsEnabled(v => !v)

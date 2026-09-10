@@ -948,7 +948,16 @@ class WebSocketGateway:
         """
         change = getattr(self._scratch, "plan_change", None)
         if not change:
-            return ADVANCE_ACK.get(mechanism, ADVANCE_ACK["default"])
+            # NOTHING to announce, so say nothing. A visitor who says "no more
+            # questions" then hears the guide say "Great! Let's continue with
+            # the demonstration then!" is being told something the tour is
+            # about to demonstrate by simply continuing — and it puts the
+            # guide in front of a robot that was mid-presentation. The tour
+            # resuming IS the acknowledgement.
+            #
+            # A plan CHANGE is different: the visitor cannot see that from the
+            # tour resuming, because what changed is what is no longer coming.
+            return ""
         lead = ADVANCE_ACK_WITH_CHANGE.get(mechanism,
                                            ADVANCE_ACK_WITH_CHANGE["default"])
         return f"{lead} — {change}."
@@ -1255,14 +1264,16 @@ class WebSocketGateway:
                         # a turn that has nothing to answer, and time
                         # pressure is the case where spending seconds is
                         # exactly wrong.
-                        guide_id, _p = guide_and_presenter(
-                            self._demo_orchestrator.get_status())
-                        self.send_to_robot(guide_id or client_id, {
-                            "event": "demo_step",
-                            "step_id": "_qa_advance_ack",
-                            "text": self.advance_ack_text(result.mechanism),
-                            "require_ack": False,
-                        })
+                        ack = self.advance_ack_text(result.mechanism)
+                        if ack:
+                            guide_id, _p = guide_and_presenter(
+                                self._demo_orchestrator.get_status())
+                            self.send_to_robot(guide_id or client_id, {
+                                "event": "demo_step",
+                                "step_id": "_qa_advance_ack",
+                                "text": ack,
+                                "require_ack": False,
+                            })
                         return
 
                     # A nod, not a question. Answered from a fixed line rather

@@ -472,22 +472,24 @@ class TestAdvanceTurnsAreNotGenerated:
                     if d.get("step_id") == "_qa_advance_ack")
         assert "skip" in text.lower(), f"the ack did not say what was cut: {text!r}"
 
-    def test_an_advance_that_changes_nothing_is_just_the_courtesy(self, client):
-        """"lets move on" closes the window and revises nothing, so there is
-        nothing to announce.
+    def test_an_advance_that_changes_nothing_says_nothing(self, client):
+        """"lets move on" closes the window and revises nothing, so the guide
+        stays quiet and the tour simply resumes.
 
-        Note that "we are running out of time" is NOT this case — it still
-        compresses the remaining blocks, and the ack correctly says so. Which
-        is the point of naming the change rather than the mechanism: the same
-        phrase family produces different edits, and the visitor should hear
-        which one they got.
+        It used to say "Great! Let's continue with the demonstration then!",
+        which tells the visitor something the tour is about to demonstrate by
+        continuing — and puts the guide in front of a robot that was
+        mid-presentation. Reported as unnecessary, and it is: the tour
+        resuming IS the acknowledgement.
+
+        A plan CHANGE is the opposite case and still speaks, because what
+        changed is what is no longer coming and the visitor cannot see that
+        from the tour resuming.
         """
         client.post(f"/robots/{A}/chat", json={"message": "lets move on"})
-        text = next(d["text"] for _c, d in client.sent
-                    if d.get("step_id") == "_qa_advance_ack")
-        low = text.lower()
-        assert "skip" not in low and "wrap-up" not in low, \
-            f"announced a change that did not happen: {text!r}"
+        acks = [d for _c, d in client.sent
+                if d.get("step_id") == "_qa_advance_ack"]
+        assert acks == [], f"spoke when nothing had changed: {acks}"
 
     def test_plain_time_pressure_announces_the_compression(self, client):
         # Time pressure with no explicit skip still tightens the tour, and
