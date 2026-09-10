@@ -430,7 +430,7 @@ class HeuristicPolicy:
         utterance = obs.user_utterance or ""
 
         if _matches(utterance, SKIP_PHRASES):
-            target = self._named_robot(utterance, obs) or obs.presenting_robot_id
+            target = self._named_robot(utterance, obs) or self._next_block(obs)
             if target:
                 return PolicyResult(
                     Action.revise([PlanOp(PlanOpKind.SKIP, robot_id=target)]),
@@ -516,6 +516,33 @@ class HeuristicPolicy:
                 return peer.get("client_id")
             if cid and len(cid) > 2 and cid in t:
                 return peer.get("client_id")
+        return None
+
+    def _next_block(self, obs: Observation) -> Optional[str]:
+        """Whose part of the tour "skip this" means, when no robot is named.
+
+        The block AHEAD of the play head, never the presenting robot. That
+        was the original rule and it is wrong at exactly the moment visitors
+        ask: presenting_robot_id is "the most recent non-guide robot at or
+        before the current step", so while the guide is introducing the next
+        project it still names the one that just finished. A live run had a
+        visitor say "I'm actually running out of time so can we skip?" three
+        times — the first two landed on Silbot, whose block was already
+        entirely behind the play head, so revise_script had nothing to remove
+        and the tour carried on as if nothing had been said. The third
+        arrived once Navel itself was speaking, and only then did the skip do
+        anything.
+
+        Reading it off remaining_steps makes the no-op case impossible by
+        construction: whatever this returns has steps left to drop. None when
+        no project block remains at all — nothing to skip, and the caller
+        falls through to the time-pressure branch rather than issuing an op
+        that cannot apply.
+        """
+        for step in obs.remaining_steps:
+            block = getattr(step, "block_robot_id", None)
+            if block:
+                return block
         return None
 
     def _remaining_projects(self, obs: Observation) -> list[str]:

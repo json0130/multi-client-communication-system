@@ -108,6 +108,18 @@ export default function KGTab() {
     return topics.filter(t => seen.has(t.id))
   }, [topics, edges, showAll])
 
+  // The graph shows a topic as soon as SOME robot is linked to it, observed
+  // or not. The matrix can afford the stricter rule — its unobserved cells
+  // are grey squares in a grid that still reads as a grid — but a graph
+  // filtered the same way loses the nodes AND the lines to them, leaving
+  // robots floating unconnected as though nothing had been configured. The
+  // "show unobserved" box then adds the topics nothing is linked to at all.
+  const graphTopics = useMemo(() => {
+    if (showAll) return topics
+    const linked = new Set(edges.map(e => e.topic_id))
+    return topics.filter(t => linked.has(t.id))
+  }, [topics, edges, showAll])
+
   const sel = selected ? edgeAt(selected.robot_id, selected.topic_id) : null
   const selTopic = selected ? topics.find(t => t.id === selected.topic_id) : null
 
@@ -128,6 +140,7 @@ export default function KGTab() {
           <div className="muted" style={{ fontSize: '0.76rem', marginTop: 2 }}>
             What the system has learned about which robot handles which subject.
             Green = good fit, red = poor fit, grey = not enough evidence.
+            {view === 'graph' && ' A dashed line is a subject the robot is configured to own, with nothing observed about it yet.'}
           </div>
         </div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -177,12 +190,12 @@ export default function KGTab() {
       )}
 
       {/* ── Matrix ─────────────────────────────────────────────────────── */}
-      {visibleTopics.length > 0 && (
+      {(view === 'graph' ? graphTopics : visibleTopics).length > 0 && (
         <div className="kg-body">
           {view === 'graph' ? (
             <div className="kg-matrix-wrap" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
               <KGGraphView
-                topics={visibleTopics}
+                topics={graphTopics}
                 links={links}
                 edges={edges}
                 robots={robots}

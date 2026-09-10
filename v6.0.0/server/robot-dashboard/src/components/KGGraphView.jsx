@@ -49,7 +49,18 @@ function seededPos(id) {
 }
 
 export default function KGGraphView({ topics, links, edges, robots, robotIds, selected, onSelect }) {
-  const observedEdges = useMemo(() => edges.filter(e => e.n_obs > 0), [edges])
+  // Every DECLARED edge is drawn, observed or not. Only observed ones used to
+  // be, and with a fresh graph that left four robots as unconnected dots and
+  // one lone link — a picture that reads as "nothing is wired up" when in
+  // fact each robot's whole subject scope was sitting in the payload,
+  // n_obs = 0. Declared scope is configuration, not evidence, so hiding it
+  // behind an evidence threshold answers a question nobody asked.
+  //
+  // The distinction still has to be visible, so it is carried in the STROKE
+  // (see below) rather than in whether the line exists: solid and coloured
+  // for something the system has actually observed, dashed and faint for a
+  // subject it has merely been told this robot owns.
+  const competenceEdges = edges
 
   // ── Node/edge model, rebuilt only when the DATA (not physics) changes ──────
   const { nodeList, linkList } = useMemo(() => {
@@ -60,13 +71,14 @@ export default function KGGraphView({ topics, links, edges, robots, robotIds, se
     ]
     const edgeLinks = [
       ...links.map(l => ({ a: l.topic_a, b: l.topic_b, kind: 'topic_link', weight: l.weight })),
-      ...observedEdges.map(e => ({
+      ...competenceEdges.map(e => ({
         a: e.robot_id, b: e.topic_id, kind: 'competence',
         clamped: e.clamped, confidence: e.confidence,
+        observed: e.n_obs > 0,
       })),
     ]
     return { nodeList: nodes, linkList: edgeLinks }
-  }, [topics, links, robotIds, robots, observedEdges])
+  }, [topics, links, robotIds, robots, competenceEdges])
 
   // Physics state lives in a ref (mutated every frame) so re-renders don't
   // fight the simulation; a small tick counter in React state repaints the SVG.
@@ -195,6 +207,19 @@ export default function KGGraphView({ topics, links, edges, robots, robotIds, se
           )
         }
         const isSel = selected?.robot_id === l.a && selected?.topic_id === l.b
+        // Declared but never observed: the robot owns the subject, the system
+        // has no evidence about how well it handles it. Dashed and faint, so
+        // scope reads as scope and is never mistaken for a learned opinion.
+        if (!l.observed) {
+          return (
+            <line key={`ce${i}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
+                  stroke="var(--border)" strokeWidth={isSel ? 3 : 1.2}
+                  strokeDasharray="4 4"
+                  opacity={faded ? 0.08 : 0.5}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => onSelect({ robot_id: l.a, topic_id: l.b })} />
+          )
+        }
         return (
           <line key={`ce${i}`} x1={pa.x} y1={pa.y} x2={pb.x} y2={pb.y}
                 stroke={edgeColor(l.clamped)}

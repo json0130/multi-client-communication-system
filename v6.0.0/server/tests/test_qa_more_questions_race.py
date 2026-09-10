@@ -547,6 +547,24 @@ class TestAdvanceTurnsAreNotGenerated:
                     if d.get("step_id") == "_qa_advance_ack")
         assert "short" in text.lower() or "brief" in text.lower(), text
 
+    def test_time_pressure_is_answered_even_when_nothing_changes(
+            self, client, ws_gateway):
+        """Silence in answer to a request is indistinguishable from ignoring it.
+
+        A live run had a visitor say "I'm actually running out of time so can
+        we skip?" and hear nothing at all — so they said it again, and again,
+        three times in a row. Two of those did fail to change the plan (the
+        skip was landing on a block that had already finished), but the
+        visible failure was that nobody answered them.
+        """
+        ws_gateway.check_plan_revision = lambda *a, **k: False
+        client.post(f"/robots/{A}/chat",
+                    json={"message": "i am actually running out of time so can we skip?"})
+        text = next((d["text"] for _c, d in client.sent
+                     if d.get("step_id") == "_qa_advance_ack"), None)
+        assert text, "the visitor's request went unanswered"
+        assert "brief" in text.lower() or "short" in text.lower(), text
+
     def test_a_plain_advance_phrase_also_ends_the_turn(self, client):
         client.post(f"/robots/{A}/chat", json={"message": "lets move on"})
         spoken = [d.get("text", "") for _c, d in client.sent

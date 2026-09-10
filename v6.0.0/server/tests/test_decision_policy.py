@@ -83,6 +83,16 @@ def robot_turn(text: str, **kw) -> Observation:
     return Observation(**base)
 
 
+def _ahead(*block_robot_ids):
+    """The tour still to come, one project step per block named."""
+    from decision.flow import StepRef
+    return tuple(
+        StepRef(step_id=f"{rid}_project", robot_id=rid, role="project",
+                block_robot_id=rid)
+        for rid in block_robot_ids
+    )
+
+
 def decide(obs, point=DecisionPoint.QA_ADVANCE, **kw):
     return HeuristicPolicy(**kw).decide(point, obs)
 
@@ -377,9 +387,56 @@ class TestPlanRevision:
         assert r.action.ops[0].kind is PlanOpKind.SKIP
         assert r.action.ops[0].robot_id == ROBOT_B
 
-    def test_skip_request_without_a_name_targets_the_presenter(self):
-        r = decide(visitor_turn("we can skip this one"), point=DecisionPoint.PLAN_REVISE)
+    def test_skip_request_without_a_name_targets_what_is_still_ahead(self):
+        r = decide(
+            visitor_turn("we can skip this one", remaining_steps=_ahead(ROBOT_A)),
+            point=DecisionPoint.PLAN_REVISE,
+        )
         assert r.action.ops[0].robot_id == ROBOT_A
+
+    def test_skip_does_not_target_a_block_that_already_finished(self):
+        # The reported run: "I'm actually running out of time so can we skip?"
+        # said three times while the guide was introducing Navel.
+        # presenting_robot_id is "the most recent non-guide robot at or before
+        # the current step", which is still Silbot there — a block entirely
+        # behind the play head, so revise_script had nothing to remove and the
+        # tour carried on as if nothing had been said.
+        r = decide(
+            visitor_turn("can we skip?",
+                         presenting_robot_id=ROBOT_A,      # the block just finished
+                         remaining_steps=_ahead(ROBOT_B)),  # the one coming up
+            point=DecisionPoint.PLAN_REVISE,
+        )
+        assert r.mechanism == Mechanism.SKIP_REQUEST
+        assert r.action.ops[0].robot_id == ROBOT_B, \
+            "skipped the project the visitors had already seen"
+
+    def test_a_named_robot_still_wins_over_what_is_next(self):
+        r = decide(
+            visitor_turn("can we skip Navel", remaining_steps=_ahead(ROBOT_A)),
+            point=DecisionPoint.PLAN_REVISE,
+        )
+        assert r.action.ops[0].robot_id == ROBOT_B
+
+    def test_the_current_block_is_skippable_from_inside_it(self):
+        # Asked during a project's own Q&A, "skip this" means the rest of
+        # THIS block — which is still ahead of the play head.
+        r = decide(
+            visitor_turn("can we skip this", presenting_robot_id=ROBOT_A,
+                         remaining_steps=_ahead(ROBOT_A, ROBOT_B)),
+            point=DecisionPoint.PLAN_REVISE,
+        )
+        assert r.action.ops[0].robot_id == ROBOT_A
+
+    def test_nothing_left_to_skip_issues_no_skip(self):
+        # Only the closing remains. An op that cannot apply is worse than no
+        # op: it reads as agreement and changes nothing.
+        r = decide(
+            visitor_turn("can we skip this", presenting_robot_id=ROBOT_A,
+                         remaining_steps=()),
+            point=DecisionPoint.PLAN_REVISE,
+        )
+        assert r.mechanism != Mechanism.SKIP_REQUEST
 
     @pytest.mark.parametrize("phrase", SKIP_PHRASES)
     def test_every_skip_phrase_is_recognized(self, phrase):

@@ -1074,12 +1074,21 @@ class WebSocketGateway:
         """
         change = getattr(self._scratch, "plan_change", None)
         if not change:
-            # NOTHING to announce, so say nothing. A visitor who says "no more
-            # questions" then hears the guide say "Great! Let's continue with
-            # the demonstration then!" is being told something the tour is
-            # about to demonstrate by simply continuing — and it puts the
-            # guide in front of a robot that was mid-presentation. The tour
-            # resuming IS the acknowledgement.
+            # A stated time problem is a REQUEST, and silence in answer to a
+            # request is indistinguishable from being ignored. A live run had
+            # a visitor say "I'm actually running out of time so can we skip?"
+            # and hear nothing at all — so they said it again, and again.
+            # Even when nothing about the plan can change, they get told the
+            # tour heard them.
+            if mechanism == Mechanism.TIME_PRESSURE:
+                return ADVANCE_ACK[Mechanism.TIME_PRESSURE]
+
+            # Otherwise say nothing. A visitor who says "no more questions"
+            # then hears the guide say "Great! Let's continue with the
+            # demonstration then!" is being told something the tour is about
+            # to demonstrate by simply continuing — and it puts the guide in
+            # front of a robot that was mid-presentation. The tour resuming
+            # IS the acknowledgement.
             #
             # A plan CHANGE is different: the visitor cannot see that from the
             # tour resuming, because what changed is what is no longer coming.
