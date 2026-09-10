@@ -63,7 +63,7 @@ def _spread(rows: list[dict], limit: int) -> list[dict]:
 
 
 def facts_for(topic_id: str, robot_id: Optional[str] = None,
-              limit: int = 10) -> list[dict]:
+              limit: int = 6) -> list[dict]:
     """Facts to ground one answer: this robot's own, plus topic-general ones.
 
     Another robot's facts about the same topic are deliberately excluded —
@@ -88,7 +88,7 @@ def facts_for(topic_id: str, robot_id: Optional[str] = None,
 
 
 def facts_for_topics(topic_ids: list[str], robot_id: Optional[str] = None,
-                     per_topic: int = 4) -> dict[str, list[dict]]:
+                     per_topic: int = 6) -> dict[str, list[dict]]:
     """facts_for over several topics in ONE query, keyed by topic id.
 
     Used for topic-link expansion, where the caller has three or four

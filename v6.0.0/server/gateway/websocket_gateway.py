@@ -879,38 +879,23 @@ class WebSocketGateway:
                 # its work, so ground on everything that robot may state.
                 return format_facts(demo_facts_repo.facts_for_robot(robot_id))
 
-            own = demo_facts_repo.facts_for(topic_id, robot_id)
-            related = self._related_facts(topic_id, robot_id, NEIGHBOUR_MIN_WEIGHT)
+            # One read for the topic AND its neighbours. Grounding sits
+            # between a visitor finishing their question and the robot
+            # starting to answer, so every round trip here is silence in the
+            # room.
+            neighbours = sorted(
+                ((tid, float(w)) for tid, w in demo_kg_repo.neighbours(topic_id)
+                 if float(w) >= NEIGHBOUR_MIN_WEIGHT),
+                key=lambda nw: -nw[1])
+            by_topic = demo_facts_repo.facts_for_topics(
+                [topic_id] + [tid for tid, _ in neighbours], robot_id)
+            own = by_topic.get(topic_id) or []
+            labels = demo_kg_repo.topic_labels()
+            related = [(labels.get(tid, tid), by_topic[tid])
+                       for tid, _ in neighbours if by_topic.get(tid)]
             return format_facts(with_related(own, related))
         except Exception as e:
             logger.warning(f"[WS Gateway] grounding lookup failed: {e}")
-            return []
-
-    def _related_facts(self, topic_id: str, robot_id: str, min_weight: float):
-        """[(topic_label, rows)] for the linked topics worth reading, strongest
-        link first.
-
-        Best-effort and separate from grounding_for so a failure here costs
-        the expansion, not the grounding: the robot still gets everything
-        recorded about the subject it was actually asked about.
-        """
-        from data import demo_facts_repo, demo_kg_repo
-        try:
-            neighbours = [(tid, float(w))
-                          for tid, w in demo_kg_repo.neighbours(topic_id)
-                          if float(w) >= min_weight]
-            if not neighbours:
-                return []
-            neighbours.sort(key=lambda nw: -nw[1])
-            labels = {t["id"]: t.get("label") or t["id"]
-                      for t in demo_kg_repo.all_topics()}
-            by_topic = demo_facts_repo.facts_for_topics(
-                [tid for tid, _ in neighbours], robot_id)
-            return [(labels.get(tid, tid), by_topic.get(tid) or [])
-                    for tid, _ in neighbours
-                    if by_topic.get(tid)]
-        except Exception as e:
-            logger.warning(f"[WS Gateway] topic-link expansion failed: {e}")
             return []
 
     def check_qa_auto_close(self, responding_robot_id: str, clean_text: str):

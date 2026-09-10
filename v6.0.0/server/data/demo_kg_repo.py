@@ -16,7 +16,8 @@ into a Postgres function and delete apply_observation.
 """
 
 from __future__ import annotations
-from typing import Iterable, Optional, Sequence
+import time
+from typing import Callable, Iterable, Optional, Sequence
 
 from data.connection import get_client
 from decision.kg import Evidence, RobotTopicEdge, TopicEdge
@@ -42,12 +43,57 @@ def upsert_topics(rows: Sequence[dict]) -> int:
     return len(payload)
 
 
+VOCAB_TTL_SEC = 60.0
+"""How long the topic vocabulary and link graph are reused before re-reading.
+
+These two tables are CONFIGURATION — a topic list and the semantic links
+between topics — edited by hand through the dashboard, not by the running
+demo. Re-reading them per answer cost 160ms of the ~225ms that topic-link
+grounding added to every visitor question, for data that had not changed
+since the server booted.
+
+A minute, rather than caching for the process lifetime, so an edit made in
+the dashboard during a demo still takes effect within one; the writers below
+clear it immediately, so an edit made through this module is visible at once.
+The learned edges (demo_robot_topic) are NOT cached — those change while the
+demo runs, which is the entire point of them."""
+
+_vocab_cache: dict = {}
+
+
+def _cached(key: str, fetch: Callable):
+    hit = _vocab_cache.get(key)
+    if hit is not None and (time.monotonic() - hit[0]) < VOCAB_TTL_SEC:
+        return hit[1]
+    value = fetch()
+    _vocab_cache[key] = (time.monotonic(), value)
+    return value
+
+
+def invalidate_vocab_cache() -> None:
+    """Drop the cached vocabulary. Called by every writer in this module."""
+    _vocab_cache.clear()
+
+
 def all_topics() -> list[dict]:
-    try:
-        return get_client().table(TOPICS).select("*").order("label").execute().data or []
-    except Exception as e:
-        print(f"[demo_kg_repo] all_topics error: {e}")
-        return []
+    def fetch():
+        try:
+            return get_client().table(TOPICS).select("*").order("label").execute().data or []
+        except Exception as e:
+            print(f"[demo_kg_repo] all_topics error: {e}")
+            return []
+    return _cached("topics", fetch)
+
+
+def topic_labels() -> dict:
+    """{topic_id: label} — what a caller naming a topic in a prompt needs.
+
+    Separate from all_topics so the mapping is built once per cache fill
+    rather than once per answer.
+    """
+    return _cached("labels",
+                   lambda: {t["id"]: (t.get("label") or t["id"])
+                            for t in all_topics()})
 
 
 # ── Topic ↔ topic links ───────────────────────────────────────────────────────
@@ -60,28 +106,35 @@ def upsert_links(links: Iterable[TopicEdge]) -> int:
     if not rows:
         return 0
     get_client().table(LINKS).upsert(rows).execute()
+    invalidate_vocab_cache()
+    invalidate_vocab_cache()
     return len(rows)
 
 
 def all_links() -> list[dict]:
-    try:
-        return get_client().table(LINKS).select("*").execute().data or []
-    except Exception as e:
-        print(f"[demo_kg_repo] all_links error: {e}")
-        return []
+    def fetch():
+        try:
+            return get_client().table(LINKS).select("*").execute().data or []
+        except Exception as e:
+            print(f"[demo_kg_repo] all_links error: {e}")
+            return []
+    return _cached("links", fetch)
 
 
 def neighbours(topic_id: str) -> list[tuple[str, float]]:
-    """[(neighbour_topic_id, weight)] for one topic, both directions."""
-    try:
-        c = get_client()
-        a = c.table(LINKS).select("topic_b,weight").eq("topic_a", topic_id).execute().data or []
-        b = c.table(LINKS).select("topic_a,weight").eq("topic_b", topic_id).execute().data or []
-        return ([(r["topic_b"], float(r["weight"])) for r in a]
-                + [(r["topic_a"], float(r["weight"])) for r in b])
-    except Exception as e:
-        print(f"[demo_kg_repo] neighbours error: {e}")
-        return []
+    """[(neighbour_topic_id, weight)] for one topic, both directions.
+
+    Filtered from the cached link set rather than queried. This ran two
+    round trips of its own — one per direction — on every grounded answer,
+    against a table of eighteen rows that changes when a researcher edits it.
+    """
+    out = []
+    for r in all_links():
+        if r.get("topic_a") == topic_id:
+            out.append((r["topic_b"], float(r["weight"])))
+        elif r.get("topic_b") == topic_id:
+            out.append((r["topic_a"], float(r["weight"])))
+    return out
 
 
 # ── The learned edge ──────────────────────────────────────────────────────────

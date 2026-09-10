@@ -258,7 +258,14 @@ export default function ChatTab() {
           className="form-input"
           placeholder={targetId ? `Message ${robots.find(r => r.client_id === targetId)?.robot_name || targetId}…` : 'Connect a robot first…'}
           value={input}
-          disabled={!targetId || sending}
+          /* Not disabled while `sending`. A visitor watching a robot think for
+             several seconds should be able to compose the next question in
+             them, which is what they do in every other chat they use; locking
+             the box made them wait for the answer before they could even
+             start typing. handleSend still refuses to fire a second request
+             while one is in flight, and the button shows that it is busy, so
+             the guard is kept where it belongs rather than in the keyboard. */
+          disabled={!targetId}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
         />

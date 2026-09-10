@@ -61,12 +61,16 @@ reaches large language models (0.80), conversational memory (0.70) and
 knowledge graphs (0.65) — the neighbours a visitor would consider part of the
 same answer — while robot hardware / text-to-speech (0.40) stays out."""
 
-NEIGHBOUR_FACT_LIMIT = 3
+NEIGHBOUR_FACT_LIMIT = 2
 """How many related-topic facts may join an answer.
 
-Small on purpose. The topic asked about supplies up to ten lines already, and
-these are additive: the point is to reach a fact the neighbouring node holds,
-not to hand the model a second topic's worth of material to drift into."""
+Small on purpose, and smaller since the corpus grew from 21 facts to 137. The
+point is to reach a fact the neighbouring node holds, not to hand the model a
+second topic's worth of material to drift into — and the answer this feeds is
+held to one or two sentences, which is not many sentences in which to use
+thirteen facts. The prompt's own "USE THESE" and its "1-2 sentences maximum"
+are in tension by construction; the resolution is to send fewer facts, not to
+argue with the model about it."""
 
 
 def with_related(own: list[dict], related: list[tuple[str, list[dict]]],
