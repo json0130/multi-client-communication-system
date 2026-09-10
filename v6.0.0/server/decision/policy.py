@@ -268,10 +268,18 @@ DROP_REMAINING_OVERRUN_RATIO = 0.5
 #
 # Reaching for rung 3 first is the intuitive move and the wrong one.
 QA_BUDGET_TIGHT_SEC = 60.0
-"""What a Q&A window is cut to under time pressure. Deliberately a constant
-rather than a measured figure: data.demo_duration_repo.suggested_qa_budget reads
-observed windows, but it needs ~10 of them before it says anything, and until
-then a round number honestly labelled beats a measurement of three windows."""
+"""What a Q&A window is cut to under time pressure, absent a measured figure.
+
+Deliberately a constant here: decision/ does no I/O, so the measurement has to
+arrive from the call site. data.demo_duration_repo.suggested_qa_budget reads
+observed windows and needs MIN_WINDOWS_TO_TRUST of them before it says
+anything, and until then a round number honestly labelled beats a measurement
+of three windows.
+
+Worth knowing what the constant is up against: on the first live corpus the
+measured median of visitor-ended windows was 21s, against this 60. A tour cut
+to 60s per window under time pressure is, on that evidence, not cutting
+much."""
 
 
 def _matches(text: str, phrases: list[str]) -> Optional[str]:

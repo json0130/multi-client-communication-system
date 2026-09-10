@@ -162,3 +162,92 @@ class TestRowsForOneStepAreCombined:
         a = durations_from(_rows(("s", 9, 10.0), ("s", 1, 20.0)))
         b = durations_from(_rows(("s", 1, 20.0), ("s", 9, 10.0)))
         assert a == b
+
+
+class TestTheBudgetIsNotLearnedFromItsOwnConstants:
+    """
+    A window that ran out its own allocation measures the allocation, not the
+    visitor.
+
+    Half the first live corpus was exactly that: 23 of 46 windows closed by
+    timeout, 19 of them at exactly 5.0s (ALREADY_ENGAGED_QA_SEC) and 3 at
+    exactly 60.0s. Feeding those back made the estimator a closed loop —
+    shrink a window to five seconds, record five seconds, pull the median
+    down, shrink more windows. The pooled median over everything was 5.0s:
+    the system had learned its own constant and was about to present it as a
+    measurement of how long visitors want to talk.
+    """
+
+    def _rows(self, monkeypatch, rows):
+        from data import demo_duration_repo
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        return demo_duration_repo
+
+    def _w(self, seconds, closed_by="policy", block="chatbox_01"):
+        return {"seconds": seconds, "closed_by": closed_by,
+                "block_robot_id": block}
+
+    def test_timed_out_windows_do_not_move_the_estimate(self, monkeypatch):
+        repo = self._rows(monkeypatch,
+                          [self._w(30.0) for _ in range(20)]
+                          + [self._w(5.0, "timeout") for _ in range(40)])
+        got = repo.suggested_qa_budget()
+        assert got["budget_sec"] == 30.0, "the estimator learned its own shrink"
+        assert got["self_terminated"] == 40
+
+    def test_they_are_counted_rather_than_silently_dropped(self, monkeypatch):
+        # Right-censored, not junk: the visitor may well have wanted longer,
+        # and how many were cut off is itself worth seeing.
+        repo = self._rows(monkeypatch, [self._w(5.0, "timeout")] * 3)
+        assert repo.suggested_qa_budget()["self_terminated"] == 3
+
+    def test_the_gate_counts_usable_windows_not_all_of_them(self, monkeypatch):
+        # 46 windows passed a threshold of 10 while only 22 were informative.
+        repo = self._rows(monkeypatch,
+                          [self._w(30.0) for _ in range(5)]
+                          + [self._w(5.0, "timeout") for _ in range(100)])
+        got = repo.suggested_qa_budget()
+        assert got["basis"] == "default"
+        assert got["windows"] == 5
+
+    def test_the_open_floor_is_not_a_project_qa_window(self, monkeypatch):
+        # It is the end-of-demo floor, a different animal. On the live corpus
+        # its single window WAS the returned budget.
+        repo = self._rows(monkeypatch,
+                          [self._w(30.0) for _ in range(20)]
+                          + [self._w(999.0, "policy", None)])
+        got = repo.suggested_qa_budget()
+        assert got["windows"] == 20
+        assert got["budget_sec"] == 30.0
+
+    def test_it_medians_windows_not_per_step_means(self, monkeypatch):
+        # One busy step and one quiet one. Medianing the two STEP means gives
+        # the midpoint of 10 and 100; medianing the windows gives what a
+        # window actually looks like.
+        repo = self._rows(monkeypatch,
+                          [self._w(10.0) for _ in range(19)]
+                          + [self._w(100.0, "policy", "navel_01")])
+        assert repo.suggested_qa_budget()["budget_sec"] == 10.0
+
+    def test_a_long_tail_does_not_drag_the_centre(self, monkeypatch):
+        repo = self._rows(monkeypatch,
+                          [self._w(20.0) for _ in range(20)] + [self._w(1000.0)])
+        assert repo.suggested_qa_budget()["budget_sec"] == 20.0
+
+    def test_too_little_evidence_says_so(self, monkeypatch):
+        repo = self._rows(monkeypatch, [self._w(30.0) for _ in range(3)])
+        got = repo.suggested_qa_budget(default_sec=90.0)
+        assert (got["budget_sec"], got["basis"]) == (90.0, "default")
+
+    def test_the_threshold_reflects_where_more_data_stops_helping(self):
+        # Bootstrapped on the real corpus: the median's 95% interval is
+        # 4.3-52.7s at n=10 and 9.7-42.6s at n=20, and barely moves after.
+        from data.demo_duration_repo import MIN_WINDOWS_TO_TRUST
+        assert MIN_WINDOWS_TO_TRUST >= 20
+
+    def test_an_unreadable_row_does_not_take_the_estimate_with_it(self, monkeypatch):
+        repo = self._rows(monkeypatch,
+                          [self._w(30.0) for _ in range(20)]
+                          + [{"seconds": None, "closed_by": "policy",
+                              "block_robot_id": "chatbox_01"}])
+        assert repo.suggested_qa_budget()["budget_sec"] == 30.0

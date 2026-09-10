@@ -90,20 +90,78 @@ def block_estimate(block_robot_id: str) -> dict:
     }
 
 
+def qa_windows(limit: int = 5000) -> list[dict]:
+    """Individual Q&A windows, not the aggregate view.
+
+    suggested_qa_budget needs `closed_by` to tell a window a person ended from
+    one that ran out its own allocation, and the view groups that away.
+    """
+    try:
+        return (get_client().table(QA).select("*")
+                .limit(limit).execute().data or [])
+    except Exception as e:
+        print(f"[demo_duration_repo] qa_windows error: {e}")
+        return []
+
+
+MIN_WINDOWS_TO_TRUST = 20
+"""Usable windows before an observed budget replaces the constant.
+
+Was 10, and counted every window rather than the usable ones. Bootstrapped
+over the real corpus, the median's 95% interval runs 4.3-52.7s at n=10,
+9.7-42.6s at n=20, and 10.4-42.0s at n=30 — a third of the spread bought
+between 10 and 20, and almost nothing after. The remaining width is not
+sampling error: visitor Q&A genuinely runs from 2s to 165s, so no threshold
+makes ONE pooled number good for any particular group. Twenty is where more
+data stops helping a global estimate, which is also the point at which the
+honest next move is a per-block or per-audience one."""
+
+
 def suggested_qa_budget(default_sec: float = 90.0) -> dict:
     """
     A defensible default Q&A allocation, from observed windows.
 
-    Uses the MEDIAN-ish centre rather than the mean: Q&A length is
-    operator-driven and long tails are common, so a mean is dragged upward by
-    the one group that would not stop asking. Falls back to `default_sec` while
-    there is too little data, and says so — a budget invented from three windows
-    should not be presented as measured.
+    Uses the MEDIAN rather than the mean: Q&A length is operator-driven and
+    long tails are common, so a mean is dragged upward by the one group that
+    would not stop asking. Falls back to `default_sec` while there is too
+    little data, and says so — a budget invented from three windows should not
+    be presented as measured.
+
+    A WINDOW THAT RAN OUT ITS OWN ALLOCATION IS NOT EVIDENCE ABOUT VISITORS.
+    It is a measurement of the allocation. Half the live corpus was exactly
+    that: 23 of 46 windows closed by timeout, 19 of them at exactly 5.0s
+    (ALREADY_ENGAGED_QA_SEC) and 3 at exactly 60.0s. Feeding those back in
+    made the estimator a closed loop — shrink a window to five seconds,
+    record five seconds, pull the median down, shrink more windows. The
+    pooled median over everything was 5.0s: the system had learned its own
+    constant. Timeout closures are right-censored (the visitor may well have
+    wanted longer), so they are excluded and counted, never averaged in.
+
+    And it now medians the WINDOWS, not the per-step means. Medianing six
+    per-step rows put the answer on whichever row happened to sit in the
+    middle regardless of how many windows stood behind it: on the live
+    corpus that was `open_floor`, n=1 — a single window, of a step that is
+    not a project Q&A at all, returned as "observed" on the strength of 46.
+    Only windows belonging to a project block count, for the same reason.
     """
-    rows = qa_stats()
-    windows = sum(int(r.get("windows") or 0) for r in rows)
-    if windows < 10:
-        return {"budget_sec": default_sec, "basis": "default", "windows": windows}
-    means = sorted(float(r["mean_sec"]) for r in rows if r.get("mean_sec"))
-    centre = means[len(means) // 2] if means else default_sec
-    return {"budget_sec": round(centre, 0), "basis": "observed", "windows": windows}
+    rows = qa_windows()
+    usable, censored = [], 0
+    for r in rows:
+        if not r.get("block_robot_id"):
+            continue                    # open floor, not a project Q&A window
+        if (r.get("closed_by") or "") == "timeout":
+            censored += 1
+            continue
+        try:
+            usable.append(float(r["seconds"]))
+        except (TypeError, ValueError, KeyError):
+            continue
+
+    out = {"windows": len(usable), "self_terminated": censored}
+    if len(usable) < MIN_WINDOWS_TO_TRUST:
+        return {**out, "budget_sec": default_sec, "basis": "default"}
+    usable.sort()
+    mid = len(usable) // 2
+    centre = (usable[mid] if len(usable) % 2
+              else (usable[mid - 1] + usable[mid]) / 2)
+    return {**out, "budget_sec": round(centre, 0), "basis": "observed"}
