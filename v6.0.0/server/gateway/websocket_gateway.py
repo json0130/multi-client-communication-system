@@ -291,9 +291,17 @@ class WebSocketGateway:
         self._utterance_lock = threading.Lock()
 
         # Who the last hand-off named, so the same line is not repeated in
-        # front of every answer from the same robot. Cleared when a Q&A
-        # window opens or closes — see route_question.
+        # front of every answer from the same robot — see route_question.
         self._handed_off_to = None
+
+        # When the robots are expected to fall silent, as a wall clock. The
+        # server never hears the end of a sentence: TTS happens on the robot
+        # and only ACK-bearing demo steps report back. So every timer that
+        # said "wait for the robot to finish" was really counting from the
+        # moment GENERATION finished, with the whole utterance still ahead of
+        # it. This is the one place that models what is still being said.
+        self._speech_lock = threading.Lock()
+        self._quiet_at = 0.0
         # Whether this window has already invited further questions.
         self._asked_more_questions = False
 
@@ -403,7 +411,6 @@ class WebSocketGateway:
         """Called by DemoOrchestrator when a Q&A window opens."""
         self._tracker.open_window()
         self._segment.reset()
-        self._handed_off_to = None
         self._asked_more_questions = False
         # A timer left over from the previous window would close this one
         # almost as soon as it opened.
@@ -422,7 +429,6 @@ class WebSocketGateway:
         cannot reintroduce hollow observations by taking a different path.
         """
         self._tracker.close_window()
-        self._handed_off_to = None
         self._asked_more_questions = False
         self.cancel_qa_auto_close("window closed")
         try:
@@ -690,6 +696,57 @@ class WebSocketGateway:
                          exc_info=True)
             return instruction
 
+    MAX_QUIET_WAIT_SEC = 25.0
+    """Ceiling on waiting for the robots to stop talking.
+
+    The estimate can be wrong — a robot may be muted, disconnected, or
+    playing nothing at all — and a tour that parks itself forever on a bad
+    guess is worse than one that occasionally speaks a little early."""
+
+    def note_speech(self, client_id: str, data: dict) -> None:
+        """Add whatever was just sent to the estimate of what is still being said.
+
+        Modelled as a queue, not a single utterance: the answer to one
+        question arrives as several `chat_sentence` events in quick
+        succession and the robot speaks them one after another, so their
+        durations add. Taking the max instead would have said a four-sentence
+        answer lasts as long as its longest sentence.
+
+        Best-effort by design — an over- or under-estimate costs a second of
+        pacing, never correctness, and every caller caps how long it will
+        act on this.
+        """
+        event = data.get("event")
+        if event == "tts_stop":
+            # Speech was cut off mid-utterance; whatever was queued is gone.
+            with self._speech_lock:
+                self._quiet_at = 0.0
+            return
+        if event == "chat_sentence":
+            text = data.get("text", "")
+        elif event == "demo_step" and not data.get("require_ack"):
+            # An ACK-bearing step is already waited for properly — the robot
+            # reports back when it has finished speaking it. Counting those
+            # here would charge for the same speech twice.
+            text = data.get("text", "")
+        else:
+            return
+        seconds = _speaking_seconds(_spoken_text(text))
+        if seconds <= 0:
+            return
+        with self._speech_lock:
+            self._quiet_at = max(self._quiet_at, time.time()) + seconds
+
+    def seconds_until_quiet(self) -> float:
+        """How much longer the robots are expected to keep talking, in seconds.
+
+        0.0 when nothing is in flight, which is the common case and makes
+        this safe to add to any delay unconditionally.
+        """
+        with self._speech_lock:
+            remaining = self._quiet_at - time.time()
+        return max(0.0, min(self.MAX_QUIET_WAIT_SEC, remaining))
+
     def cancel_qa_auto_close(self, why: str = "") -> None:
         """Stop a pending auto-close. Idempotent."""
         with self._auto_close_lock:
@@ -883,7 +940,7 @@ class WebSocketGateway:
             # pause mean what it says: three seconds of silence AFTER the
             # robot finishes, not three seconds from the middle of a sentence.
             self._schedule_qa_auto_close(
-                QA_AUTO_CLOSE_SEC + _speaking_seconds(clean_text))
+                QA_AUTO_CLOSE_SEC + self.seconds_until_quiet())
             return "auto_close"
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
@@ -912,7 +969,7 @@ class WebSocketGateway:
                     "require_ack": False,
                 })
 
-            self._schedule_qa_action(_speaking_seconds(clean_text), _say_wrap_up)
+            self._schedule_qa_action(self.seconds_until_quiet(), _say_wrap_up)
             return "wrap_up"
 
         return None
@@ -1152,23 +1209,61 @@ class WebSocketGateway:
 
         target_name = getattr(target, "robot_name", None) or target_id
 
-        # ONCE PER RUN OF QUESTIONS TO THE SAME ROBOT. A live run put the
-        # identical line in front of three consecutive answers — "ChatBox can
-        # tell you more about that" before each of three questions the
-        # visitor had already watched ChatBox answer. After the first, the
-        # visitor knows who is speaking; repeating it is the guide narrating
-        # something everyone can see.
-        #
-        # Reset when the target changes or the window reopens, so a genuine
-        # switch of speaker is still announced.
+        # ONCE PER CHANGE OF SPEAKER, not once per question and not once per
+        # window. A live run put the identical line in front of three
+        # consecutive answers from the same robot; resetting it per window
+        # then brought it back at the top of every window, so a visitor who
+        # asked something in each of three windows heard the same sentence
+        # three times. What is worth announcing is the FLOOR MOVING to a
+        # robot other than the last one that had it. Asking the same robot
+        # again needs no announcement — the visitor just watched it answer.
         with self._utterance_lock:
             already = self._handed_off_to == target_id
             self._handed_off_to = target_id
         if already:
             return target, target_id, None
 
-        handoff = f"{target_name} can tell you more about that — let's hear from them!"
-        return target, target_id, handoff
+        return target, target_id, self._handoff_line(receiver_id, target_name, message)
+
+    HANDOFF_FALLBACK = "{name} can tell you more about that — let's hear from them!"
+
+    def _handoff_line(self, speaker_id, target_name: str, message: str) -> str:
+        """What the addressed robot says as it passes the question on.
+
+        Generated, because it was a single f-string and every hand-off in a
+        tour came out word for word identical — "ChatBox can tell you more
+        about that — let's hear from them!", then the same again for Silbot,
+        then for Navel. Written down in a transcript that reads as a template,
+        which is what it was.
+
+        Generation sees the actual question, so the line can refer to what was
+        asked rather than to "that". It is also the only LLM call between the
+        visitor speaking and the answer starting, so the instruction asks for
+        one short sentence — and any failure falls straight back to the fixed
+        line rather than delaying the answer further.
+        """
+        instruction = (
+            f"A visitor just asked you: \"{message[:200]}\". "
+            f"{target_name} is the robot who should answer it, not you. "
+            f"Say ONE short sentence handing the question to {target_name} by name — "
+            f"warm and natural, under 15 words. Do not answer the question yourself, "
+            f"do not greet anyone, and do not add anything after the hand-off."
+        )
+        fallback = self.HANDOFF_FALLBACK.format(name=target_name)
+        if not speaker_id:
+            return fallback
+        try:
+            generated = self.generate_demo_step(speaker_id, instruction)
+        except Exception as e:
+            logger.warning(f"[WS Gateway] hand-off generation failed: {e}")
+            return fallback
+        # generate_demo_step echoes the instruction back on failure — that is
+        # its documented fallback, and speaking it aloud would tell the
+        # visitor how the prompt was written.
+        if not generated or generated == instruction:
+            return fallback
+        spoken = _spoken_text(generated)
+        return spoken or fallback
 
     # ── Public API ────────────────────────────────────────────────────────────
 
@@ -1244,6 +1339,13 @@ class WebSocketGateway:
             self._record_utterance(client_id, data)
         except Exception as e:
             logger.warning(f"[WS Gateway] could not record utterance: {e}")
+
+        # Every outbound utterance passes through here, which makes this the
+        # one place that can know what is still being spoken.
+        try:
+            self.note_speech(client_id, data)
+        except Exception as e:
+            logger.warning(f"[WS Gateway] could not time utterance: {e}")
 
         with self._lock:
             conn = self._connections.get(client_id)

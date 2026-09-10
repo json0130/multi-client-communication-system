@@ -305,9 +305,89 @@ class TestSpeakingTimeIsWaitedOut:
         gw, orch, _, closed = wired
         monkeypatch.undo()   # drop the autouse zeroing for this one
         monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_SEC", 0.05)
+        gw.note_speech(A, {"event": "chat_sentence", "text": self.LONG})
         gw.check_qa_auto_close(A, self.LONG)
         _settle(0.3)
         assert closed == [], "closed while the robot was still speaking"
+
+
+class TestTheSpeechClock:
+    """
+    The server never hears the end of a sentence — TTS happens on the robot,
+    and only ACK-bearing demo steps report back. So "wait for the robot to
+    finish" has to be estimated from what was sent, or it silently means
+    "wait from the moment generation finished", with the whole utterance
+    still ahead of it. That is what put the guide's transition one second
+    into a nine-second answer.
+    """
+
+    def test_nothing_in_flight_costs_nothing(self, wired):
+        gw, *_ = wired
+        assert gw.seconds_until_quiet() == 0.0
+
+    def test_sentences_of_one_answer_add_up(self, wired, monkeypatch):
+        # Four sentences of an answer are spoken one after another, not at
+        # once. Taking the longest would say the answer lasts as long as its
+        # longest sentence.
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 1.0)
+        for _ in range(4):
+            gw.note_speech(A, {"event": "chat_sentence", "text": "a sentence"})
+        assert 3.5 < gw.seconds_until_quiet() <= 4.0
+
+    def test_an_acked_step_is_not_counted(self, wired, monkeypatch):
+        # The robot reports back when it has finished speaking one of those,
+        # and the run loop already waits for that. Counting it here would
+        # charge for the same speech twice.
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 1.0)
+        gw.note_speech(A, {"event": "demo_step", "text": "spoken", "require_ack": True})
+        assert gw.seconds_until_quiet() == 0.0
+
+    def test_an_unacked_step_is_counted(self, wired, monkeypatch):
+        # "_qa_more_questions" and the guide's wrap-up are spoken and never
+        # acknowledged; nothing else knows they are in flight.
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 1.0)
+        gw.note_speech(A, {"event": "demo_step", "text": "spoken", "require_ack": False})
+        assert gw.seconds_until_quiet() > 0.0
+
+    def test_an_interrupt_clears_what_was_queued(self, wired, monkeypatch):
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 5.0)
+        gw.note_speech(A, {"event": "chat_sentence", "text": "a long answer"})
+        gw.note_speech(A, {"event": "tts_stop"})
+        assert gw.seconds_until_quiet() == 0.0
+
+    def test_an_emotion_tag_alone_is_not_speech(self, wired):
+        gw, *_ = wired
+        gw.note_speech(A, {"event": "chat_sentence", "text": "[DEFAULT]"})
+        assert gw.seconds_until_quiet() == 0.0
+
+    def test_the_wait_is_capped(self, wired, monkeypatch):
+        # A muted or disconnected robot must not be able to park the tour.
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 1000.0)
+        gw.note_speech(A, {"event": "chat_sentence", "text": "forever"})
+        assert gw.seconds_until_quiet() == gw.MAX_QUIET_WAIT_SEC
+
+    def test_it_is_fed_by_sending(self, wired, monkeypatch):
+        # The estimate must not depend on any caller remembering to report —
+        # every outbound utterance goes through send_to_robot.
+        # The real method, not the fixture's capturing stub — the point is
+        # that no caller has to remember to report speech.
+        from gateway.websocket_gateway import WebSocketGateway
+        gw, *_ = wired
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: 2.0)
+        WebSocketGateway.send_to_robot(gw, A, {"event": "chat_sentence",
+                                               "text": "an answer"})
+        assert gw.seconds_until_quiet() > 0.0
 
 
 class TestPickingUpAfterAQuestion:
@@ -561,6 +641,7 @@ class TestTheGuideWrapsUpAfterTheAnswer:
         sent = self._capture(gw)
         monkeypatch.undo()          # restore the real speaking-time estimate
         self._interjecting(gw, monkeypatch)
+        gw.note_speech(A, {"event": "chat_sentence", "text": "word " * 60})
         gw.check_qa_auto_close(A, "word " * 60)
         _settle(0.3)
         assert sent == [], "the guide spoke while the answer was still being said"
@@ -582,6 +663,7 @@ class TestTheGuideWrapsUpAfterTheAnswer:
         sent = self._capture(gw)
         self._slow_speech(monkeypatch)
         self._interjecting(gw, monkeypatch)
+        gw.note_speech(A, {"event": "chat_sentence", "text": A_REAL_ANSWER})
         gw.check_qa_auto_close(A, A_REAL_ANSWER)
         gw.cancel_qa_auto_close("visitor spoke")
         _settle(0.4)
@@ -592,7 +674,138 @@ class TestTheGuideWrapsUpAfterTheAnswer:
         sent = self._capture(gw)
         self._slow_speech(monkeypatch)
         self._interjecting(gw, monkeypatch)
+        gw.note_speech(A, {"event": "chat_sentence", "text": A_REAL_ANSWER})
         gw.check_qa_auto_close(A, A_REAL_ANSWER)
         orch._state = DemoState.RUNNING   # closed by someone else meanwhile
         _settle(0.4)
         assert sent == []
+
+
+class _NoisyGateway:
+    """A gateway whose robots are still speaking for `quiet_in` seconds."""
+
+    def __init__(self, quiet_in=0.0):
+        self.quiet_in = quiet_in
+        self.sent = []
+
+    def seconds_until_quiet(self):
+        return self.quiet_in
+
+    def send_to_robot(self, client_id, data):
+        self.sent.append((client_id, data))
+
+
+class TestTheTourWaitsForSilence:
+    """
+    A scripted step sent over the top of a live answer is the most confusing
+    thing the tour does. A live run: the visitor asked Silbot a question, the
+    answer went out at 15:24:56 and takes about nine seconds to say, and at
+    15:24:57 the guide said "Thank you, Silbot, for that fascinating
+    discussion. Let us move on to the next project!".
+
+    The run loop had no way to know. A streamed answer is dispatched sentence
+    by sentence and never acknowledged, so as far as the loop was concerned
+    nothing was happening.
+    """
+
+    def _orch(self, ws):
+        o = DemoOrchestrator(ws)
+        o.load_script(build_script(GUIDE, [A, B]))
+        o._state = DemoState.RUNNING   # a tour actually under way
+        return o
+
+    def test_a_gateway_that_cannot_answer_costs_nothing(self):
+        # The orchestrator predates the estimate and must keep working
+        # against a gateway with no such hook.
+        class Old:
+            def send_to_robot(self, *a, **k): pass
+        assert self._orch(Old())._seconds_until_quiet() == 0.0
+
+    def test_silence_is_not_waited_for(self):
+        o = self._orch(_NoisyGateway(0.0))
+        started = time.time()
+        o._wait_for_quiet()
+        assert time.time() - started < 0.1
+
+    def test_speech_is_waited_out(self):
+        ws = _NoisyGateway(0.3)
+        o = self._orch(ws)
+
+        def stop_soon():
+            time.sleep(0.25)
+            ws.quiet_in = 0.0
+        threading.Thread(target=stop_soon, daemon=True).start()
+
+        started = time.time()
+        o._wait_for_quiet()
+        assert time.time() - started >= 0.2, "did not wait for the robot to finish"
+
+    def test_a_stopped_demo_does_not_keep_waiting(self):
+        o = self._orch(_NoisyGateway(30.0))
+        o._state = DemoState.IDLE
+        started = time.time()
+        o._wait_for_quiet()
+        assert time.time() - started < 0.6
+
+    def test_the_wait_is_capped(self, monkeypatch):
+        # A muted or disconnected robot must not park the demonstration.
+        o = self._orch(_NoisyGateway(30.0))
+        monkeypatch.setattr(type(o), "MAX_QUIET_WAIT_SEC", 0.2)
+        started = time.time()
+        o._wait_for_quiet()
+        assert time.time() - started < 0.6
+
+
+class TestTheQABudgetCountsQuietSeconds:
+    """
+    A shortened window (see _shrink_if_already_engaged) is five seconds long,
+    and a live run spent all five of them with Silbot mid-answer: the window
+    opened, the visitor's question was answered into it, and the budget
+    expired before the answer had finished playing. The visitor never got a
+    moment of silence to ask a follow-up in — which is the only thing the
+    budget is there to provide.
+    """
+
+    def _orch(self, ws):
+        o = DemoOrchestrator(ws)
+        o.load_script(build_script(GUIDE, [A, B]))
+        return o
+
+    def test_an_expired_budget_closes_when_all_is_quiet(self):
+        o = self._orch(_NoisyGateway(0.0))
+        assert o._wait_for_qa_close(0.05) is False
+
+    def test_closing_the_window_wins_over_the_budget(self):
+        o = self._orch(_NoisyGateway(0.0))
+        o._qa_end_event.set()
+        assert o._wait_for_qa_close(5.0) is True
+
+    def test_the_budget_does_not_expire_mid_answer(self):
+        ws = _NoisyGateway(0.4)
+        o = self._orch(ws)
+
+        def stop_soon():
+            time.sleep(0.4)
+            ws.quiet_in = 0.0
+        threading.Thread(target=stop_soon, daemon=True).start()
+
+        started = time.time()
+        assert o._wait_for_qa_close(0.05) is False
+        assert time.time() - started >= 0.4, \
+            "the window closed while the answer was still being said"
+
+    def test_an_answer_that_never_ends_cannot_hold_the_window_open(self, monkeypatch):
+        # The estimate is a word count, not a microphone: a robot that goes
+        # away mid-answer leaves it standing.
+        o = self._orch(_NoisyGateway(5.0))
+        monkeypatch.setattr(type(o), "MAX_QUIET_WAIT_SEC", 0.2)
+        started = time.time()
+        assert o._wait_for_qa_close(0.05) is False
+        assert time.time() - started < 1.0
+
+    def test_a_manual_only_window_still_waits_for_a_close(self):
+        # timeout None means "operator closes it", and no amount of silence
+        # should change that.
+        o = self._orch(_NoisyGateway(0.0))
+        o._qa_end_event.set()
+        assert o._wait_for_qa_close(None) is True

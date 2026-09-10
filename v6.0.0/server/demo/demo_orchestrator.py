@@ -1074,6 +1074,11 @@ class DemoOrchestrator:
                 self._maybe_compress_pre_engaged_block(step.block_robot_id)
                 self._last_block_robot_id = step.block_robot_id
 
+            # Never over the top of a robot that is still answering. A
+            # streamed answer is dispatched sentence by sentence and never
+            # acknowledged, so without this the loop cannot tell speech from
+            # silence — see _wait_for_quiet.
+            self._wait_for_quiet()
             self._send_step(step)
 
             if step.require_ack:
@@ -1285,6 +1290,85 @@ class DemoOrchestrator:
             delay = max(delay, self.POST_PROJECT_GRACE_SEC)
         return delay
 
+    QUIET_POLL_SEC = 0.5
+    """How often to re-ask the gateway whether the robots have stopped talking."""
+
+    def _seconds_until_quiet(self) -> float:
+        """How long the robots are still expected to be speaking, or 0.0.
+
+        Duck-typed and best-effort: the orchestrator predates the estimate
+        and must keep working against a gateway that cannot answer.
+        """
+        fn = getattr(self._ws, "seconds_until_quiet", None)
+        if fn is None:
+            return 0.0
+        try:
+            return max(0.0, float(fn() or 0.0))
+        except Exception as e:
+            logger.warning(f"[Demo] speech estimate unavailable: {e}")
+            return 0.0
+
+    def _wait_for_quiet(self) -> None:
+        """Hold until the robots have finished what they are saying.
+
+        A scripted step sent over the top of a live answer is the single most
+        confusing thing the tour does: a live run had the guide say "Thank
+        you, Silbot. Let us move on to the next project!" one second into a
+        nine-second answer the visitor had just asked for. The run loop had
+        no way to know — a streamed answer is dispatched sentence by sentence
+        and never acknowledged, so as far as the loop was concerned nothing
+        was happening.
+        """
+        deadline = time.time() + self.MAX_QUIET_WAIT_SEC
+        while time.time() < deadline:
+            remaining = self._seconds_until_quiet()
+            if remaining <= 0:
+                return
+            with self._lock:
+                if self._state in (DemoState.IDLE, DemoState.COMPLETED,
+                                   DemoState.ERROR):
+                    return
+            time.sleep(min(remaining, self.QUIET_POLL_SEC))
+
+    MAX_QUIET_WAIT_SEC = 30.0
+    """Ceiling on holding the tour for speech that may never end.
+
+    The estimate is a word count, not a microphone. A robot that is muted,
+    disconnected or simply faster than the estimate must not be able to park
+    the demonstration."""
+
+    def _wait_for_qa_close(self, timeout: Optional[float]) -> bool:
+        """Block until the Q&A window closes, or its budget of SILENCE runs out.
+
+        Returns True if something closed it, False if the budget expired.
+
+        The budget counts quiet seconds, not wall-clock seconds. A shortened
+        window (see _shrink_if_already_engaged) is five seconds long, and a
+        live run spent all five of them with Silbot mid-answer: the window
+        opened, the visitor's question was answered into it, and the budget
+        expired before the answer had finished playing. The visitor never got
+        a moment of silence to ask a follow-up in, which is the only thing
+        the budget is there to provide.
+        """
+        if timeout is None:
+            return self._qa_end_event.wait()
+        deadline = time.time() + timeout
+        # And a ceiling on the extending, so an estimate that never decays —
+        # a robot that went away mid-answer — cannot hold the window open
+        # for the rest of the demonstration.
+        latest = deadline + self.MAX_QUIET_WAIT_SEC
+        while True:
+            now = time.time()
+            speaking = self._seconds_until_quiet()
+            if speaking > 0:
+                # The countdown has not really started yet.
+                deadline = min(max(deadline, now + speaking + timeout), latest)
+            remaining = deadline - now
+            if remaining <= 0:
+                return False
+            if self._qa_end_event.wait(timeout=min(remaining, self.QUIET_POLL_SEC)):
+                return True
+
     def _send_step(self, step: DemoStep):
         text = step.text
         # Consumed for EVERY step, used only by generated ones. The first step
@@ -1352,7 +1436,7 @@ class DemoOrchestrator:
 
         self._notify_window("open")
         opened_at = time.time()
-        closed_naturally = self._qa_end_event.wait(timeout=timeout)
+        closed_naturally = self._wait_for_qa_close(timeout)
         elapsed = time.time() - opened_at
         self._notify_window("close")
         # No resuming lead-in here. This is the block's OWN scripted Q&A step,

@@ -595,14 +595,76 @@ class TestTheHandOffIsNotRepeated:
         assert second is None and third is None, \
             "repeated the hand-off the visitor had already heard"
 
-    def test_a_new_window_announces_again(self):
-        # A fresh Q&A round is a fresh context; the visitor may have missed it.
+    def test_a_new_window_does_not_announce_the_same_robot_again(self):
+        # It used to. Resetting per window brought the same sentence back at
+        # the top of every round, so a visitor who asked something in each of
+        # three windows heard the identical hand-off three times — reported
+        # as "it shouldn't say it for every user interrupt". What is worth
+        # announcing is the floor MOVING, and it has not moved here.
+        gw, registry = self._wire()
+        gw.on_qa_window_open()
+        assert gw.route_question(registry.get(GUIDE), "how does RAG work")[2]
+        gw.on_qa_window_close()
+        gw.on_qa_window_open()
+        assert gw.route_question(registry.get(GUIDE), "and again")[2] is None
+
+    def test_a_change_of_speaker_in_a_later_window_is_announced(self):
+        # The suppression is about repetition, not about staying quiet: a
+        # different robot taking the floor is new information whenever it
+        # happens.
         gw, registry = self._wire()
         gw.on_qa_window_open()
         gw.route_question(registry.get(GUIDE), "how does RAG work")
         gw.on_qa_window_close()
         gw.on_qa_window_open()
-        assert gw.route_question(registry.get(GUIDE), "and again")[2]
+        gw._kg_router_factory = lambda: _FakeKGRouter(B)
+        handoff = gw.route_question(registry.get(GUIDE), "how does emotion work")[2]
+        assert handoff and "Navel" in handoff
+
+    def test_the_line_is_generated_not_stamped_out(self):
+        # It was a single f-string, so every hand-off in a tour came out word
+        # for word identical: "ChatBox can tell you more about that — let's
+        # hear from them!", then the same again for Silbot, then for Navel.
+        # A transcript that reads as a template, because it was one.
+        gw, registry = self._wire()
+        guide = registry.get(GUIDE)
+        guide.generate_demo_speech = lambda instruction: _ChatResult(
+            "[DEFAULT] Good question — ChatBox is the one to ask about retrieval.")
+        gw.on_qa_window_open()
+        handoff = gw.route_question(guide, "how does RAG work")[2]
+        assert handoff == "Good question — ChatBox is the one to ask about retrieval."
+
+    def test_the_prompt_is_never_spoken_aloud(self):
+        # generate_demo_step's documented fallback is to echo back what it
+        # was given. Speaking that would read the instruction to the visitor.
+        gw, registry = self._wire()
+        guide = registry.get(GUIDE)
+        guide.generate_demo_speech = lambda instruction: _ChatResult(instruction)
+        gw.on_qa_window_open()
+        handoff = gw.route_question(guide, "how does RAG work")[2]
+        assert handoff == gw.HANDOFF_FALLBACK.format(name="ChatBox")
+
+    def test_a_failed_generation_still_hands_over(self):
+        # The hand-off is the only thing between the visitor asking and the
+        # answer starting; a generation failure must cost the fixed line, not
+        # the hand-off itself.
+        gw, registry = self._wire()
+        guide = registry.get(GUIDE)
+
+        def boom(instruction):
+            raise RuntimeError("model unavailable")
+        guide.generate_demo_speech = boom
+        gw.on_qa_window_open()
+        handoff = gw.route_question(guide, "how does RAG work")[2]
+        assert handoff == gw.HANDOFF_FALLBACK.format(name="ChatBox")
+
+    def test_the_generated_line_still_routes_to_the_target(self):
+        gw, registry = self._wire()
+        guide = registry.get(GUIDE)
+        guide.generate_demo_speech = lambda i: _ChatResult("Over to ChatBox on that one.")
+        gw.on_qa_window_open()
+        target_instance, target_id, handoff = gw.route_question(guide, "how does RAG work")
+        assert target_id == A and target_instance is registry.get(A) and handoff
 
     def test_switching_target_announces_the_new_robot(self):
         gw, registry = self._wire()
