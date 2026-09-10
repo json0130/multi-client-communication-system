@@ -468,3 +468,70 @@ class TestEligibility:
         # open, matching the column's own DEFAULT true.
         restored = RobotTopicEdge.from_row({"robot_id": R, "topic_id": A, "weight": 0.5})
         assert restored.eligible is True
+
+
+class TestTwoDeclarersAreADecisionNotATieBreak:
+    """
+    The margin gate used to exempt any topic with specialists, on the
+    reasoning that declared scope had already decided it. That holds only
+    while every topic has at most one declarer — true of the seeded
+    vocabulary, and not a property of the design.
+
+    Declaring a subject twice is the natural way to give competence something
+    to decide: the topic stays owned, so nothing degrades to "no opinion"
+    for want of a candidate, but the field is now two and the learned weight
+    picks between them. Before this change that field was two specialists at
+    the identical prior, and rank_robots breaks ties lexicographically — so
+    it returned ("navel_01", "argmax"): a robot picked out of the alphabet,
+    reported as an argmax, with nothing in the log to say the graph had no
+    idea. The exemption made an untested path the default for anyone who
+    widened the scope.
+    """
+
+    T = "topic:contested"
+    ROBOTS = ["chatbox_01", "navel_01", "pepper_01", "silbot_01"]
+
+    def _contested(self, corrections=0, winner="silbot_01", other="navel_01"):
+        from decision.kg import Evidence, RobotTopicEdge
+        a = RobotTopicEdge(robot_id=winner, topic_id=self.T, specialised=True)
+        for _ in range(corrections):
+            a = a.update(1.0, Evidence.SUPERVISOR)
+        return [a, RobotTopicEdge(robot_id=other, topic_id=self.T, specialised=True)]
+
+    def test_a_contested_topic_with_no_evidence_declines(self):
+        from decision.kg_infer import route
+        robot, why = route(self._contested(0), [], self.T, self.ROBOTS, explore=False)
+        assert robot is None
+        assert why == "no confident opinion"
+
+    def test_one_correction_settles_it(self):
+        # The cold-start cost of widening the scope, in one number.
+        from decision.kg_infer import route
+        robot, _ = route(self._contested(1), [], self.T, self.ROBOTS, explore=False)
+        assert robot == "silbot_01"
+
+    def test_the_decline_is_not_alphabetical(self):
+        # Whichever way round the two declarers are given, an unresolved
+        # field declines rather than settling on the earlier name.
+        from decision.kg_infer import route
+        for winner, other in (("silbot_01", "navel_01"), ("navel_01", "silbot_01")):
+            robot, _ = route(self._contested(0, winner, other), [], self.T,
+                             self.ROBOTS, explore=False)
+            assert robot is None
+
+    def test_a_single_declarer_still_routes_with_no_evidence_at_all(self):
+        # Scope is a capability fact, not a learned one. One candidate means
+        # there is nothing to be uncertain between.
+        from decision.kg import RobotTopicEdge
+        from decision.kg_infer import route
+        edges = [RobotTopicEdge(robot_id="silbot_01", topic_id=self.T,
+                                specialised=True)]
+        robot, _ = route(edges, [], self.T, self.ROBOTS, explore=False)
+        assert robot == "silbot_01"
+
+    def test_exploration_still_takes_the_near_tie(self):
+        # A near-tie is the exploration rules' whole purpose: a campaign
+        # should spend that turn finding out which robot is better.
+        from decision.kg_infer import route
+        robot, _ = route(self._contested(0), [], self.T, self.ROBOTS, explore=True)
+        assert robot is not None

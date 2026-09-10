@@ -305,14 +305,25 @@ def route(
     if not ranked:
         return None, "no robots"
 
-    # An UNDECLARED topic — nobody's project covers it. Ranking here can be
-    # ordering robots on propagated fractions of a single distant
-    # observation: the live graph separated the top two by 0.003 on all
-    # three orphan topics, which is noise presented as a decision. When the
-    # candidates are that close the honest answer is that the graph has no
-    # opinion, which hands the turn to the receiver or to LLM delegation —
-    # the mechanism that exists for exactly the questions declared scope
-    # does not cover.
+    # A FIELD THE GRAPH CANNOT TELL APART. Ranking here can be ordering
+    # robots on propagated fractions of a single distant observation: the
+    # live graph separated the top two by 0.003 on all three orphan topics,
+    # which is noise presented as a decision. When the candidates are that
+    # close the honest answer is that the graph has no opinion, which hands
+    # the turn to the receiver or to LLM delegation — the mechanism that
+    # exists for exactly the questions declared scope does not cover.
+    #
+    # This used to exempt topics that HAVE specialists, on the reasoning that
+    # declared scope had already decided. That holds only while every topic
+    # has at most one declarer, which is true of the seeded vocabulary and is
+    # not a property of the design: the moment two robots declare the same
+    # subject — the natural way to give competence something to decide — the
+    # field is two specialists at the identical prior, and rank_robots breaks
+    # that tie lexicographically. Measured before this change: a contested
+    # topic with zero observations returned ("navel_01", "argmax"). A robot
+    # picked out of the alphabet, reported as an argmax, with no decline and
+    # nothing in the log to say the graph had no idea. The exemption made an
+    # untested path the default for anyone who widened the scope.
     #
     # The test is the SPREAD between candidates, not the distance from the
     # prior. A robot the graph is confident is BAD at something is still a
@@ -323,7 +334,6 @@ def route(
     # better. Live, with exploration off, the same closeness means the graph
     # cannot tell them apart and should say so rather than pick one.
     if (not explore and len(ranked) > 1
-            and not _specialists(edges, topic_id)
             and ranked[0][1] - ranked[-1][1] < MIN_EVIDENCE_MARGIN):
         return None, "no confident opinion"
     if len(ranked) == 1 or not explore:
