@@ -114,10 +114,25 @@ class SimpleConcurrentClient(BasicClient):
 
         # ── OUTPUT: TTS ───────────────────────────────────────────────────────
         logger.info("[Setup] Edge TTS...")
-        edge_cfg = self.config.get("edge_tts_config", {
-            "voice": "en-US-AriaNeural", "rate": "+0%",
-            "pitch": "+0Hz", "remove_emotion_tags": True,
-        })
+        # Built from the ROBOT's own config, not from an "edge_tts_config"
+        # block no config file has ever contained. That .get() defaulted every
+        # robot to the same literal dict, so the per-robot `tts_voice` sitting
+        # at the top level of pepper_01.json / chatbox_01.json / navel_01.json
+        # / silbot_01.json never reached the TTS module at all: it read no
+        # voice, fell through to gTTS — which has no voice selection — and all
+        # four robots spoke in one voice. Reported twice.
+        edge_cfg = dict(self.config.get("edge_tts_config") or {})
+        edge_cfg.setdefault("rate", "+0%")
+        edge_cfg.setdefault("pitch", "+0Hz")
+        edge_cfg.setdefault("remove_emotion_tags", True)
+        # Top-level keys win nothing they have not been given: each is copied
+        # only if the robot actually set it, and only if edge_tts_config did
+        # not already say something about it.
+        for key in ("tts_voice", "audio_device", "audio_cmd", "sim_speed"):
+            if self.config.get(key) is not None:
+                edge_cfg.setdefault(key, self.config[key])
+        edge_cfg.setdefault("tts_voice", edge_cfg.get("voice", ""))
+        logger.info(f"[Setup] TTS voice: {edge_cfg.get('tts_voice') or 'gTTS default'}")
         edge = EdgeTTSOutputModule("edge_tts_output", edge_cfg)
         if self.register_output_module(edge):
             edge.start()

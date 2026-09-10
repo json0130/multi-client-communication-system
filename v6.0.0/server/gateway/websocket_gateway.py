@@ -715,11 +715,7 @@ class WebSocketGateway:
         visitor's real silence is this minus however long the closing
         sentence takes to say. QA_AUTO_CLOSE_SEC is set with that in mind.
         """
-        self.cancel_qa_auto_close()
-
         def fire():
-            with self._auto_close_lock:
-                self._auto_close_timer = None
             orch = self._demo_orchestrator
             if orch is None or orch.get_status().get("state") != "qa_window":
                 return          # someone else already closed it
@@ -727,7 +723,25 @@ class WebSocketGateway:
                         f"questions and {delay:.0f}s passed in silence.")
             orch.qa_end(source="policy")
 
-        timer = threading.Timer(delay, fire)
+        self._schedule_qa_action(delay, fire)
+
+    def _schedule_qa_action(self, delay: float, fn) -> None:
+        """Run `fn` in `delay` seconds unless the window changes first.
+
+        One timer slot, shared by every deferred reaction to a Q&A turn, so
+        cancel_qa_auto_close cancels whichever is pending — a visitor speaking
+        must call off a queued auto-close and a queued wrap-up alike. Two
+        independent timers would have let a stale wrap-up fire on top of the
+        answer to the question that made it stale.
+        """
+        self.cancel_qa_auto_close()
+
+        def run():
+            with self._auto_close_lock:
+                self._auto_close_timer = None
+            fn()
+
+        timer = threading.Timer(delay, run)
         timer.daemon = True
         with self._auto_close_lock:
             self._auto_close_timer = timer
@@ -803,6 +817,15 @@ class WebSocketGateway:
         """
         Decide, after a robot responds, whether the Q&A window should close.
 
+        Returns what it set in motion — "auto_close", "wrap_up", or None —
+        because the caller has its own follow-up to suppress. A live run had
+        the guide say "Wonderful! Shall we move on to the next part of the
+        demo?" and the answering robot say "Do you have any other questions,
+        or shall we continue the demonstration?" in the same second, in two
+        voices, contradicting each other about what was being asked. Both
+        paths are reasonable on their own; what was missing is that they are
+        alternatives.
+
         WIRED as of the closing-phrase auto-advance change. It was dormant for
         a long time — the closing-phrase list and the guide's LLM wrap-up
         judgement were both written and never called, so of the five Q&A
@@ -818,10 +841,10 @@ class WebSocketGateway:
         original had, preserved.
         """
         if not self._demo_orchestrator or not clean_text:
-            return
+            return None
         status = self._demo_orchestrator.get_status()
         if status.get("state") != "qa_window":
-            return
+            return None
 
         self._tracker.note_robot_turn(responding_robot_id, clean_text)
 
@@ -845,7 +868,7 @@ class WebSocketGateway:
         # our tour" and nothing would close, which is exactly the robot most
         # likely to say it.
         if is_guide and result.mechanism != Mechanism.CLOSING_PHRASE:
-            return
+            return None
 
         if action.kind is ActionKind.ADVANCE:
             # The clock starts when GENERATION finishes, not when the robot
@@ -861,20 +884,38 @@ class WebSocketGateway:
             # robot finishes, not three seconds from the middle of a sentence.
             self._schedule_qa_auto_close(
                 QA_AUTO_CLOSE_SEC + _speaking_seconds(clean_text))
-            return
+            return "auto_close"
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
             # Speak the sentence the guide already generated while judging.
             # Generating a second one would risk it contradicting the first.
             text = getattr(self._scratch, "wrap_up_text", None)
             target = action.robot_id or guide_id
-            if text and target:
+            if not (text and target):
+                return None
+
+            # AFTER the answer has been said, not on top of it. The judgement
+            # is made when GENERATION finishes, and the answering robot is
+            # still working through its sentences at that point — a live run
+            # had Pepper's "Shall we move on?" start while Navel was two
+            # sentences into explaining the pipeline. Same reasoning as the
+            # auto-close delay above; the guide waits out the answer it is
+            # reacting to.
+            def _say_wrap_up():
+                orch = self._demo_orchestrator
+                if orch is None or orch.get_status().get("state") != "qa_window":
+                    return   # the window closed while we waited — nothing to wrap
                 self.send_to_robot(target, {
                     "event":       "demo_step",
                     "step_id":     "_qa_wrap_up",
                     "text":        text,
                     "require_ack": False,
                 })
+
+            self._schedule_qa_action(_speaking_seconds(clean_text), _say_wrap_up)
+            return "wrap_up"
+
+        return None
 
     def check_qa_advance_from_user(self, decider, user_text: str):
         """

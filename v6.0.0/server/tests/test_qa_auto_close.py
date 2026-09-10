@@ -349,3 +349,250 @@ class TestPickingUpAfterAQuestion:
         o, step = self._orch()
         o._resume_after_qa, o._qa_block = True, "someone_else"
         assert o._resuming_hint(step) == ""
+
+    def test_a_step_belonging_to_no_block_does_not_pick_up(self):
+        # The opening and the wrap-up belong to the tour, not to a project.
+        # Nothing of theirs was ever interrupted by a project's Q&A.
+        from demo.demo_orchestrator import DemoStep
+        o, _ = self._orch()
+        o._resume_after_qa, o._qa_block = True, A
+        assert o._resuming_hint(
+            DemoStep(step_id="wrap_up", robot_id=GUIDE, text="Thanks all.")) == ""
+
+
+class TestOnlyAnInterruptionIsPickedUpFrom:
+    """
+    The lead-in belongs to the ad-hoc window a VISITOR opens by speaking up
+    mid-presentation — the only case where a presentation really was cut off
+    with something left to say.
+
+    A block's own scripted Q&A step sits at the END of that block, so nothing
+    is left to pick up and the next thing said is the guide moving on to
+    another robot entirely. Arming it there had Pepper open every single
+    transition with "Let me carry on where I left off. Coming back to our
+    next project..." — announcing a return to something already finished.
+    """
+
+    def _orch(self):
+        class Stub:
+            def send_to_robot(self, *a, **k): pass
+        o = DemoOrchestrator(Stub())
+        o.load_script(build_script(GUIDE, [A, B]))
+        return o
+
+    def _qa_step_of(self, o, robot_id):
+        return next(s for s in o._script
+                    if s.block_robot_id == robot_id and s.role == StepRole.QA)
+
+    def _run_scripted_window(self, o, robot_id):
+        # A real one, opened and closed. _open_qa_window CLEARS the close
+        # event on entry, so the window cannot be pre-closed — it has to be
+        # given a budget instead, and a hundredth of a second of it is enough
+        # to reach the exit path this test is about.
+        from dataclasses import replace
+        o._state = DemoState.QA_WINDOW
+        o._open_qa_window(replace(self._qa_step_of(o, robot_id), qa_timeout=0.01))
+
+    def test_a_scripted_qa_window_arms_nothing(self):
+        o = self._orch()
+        self._run_scripted_window(o, A)
+        assert o._resume_after_qa is False
+
+    def test_the_transition_after_a_scripted_window_has_no_lead_in(self):
+        # The reported line, end to end: the guide's transition to the next
+        # robot must not open by carrying on from anything.
+        o = self._orch()
+        self._run_scripted_window(o, A)
+        transition = next(s for s in o._script
+                          if s.role == StepRole.TRANSITION and s.block_robot_id == A)
+        assert o._resuming_hint(transition) == ""
+
+    def test_an_interruption_arms_the_lead_in_for_that_block(self):
+        o = self._orch()
+        o._idx = next(i for i, s in enumerate(o._script)
+                      if s.block_robot_id == A and s.role == StepRole.PROJECT)
+        o._state = DemoState.QA_WINDOW      # what qa_interrupt() sets
+        o._qa_end_event.set()
+        assert o._wait_if_interrupted_qa() is True
+        assert o._resume_after_qa is True
+        assert o._qa_block == A
+        assert "carrying on" in o._resuming_hint(o._script[o._idx])
+
+    def test_an_interruption_does_not_arm_another_robots_block(self):
+        o = self._orch()
+        o._idx = next(i for i, s in enumerate(o._script)
+                      if s.block_robot_id == A and s.role == StepRole.PROJECT)
+        o._state = DemoState.QA_WINDOW
+        o._qa_end_event.set()
+        o._wait_if_interrupted_qa()
+        b_step = next(s for s in o._script if s.block_robot_id == B)
+        assert o._resuming_hint(b_step) == ""
+
+
+class TestTheVerbatimResumeSaysSoItself:
+    """
+    The remainder of an interrupted sentence is repeated verbatim, never
+    regenerated, so it cannot be ASKED to introduce itself the way a
+    generated step can. Without a lead-in of its own the robot answered the
+    visitor's question and then, with no seam at all, resumed on the second
+    half of a sentence.
+    """
+
+    def _orch_mid_project(self):
+        class Stub:
+            def send_to_robot(self, *a, **k): pass
+        o = DemoOrchestrator(Stub())
+        o.load_script(build_script(GUIDE, [A, B]))
+        o._state = DemoState.QA_WINDOW
+        o._idx = next(i for i, s in enumerate(o._script)
+                      if s.block_robot_id == A and s.role == StepRole.PROJECT)
+        return o
+
+    def test_the_remainder_is_spoken_after_a_lead_in(self):
+        o = self._orch_mid_project()
+        cut = o._script[o._idx]
+        o.note_interrupted_step(cut.robot_id, cut.step_id, "It matters because of X.")
+        resume = o._script[o._idx + 1]
+        assert resume.text.startswith(o.RESUME_LEAD_IN)
+        assert resume.text.endswith("It matters because of X.")
+        assert resume.generate is False
+
+    def test_the_lead_in_lands_after_an_emotion_tag(self):
+        # The client reads the tag off the front of the text; a lead-in
+        # pushed in ahead of it would be spoken and the tag lost.
+        o = self._orch_mid_project()
+        cut = o._script[o._idx]
+        o.note_interrupted_step(cut.robot_id, cut.step_id, "[HAPPY] And that is the impact.")
+        assert o._script[o._idx + 1].text == f"[HAPPY] {o.RESUME_LEAD_IN}And that is the impact."
+
+    def test_it_is_not_said_twice(self):
+        o = self._orch_mid_project()
+        assert (o._with_resume_lead_in(o.RESUME_LEAD_IN + "the rest of it")
+                == o.RESUME_LEAD_IN + "the rest of it")
+
+    def test_resume_suffixes_do_not_stack(self):
+        # A resume that is itself interrupted stays "<step>_resume", never
+        # "<step>_resume_resume_resume".
+        o = self._orch_mid_project()
+        cut = o._script[o._idx]
+        o.note_interrupted_step(cut.robot_id, cut.step_id, "first remainder")
+        o._idx += 1
+        resume = o._script[o._idx]
+        o.note_interrupted_step(resume.robot_id, resume.step_id, "second remainder")
+        assert o._script[o._idx + 1].step_id == f"{cut.step_id}_resume"
+
+    def test_a_verbatim_resume_consumes_the_generated_lead_in(self):
+        # Otherwise the flag survives the resume — which already introduced
+        # itself — and lands on a LATER generated step, which opens with
+        # "let me carry on where I left off" minutes after the interruption.
+        o = self._orch_mid_project()
+        cut = o._script[o._idx]
+        o.note_interrupted_step(cut.robot_id, cut.step_id, "the rest of it")
+        o._resume_after_qa, o._qa_block = True, A
+        o._send_step(o._script[o._idx + 1])
+        assert o._resume_after_qa is False
+
+
+class TestTheGuideWrapsUpAfterTheAnswer:
+    """
+    The guide's "Shall we move on to the next part of the demo?" is a
+    judgement made when GENERATION finishes — and the robot that just
+    answered is still working through its sentences at that point.
+
+    A live run had Pepper start that line while Navel was two sentences into
+    explaining the pipeline, and in the same second Navel was told to ask "Do
+    you have any other questions, or shall we continue the demonstration?".
+    Two voices, one second, contradicting each other about what was being
+    asked. Both moves are reasonable alone; what was missing is that they are
+    alternatives, and that one of them has to wait.
+    """
+
+    WRAP_UP = "Wonderful! Shall we move on to the next part of the demo?"
+
+    def _interjecting(self, gw, monkeypatch):
+        from decision.models import Action
+        from decision.policy import PolicyResult
+
+        def fake_decide(point, decider, user_utterance=""):
+            gw._scratch.wrap_up_text = self.WRAP_UP
+            return PolicyResult(Action.guide_interject(GUIDE), "llm_moderator")
+
+        monkeypatch.setattr(gw, "_decide", fake_decide)
+
+    def _capture(self, gw):
+        sent = []
+        gw.send_to_robot = lambda cid, data: sent.append((cid, data))
+        return sent
+
+    def _slow_speech(self, monkeypatch, seconds=0.2):
+        """Give the pending wrap-up a window to be called off inside.
+
+        The autouse fixture zeroes speaking time, which makes the timer fire
+        almost instantly — fine for "does it fire at all", useless for "can
+        it be stopped". The real delay is seconds long; this is the same
+        shape, small enough to keep the test quick.
+        """
+        monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds",
+                            lambda _t: seconds)
+
+    def test_it_reports_what_it_set_in_motion(self, wired, monkeypatch):
+        gw, _orch, _r, _closed = wired
+        self._capture(gw)
+        self._interjecting(gw, monkeypatch)
+        assert gw.check_qa_auto_close(A, A_REAL_ANSWER) == "wrap_up"
+
+    def test_a_sign_off_reports_the_close_it_scheduled(self, wired):
+        gw, _orch, _r, _closed = wired
+        assert gw.check_qa_auto_close(A, SIGN_OFF) == "auto_close"
+
+    def test_an_ordinary_answer_reports_nothing(self, wired):
+        gw, _orch, _r, _closed = wired
+        assert gw.check_qa_auto_close(A, A_REAL_ANSWER) is None
+
+    def test_nothing_is_reported_outside_a_qa_window(self, wired):
+        gw, orch, _r, _closed = wired
+        orch._state = DemoState.RUNNING
+        assert gw.check_qa_auto_close(A, SIGN_OFF) is None
+
+    def test_the_wrap_up_waits_out_the_answer(self, wired, monkeypatch):
+        # The reported symptom: the guide talking over the robot it is
+        # reacting to.
+        gw, _orch, _r, _closed = wired
+        sent = self._capture(gw)
+        monkeypatch.undo()          # restore the real speaking-time estimate
+        self._interjecting(gw, monkeypatch)
+        gw.check_qa_auto_close(A, "word " * 60)
+        _settle(0.3)
+        assert sent == [], "the guide spoke while the answer was still being said"
+
+    def test_the_wrap_up_is_said_once_the_answer_is_done(self, wired, monkeypatch):
+        gw, _orch, _r, _closed = wired
+        sent = self._capture(gw)
+        self._interjecting(gw, monkeypatch)   # speaking time zeroed by the autouse fixture
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        _settle()
+        assert [(cid, d["step_id"]) for cid, d in sent] == [(GUIDE, "_qa_wrap_up")]
+        assert sent[0][1]["text"] == self.WRAP_UP
+
+    def test_a_visitor_speaking_calls_the_wrap_up_off(self, wired, monkeypatch):
+        # Whatever the guide was about to wrap up is stale the moment the
+        # visitor asks something else. One timer slot, so the existing
+        # cancel covers this too.
+        gw, _orch, _r, _closed = wired
+        sent = self._capture(gw)
+        self._slow_speech(monkeypatch)
+        self._interjecting(gw, monkeypatch)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        gw.cancel_qa_auto_close("visitor spoke")
+        _settle(0.4)
+        assert sent == []
+
+    def test_the_wrap_up_does_not_outlive_its_window(self, wired, monkeypatch):
+        gw, orch, _r, _closed = wired
+        sent = self._capture(gw)
+        self._slow_speech(monkeypatch)
+        self._interjecting(gw, monkeypatch)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        orch._state = DemoState.RUNNING   # closed by someone else meanwhile
+        _settle(0.4)
+        assert sent == []

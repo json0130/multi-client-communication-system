@@ -141,7 +141,14 @@ def client():
     app.register_blueprint(create_http_gateway(registry, gw))
     test_client = app.test_client()
     test_client.sent = sent
+    test_client.ws_gateway = gw
     return test_client
+
+
+@pytest.fixture
+def ws_gateway(client):
+    """The same gateway the Flask blueprint was wired with."""
+    return client.ws_gateway
 
 
 class TestNoDoublePromptOnAdvance:
@@ -162,6 +169,42 @@ class TestNoDoublePromptOnAdvance:
     def test_a_real_question_still_gets_the_more_questions_prompt(self, client):
         # The resend exists for a reason — a genuine follow-up must still get
         # it. Only an ADVANCE this same turn should suppress it.
+        resp = client.post(f"/robots/{A}/chat", json={"message": "how accurate is it"})
+        assert resp.status_code == 200
+
+        step_ids = [d.get("step_id") for _, d in client.sent if d.get("event") == "demo_step"]
+        assert "_qa_more_questions" in step_ids
+
+
+class TestAClosingMoveReplacesThePrompt:
+    """
+    "Do you have any other questions, or shall we continue the demonstration?"
+    and the guide's "Shall we move on to the next part of the demo?" ask the
+    visitor the same thing. A live run sent both, from two robots, in the
+    same second.
+
+    check_qa_auto_close reports what it set in motion precisely so this path
+    can stand down — see gateway/websocket_gateway.py.
+    """
+
+    # The WS-side tests cover check_qa_auto_close DECIDING this; here the
+    # question is only whether robot_chat honours what it reports.
+
+    @pytest.mark.parametrize("verdict", ["wrap_up", "auto_close"])
+    def test_no_prompt_when_a_closing_move_is_already_in_flight(
+            self, client, ws_gateway, verdict):
+        ws_gateway.check_qa_auto_close = lambda *a, **k: verdict
+        resp = client.post(f"/robots/{A}/chat", json={"message": "how accurate is it"})
+        assert resp.status_code == 200
+
+        step_ids = [d.get("step_id") for _, d in client.sent if d.get("event") == "demo_step"]
+        assert "_qa_more_questions" not in step_ids
+
+    def test_the_prompt_still_fires_when_nothing_else_will(
+            self, client, ws_gateway):
+        # The suppression is conditional, not a removal — a genuine follow-up
+        # that nothing else answers must still be invited to continue.
+        ws_gateway.check_qa_auto_close = lambda *a, **k: None
         resp = client.post(f"/robots/{A}/chat", json={"message": "how accurate is it"})
         assert resp.status_code == 200
 

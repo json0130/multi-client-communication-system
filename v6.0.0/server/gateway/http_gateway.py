@@ -409,7 +409,12 @@ def create_http_gateway(
         # Did the robot just sign off ("let me know if you have any other
         # questions")? If so the window closes on its own after a pause,
         # instead of waiting for someone to say "move on" out loud.
-        ws_gateway.check_qa_auto_close(target_id, result.clean_text or "")
+        #
+        # `closing` says whether that already put a closing move in flight —
+        # a scheduled auto-close, or the guide's wrap-up line. Either one is
+        # an alternative to the "any other questions?" prompt below, never a
+        # companion to it.
+        closing = ws_gateway.check_qa_auto_close(target_id, result.clean_text or "")
 
         # Handle delegation — run synchronously so the browser gets the
         # target's answer. Must run BEFORE the "more questions?" resend below,
@@ -458,6 +463,7 @@ def create_http_gateway(
         already_invited = _matches(result.clean_text or "", QA_CLOSING_PHRASES)
         if (ws_gateway._demo_orchestrator and not advancing
                 and not delegation_result and not already_invited
+                and not closing
                 and ws_gateway.claim_more_questions_prompt()):
             if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
                 ws_gateway.send_to_robot(target_id, {

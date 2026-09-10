@@ -21,6 +21,7 @@ Timeout on WAITING_ACK ──────► ERROR  (recover with manual_next)
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 import logging
@@ -461,10 +462,16 @@ class DemoOrchestrator:
                 logger.debug(f"[Demo] Ignoring stale interruption report for '{step_id}'.")
                 return
 
+            # One "_resume" suffix, never a chain. A resume that is itself
+            # interrupted used to become "..._resume_resume", and a third
+            # "..._resume_resume_resume" — an id that grows without bound and
+            # tells a reader nothing the first suffix did not.
+            base_id = (step_id[: -len("_resume")]
+                       if step_id.endswith("_resume") else step_id)
             resume_step = replace(
                 current,
-                step_id=f"{step_id}_resume",
-                text=remaining_text,
+                step_id=f"{base_id}_resume",
+                text=self._with_resume_lead_in(remaining_text),
                 generate=False,   # already-spoken content — repeat verbatim, don't regenerate
                 qa_window=False,  # the block's own Q&A step is still later in the tail
             )
@@ -477,6 +484,28 @@ class DemoOrchestrator:
                 "turns_at_queue": self._engagement_turns(current.block_robot_id),
             }
         logger.info(f"[Demo] Queued resume for '{step_id}' ({len(remaining_text)} chars).")
+
+    RESUME_LEAD_IN = "Let me carry on where I left off. "
+
+    def _with_resume_lead_in(self, remaining_text: str) -> str:
+        """The unspoken remainder, opened with a short line saying so.
+
+        The remainder is repeated verbatim rather than regenerated, so it
+        cannot be asked to introduce itself the way a generated step can (see
+        RESUMING_HINT). Without a lead-in the robot simply resumed on the
+        second half of a sentence — the visitor heard an answer to their
+        question and then, with no seam at all, the middle of the explanation
+        that had been running before they spoke.
+
+        Placed AFTER any leading emotion tag, so the client still reads the
+        tag off the front, and never added twice.
+        """
+        text = (remaining_text or "").strip()
+        m = re.match(r"^(\[[A-Z_]+\]\s*)(.*)$", text, flags=re.S)
+        tag, body = (m.group(1), m.group(2)) if m else ("", text)
+        if body.lower().startswith(self.RESUME_LEAD_IN.strip().lower()):
+            return text
+        return f"{tag}{self.RESUME_LEAD_IN}{body}"
 
     def _engagement_turns(self, robot_id: Optional[str]) -> int:
         tracker = getattr(self._ws, "tracker", None)
@@ -910,6 +939,15 @@ class DemoOrchestrator:
             if self._state in (DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR):
                 return False
             self._state = DemoState.RUNNING
+            # THIS is the window that interrupts a presentation: a visitor
+            # spoke up while a robot was still presenting, so whatever comes
+            # next really is picking that presentation back up. Remember whose
+            # block was cut off, so the lead-in is only added if that same
+            # block continues — see _resuming_hint.
+            idx = self._idx
+            current = self._script[idx] if idx < len(self._script) else None
+            self._qa_block = current.block_robot_id if current else None
+            self._resume_after_qa = True
 
         logger.info("[Demo] Ad-hoc Q&A closed — resuming demo.")
         return True
@@ -1168,26 +1206,31 @@ class DemoOrchestrator:
     )
 
     def _resuming_hint(self, step: DemoStep) -> str:
-        """A lead-in for the first step after a Q&A window closed.
+        """A lead-in for the first step after a visitor INTERRUPTED the tour.
 
-        Without it the tour simply resumed mid-thought: a visitor asked
-        something, got an answer, and then the robot's next scripted sentence
-        began with no acknowledgement that the detour had ended — which reads
-        as the robot having forgotten the exchange rather than returning from
-        it.
+        Set only by _wait_if_interrupted_qa — the ad-hoc window a visitor
+        opens by speaking up mid-presentation. Without it the tour resumed
+        mid-thought: a visitor asked something, got an answer, and the robot's
+        next scripted sentence carried on with no acknowledgement that the
+        detour had ended, which reads as having forgotten the exchange rather
+        than returning from it.
 
-        Consumed once, so only the first step back carries it and the rest of
-        the block continues normally.
+        Deliberately NOT set by a block's own scripted Q&A step. That step
+        sits at the end of its block, so there is nothing left to pick up and
+        the next thing said is the guide moving to another robot entirely.
+
+        Consumed once, and only when the SAME block continues — an exact
+        match, so a step belonging to no block does not inherit a lead-in
+        from a block that was interrupted, or the reverse.
         """
         with self._lock:
             if not self._resume_after_qa:
                 return ""
-            if step.block_robot_id and step.block_robot_id != self._qa_block:
+            self._resume_after_qa = False
+            if step.block_robot_id != self._qa_block:
                 # A different block entirely — the guide's transition already
                 # covers the change, so there is nothing to pick up.
-                self._resume_after_qa = False
                 return ""
-            self._resume_after_qa = False
         return self.RESUMING_HINT
 
     def framing_for_robot(self, robot_id: str) -> str:
@@ -1244,6 +1287,14 @@ class DemoOrchestrator:
 
     def _send_step(self, step: DemoStep):
         text = step.text
+        # Consumed for EVERY step, used only by generated ones. The first step
+        # back after an interruption is usually the verbatim resume of the
+        # sentence that was cut off (generate=False), which already carries
+        # its own lead-in from note_interrupted_step. Consuming the flag only
+        # inside the generate branch let that resume slip past it, so the
+        # NEXT step — a fresh part of the talk, minutes later — opened with
+        # "let me carry on where I left off" instead.
+        resuming = self._resuming_hint(step)
         if step.generate:
             # Style framing, if a visitor profile set one — appended to the
             # INSTRUCTION the robot generates from, not to already-spoken text,
@@ -1253,7 +1304,7 @@ class DemoOrchestrator:
             with self._lock:
                 profile = self._visitor_profile
             instruction = (step.text
-                           + self._resuming_hint(step)
+                           + resuming
                            + self._framing_for(step.robot_id, profile))
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
             generated = self._ws.generate_demo_step(step.robot_id, instruction)
@@ -1300,18 +1351,19 @@ class DemoOrchestrator:
                     f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
 
         self._notify_window("open")
-        with self._lock:
-            # Whose block this window belongs to, so the resuming lead-in is
-            # only added when that same robot picks its presentation back up.
-            self._qa_block = step.block_robot_id
         opened_at = time.time()
         closed_naturally = self._qa_end_event.wait(timeout=timeout)
         elapsed = time.time() - opened_at
         self._notify_window("close")
-        with self._lock:
-            # The next step of this block should open by acknowledging that
-            # it is carrying on — see _resuming_hint.
-            self._resume_after_qa = True
+        # No resuming lead-in here. This is the block's OWN scripted Q&A step,
+        # which sits at the END of that block: nothing of the presentation is
+        # left to pick up, and the step that follows is the guide's transition
+        # to the next robot. Saying "let me carry on where I left off" there
+        # announced a return to something already finished — a live run had
+        # Pepper open every single transition with it. The lead-in belongs to
+        # the ad-hoc window a visitor opens by interrupting, which is the only
+        # case where a presentation really was cut off mid-way — see
+        # _wait_if_interrupted_qa.
 
         # 'timeout' means the allocated budget ran out with nobody closing it —
         # distinct from an operator or the policy deciding to move on, and the

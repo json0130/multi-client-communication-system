@@ -511,9 +511,15 @@ class TestInterruptionResume:
         interrupted = o._script[o._idx]
         o.note_interrupted_step(interrupted.robot_id, interrupted.step_id,
                                  "...and that's how we handle noisy sensor data.")
-        assert o._script[o._idx + 1].text == "...and that's how we handle noisy sensor data."
-        assert o._script[o._idx + 1].robot_id == interrupted.robot_id
-        assert o._script[o._idx + 1].block_robot_id == interrupted.block_robot_id
+        # The remainder is carried whole. It is preceded by a short lead-in
+        # (see _with_resume_lead_in) because the robot is picking a sentence
+        # back up after answering something else — assert the remainder
+        # survives rather than pinning the wording of the lead-in.
+        resume = o._script[o._idx + 1]
+        assert resume.text.endswith("...and that's how we handle noisy sensor data.")
+        assert resume.text != "...and that's how we handle noisy sensor data."
+        assert resume.robot_id == interrupted.robot_id
+        assert resume.block_robot_id == interrupted.block_robot_id
 
     def test_current_step_object_is_unmoved(self, orch_mid_project):
         o = orch_mid_project
@@ -673,7 +679,7 @@ class TestStaleResumeDrop:
         second_resume, _ = self._queue(o, "second remainder")
 
         assert o._pending_resume["step_id"] == second_resume.step_id
-        assert second_resume.text == "second remainder"
+        assert second_resume.text.endswith("second remainder")
         assert o._drop_if_stale_resume(second_resume) is second_resume
 
     def test_a_step_that_was_never_queued_is_passed_through_untouched(self, orch_mid_project):
