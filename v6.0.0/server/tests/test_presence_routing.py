@@ -253,7 +253,7 @@ class TestAbsentRobotPolicy:
             remaining_block_ids={OTHER}, guide_robot_id=GUIDE)
         assert d.is_deferred is False
         assert d.robot_id == GUIDE
-        assert "already cut" in d.reason
+        assert "not still ahead" in d.reason
 
     def test_guide_answers_policy_never_defers(self):
         d = self._router(policy="guide_answers", absent=[R]).decide(

@@ -884,6 +884,28 @@ class WebSocketGateway:
             logger.warning(f"[WS Gateway] style framing lookup failed: {e}")
             return ""
 
+    def answer_kwargs(self, target_id: str, message: str) -> dict:
+        """Everything process_chat_stream needs beyond the message itself.
+
+        When routing chose the guide because the robot that owns the question
+        is at another station, the guide answers with THAT robot's facts and
+        is told it is standing in. Read from this thread's routing decision,
+        so call it on the same thread, right after route_question.
+        """
+        stand_in = getattr(self._scratch, "standing_in_for", None)
+        if stand_in and stand_in != target_id:
+            inst = self._registry.get(stand_in)
+            name = getattr(inst, "robot_name", None) or stand_in
+            return {
+                "style_framing": self.style_framing_for(target_id),
+                "grounded_facts": self.grounding_for(stand_in, message),
+                "standing_in_for": name,
+            }
+        return {
+            "style_framing": self.style_framing_for(target_id),
+            "grounded_facts": self.grounding_for(target_id, message),
+        }
+
     def grounding_for(self, robot_id: str, utterance: str) -> list:
         """Verified detail this robot may state about what was just asked.
 
@@ -1596,8 +1618,7 @@ class WebSocketGateway:
 
                     result = target_instance.process_chat_stream(
                         message, _on_sentence,
-                        style_framing=self.style_framing_for(target_id),
-                        grounded_facts=self.grounding_for(target_id, message),
+                        **self.answer_kwargs(target_id, message),
                     )
                     # Did the robot just sign off? If so the window closes on
                     # its own after a pause, instead of waiting for someone to
