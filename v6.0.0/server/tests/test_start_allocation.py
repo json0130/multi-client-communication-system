@@ -115,3 +115,27 @@ class TestTheRunIsIdentifiable:
         d = build_observation(status=orch.get_status(), registry=None,
                               tracker=DemoRunTracker()).as_dict()
         assert d["visitor_interest"] == "" and d["visitor_topics"] == []
+
+
+class TestEachTourStartsFresh:
+    """A server that had run one tour cut every Q&A window in the next to 5s:
+    the engagement counts were never reset, so every project looked as if
+    the visitor had already asked about it."""
+
+    def test_questions_from_the_last_tour_do_not_carry_over(self):
+        gw, orch, _ = _wired(lambda obs: None)
+        gw.tracker.note_visitor_turn(A, "how does it work?")
+        assert gw.tracker.engagement_for(A)["turns"] == 1
+        orch._state = DemoState.IDLE
+        orch._run_loop = lambda: None
+        orch.start(time_budget_sec=900)
+        assert gw.tracker.engagement_for(A)["turns"] == 0
+
+    def test_so_the_next_tours_qa_is_not_shortened(self):
+        gw, orch, _ = _wired(lambda obs: None)
+        gw.tracker.note_visitor_turn(A, "how does it work?")
+        orch._state = DemoState.IDLE
+        orch._run_loop = lambda: None
+        orch.start(time_budget_sec=900)
+        step = next(s for s in orch._script if s.qa_window and s.block_robot_id == A)
+        assert orch._shrink_if_already_engaged(step).qa_timeout == step.qa_timeout

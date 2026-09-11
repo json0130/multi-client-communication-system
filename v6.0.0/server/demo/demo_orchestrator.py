@@ -286,6 +286,14 @@ class DemoOrchestrator:
             self._pause_event.set()
         if self._recorder is not None:
             self._recorder.clear()
+        # Per-tour counts start from zero. Nothing reset them, so a server that
+        # had run one tour treated every project in the next as "already asked
+        # about" and cut each scripted Q&A window to ALREADY_ENGAGED_QA_SEC —
+        # in three live runs every window closed after 5 quiet seconds while
+        # the visitor was still asking.
+        tracker = getattr(self._ws, "tracker", None)
+        if tracker is not None:
+            tracker.start_run()
         # Before the first step, outside the lock: the planner reads status.
         plan_at_start = getattr(self._ws, "plan_at_start", None)
         if callable(plan_at_start):

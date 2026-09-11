@@ -269,24 +269,11 @@ class RobotInstance:
                 self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context,
                 grounded_facts=grounded_facts,
+                standing_in_for=standing_in_for,
             )
 
         if style_framing:
             system += f"\n\n*** THIS VISITOR ***{style_framing}"
-
-        # Answering for a robot at another station. Last in the prompt so it
-        # overrides the general "hand it over to whoever owns it" rule, which
-        # would otherwise send the question straight back to a robot the
-        # visitors cannot reach.
-        if standing_in_for:
-            system += (
-                f"\n\n*** STANDING IN FOR {standing_in_for.upper()} ***\n"
-                f"{standing_in_for} is at another station in the lab, so you are "
-                f"answering this for them. Answer it yourself — do not hand it "
-                f"over or tell the visitor to ask {standing_in_for}. The facts "
-                f"listed above describe {standing_in_for}'s work: present them as "
-                f"{standing_in_for}'s, not your own."
-            )
 
         from modules.llm.llm_provider import parse_response
         full_text = ""

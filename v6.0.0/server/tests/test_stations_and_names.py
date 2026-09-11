@@ -241,5 +241,26 @@ class TestTheStandInPrompt:
         inst._parse_delegation = lambda t: (False, None)
         inst.process_chat_stream("how does navel read emotions?", lambda *a: None,
                                  standing_in_for="Navel")
-        assert "STANDING IN FOR NAVEL" in _LLM.system
-        assert "do not hand it over" in _LLM.system
+        assert "standing in for Navel" in _LLM.system
+        assert "Do not hand it over" in _LLM.system
+
+    def test_the_hand_over_section_is_left_out_when_standing_in(self):
+        # With it present, Pepper followed its "RobotX, can you take it?"
+        # template and called over a robot at another station.
+        from robot.prompt_builder import build_delegation_prompt
+        peers = [{"client_id": "navel_01", "robot_name": "Navel",
+                  "robot_role": "Emotion research", "declared_topics": ["emotion recognition"]}]
+        normal, _ = build_delegation_prompt("Pepper", "Guide", ["[DEFAULT]"], "q", peers, [])
+        standin, _ = build_delegation_prompt("Pepper", "Guide", ["[DEFAULT]"], "q", peers, [],
+                                             standing_in_for="Navel")
+        assert "TEAMMATES & DELEGATION" in normal
+        assert "TEAMMATES & DELEGATION" not in standin
+        assert "target_robot_id" not in standin
+
+    def test_the_prompt_has_no_real_method_to_copy(self):
+        # A worked example naming FAISS made Pepper, standing in for Navel,
+        # say emotion recognition used "a FAISS index" in 3 of 10 answers.
+        from robot.prompt_builder import build_delegation_prompt
+        system, _ = build_delegation_prompt("Pepper", "Guide", ["[DEFAULT]"], "q", [], [],
+                                            grounded_facts=["method: something"])
+        assert "FAISS" not in system

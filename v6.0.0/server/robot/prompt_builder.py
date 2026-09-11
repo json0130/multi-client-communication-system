@@ -33,6 +33,7 @@ def build_delegation_prompt(
     active_robots: list[dict],          # [{"client_id": ..., "robot_name": ..., "robot_role": ...}]
     rag_context: Sequence[ClearedRecord],   # RBAC-cleared past user messages
     grounded_facts: Sequence[str] = (),
+    standing_in_for: str = "",
 ) -> tuple[str, str]:
     """
     Build (system_prompt, user_message) for delegation mode.
@@ -64,9 +65,8 @@ def build_delegation_prompt(
             "USE THESE. They are the specifics a visitor came for, and they "
             "are confirmed — name the method, the model, the index, the "
             "numbers, rather than paraphrasing them into something vaguer. "
-            "Asked how the retrieval works, \"a FAISS index searched by "
-            "vector similarity\" is the answer; \"we build an index of past "
-            "conversations\" is the same sentence with the content removed.\n"
+            "Use the exact names from the list; do not borrow a method from "
+            "anywhere else.\n"
             "They are also the ONLY specifics you may state. Anything marked "
             "UNVERIFIED is a draft nobody has confirmed — describe it in "
             "general terms and do not quote it as a precise result.\n"
@@ -107,6 +107,15 @@ def build_delegation_prompt(
     else:
         peers_block = "CURRENTLY ACTIVE ROBOTS:\n  None. You are the only active robot."
 
+    stand_in_block = (
+        f"\n*** You are standing in for {standing_in_for} ***\n"
+        f"{standing_in_for} is at another station in the lab, so you answer this "
+        f"question yourself, for them. Do not hand it over and do not suggest "
+        f"asking {standing_in_for}. The facts above are {standing_in_for}'s work: "
+        f"say \"{standing_in_for}'s project...\", not \"we\". If the visitor only "
+        f"asks whether they may ask, say yes and give one fact to start.\n"
+    ) if standing_in_for else ""
+
     system_prompt = f"""You are {robot_name}. Your role: '{robot_role}'.
 
 *** MANDATORY FORMATTING RULES ***
@@ -129,7 +138,7 @@ def build_delegation_prompt(
 *** INCORRECT EXAMPLES (never do this) ***
 Hello! {example_tag} How are you?   <- text before the tag
 {example_tag} Sure! {example_tag} Let me help.  <- two tags
-{rag_block}{facts_block}{honesty_rule}
+{rag_block}{facts_block}{honesty_rule}{stand_in_block}
 *** TEAMMATES & DELEGATION ***
 {peers_block}
 
@@ -150,6 +159,13 @@ CRITICAL: Never invent robot IDs. Only use IDs from the active list above.
 CRITICAL: A hand-off without the JSON block does nothing. If you name a
 teammate, the JSON block must be in the same response or the visitor is
 left waiting for an answer that will never come."""
+
+    if standing_in_for:
+        # The owner is at another station, so there is nobody to hand over to.
+        # The hand-over section stays out entirely: with it present, Pepper
+        # followed its "RobotX, can you take it?" template and called over a
+        # robot the group could not reach, even with a stand-in note after it.
+        system_prompt = system_prompt.split("\n*** TEAMMATES & DELEGATION ***")[0]
 
     return system_prompt, user_message
 
