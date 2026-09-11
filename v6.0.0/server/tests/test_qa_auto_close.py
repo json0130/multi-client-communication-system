@@ -650,6 +650,7 @@ class TestTheGuideWrapsUpAfterTheAnswer:
         gw, _orch, _r, _closed = wired
         sent = self._capture(gw)
         self._interjecting(gw, monkeypatch)   # speaking time zeroed by the autouse fixture
+        monkeypatch.setattr("gateway.websocket_gateway.QA_WRAP_UP_SILENCE_SEC", 0.0)
         gw.check_qa_auto_close(A, A_REAL_ANSWER)
         _settle()
         assert [(cid, d["step_id"]) for cid, d in sent] == [(GUIDE, "_qa_wrap_up")]
@@ -679,6 +680,61 @@ class TestTheGuideWrapsUpAfterTheAnswer:
         orch._state = DemoState.RUNNING   # closed by someone else meanwhile
         _settle(0.4)
         assert sent == []
+
+
+class TestTheWrapUpIsNotAnInterruption:
+    """A live run had Pepper say "Wonderful! Shall we move on to the next
+    part?" the moment every answer ended — three times in one window."""
+
+    def _setup(self, gw, monkeypatch, silence):
+        from decision.models import Action
+        from decision.policy import PolicyResult
+
+        def fake_decide(point, decider, user_utterance=""):
+            gw._scratch.wrap_up_text = "Shall we move on?"
+            return PolicyResult(Action.guide_interject(GUIDE), "llm_moderator")
+
+        monkeypatch.setattr(gw, "_decide", fake_decide)
+        monkeypatch.setattr("gateway.websocket_gateway.QA_WRAP_UP_SILENCE_SEC", silence)
+        sent = []
+        gw.send_to_robot = lambda cid, data: sent.append(data)
+        return lambda: [d for d in sent if d.get("step_id") == "_qa_wrap_up"]
+
+    def test_it_waits_for_silence(self, wired, monkeypatch):
+        gw, _o, _r, _c = wired
+        offers = self._setup(gw, monkeypatch, silence=0.3)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        _settle(0.1)
+        assert offers() == []
+        _settle(0.4)
+        assert len(offers()) == 1
+
+    def test_a_visitor_speaking_first_cancels_it(self, wired, monkeypatch):
+        gw, _o, _r, _c = wired
+        offers = self._setup(gw, monkeypatch, silence=0.2)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        gw.cancel_qa_auto_close("visitor spoke")
+        _settle(0.4)
+        assert offers() == []
+
+    def test_it_is_offered_once_per_window(self, wired, monkeypatch):
+        gw, _o, _r, _c = wired
+        offers = self._setup(gw, monkeypatch, silence=0.0)
+        for _ in range(3):
+            gw.check_qa_auto_close(A, A_REAL_ANSWER)
+            _settle(0.1)
+        assert len(offers()) == 1
+
+    def test_a_cancelled_offer_does_not_use_up_the_window(self, wired, monkeypatch):
+        gw, _o, _r, _c = wired
+        offers = self._setup(gw, monkeypatch, silence=0.2)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        gw.cancel_qa_auto_close("visitor spoke")
+        _settle(0.3)
+        monkeypatch.setattr("gateway.websocket_gateway.QA_WRAP_UP_SILENCE_SEC", 0.0)
+        gw.check_qa_auto_close(A, A_REAL_ANSWER)
+        _settle(0.2)
+        assert len(offers()) == 1
 
 
 class _NoisyGateway:

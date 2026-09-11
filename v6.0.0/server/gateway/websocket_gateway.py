@@ -118,6 +118,9 @@ def _speaking_seconds(text: str) -> float:
 
 
 QA_AUTO_CLOSE_SEC = 3.0
+
+QA_WRAP_UP_SILENCE_SEC = 8.0
+"""Quiet seconds after an answer before the guide offers to move on."""
 """Silence after a robot invites further questions before the tour moves on
 by itself.
 
@@ -645,6 +648,10 @@ class WebSocketGateway:
         guide_id = obs.guide_robot_id
         if not guide_id:
             return False
+        # Once per window — it shares the "any other questions?" claim. A live
+        # run had the guide offer to move on after every answer.
+        if self._asked_more_questions:
+            return False
         guide = self._registry.get(guide_id)
         if not guide or not hasattr(guide, "process_chat"):
             return False
@@ -990,6 +997,8 @@ class WebSocketGateway:
                 orch = self._demo_orchestrator
                 if orch is None or orch.get_status().get("state") != "qa_window":
                     return   # the window closed while we waited — nothing to wrap
+                if not self.claim_more_questions_prompt():
+                    return
                 self.send_to_robot(target, {
                     "event":       "demo_step",
                     "step_id":     "_qa_wrap_up",
@@ -997,7 +1006,10 @@ class WebSocketGateway:
                     "require_ack": False,
                 })
 
-            self._schedule_qa_action(self.seconds_until_quiet(), _say_wrap_up)
+            # Plus a pause, so a visitor has time to ask a follow-up first;
+            # speaking cancels it (check_qa_advance_from_user).
+            self._schedule_qa_action(
+                self.seconds_until_quiet() + QA_WRAP_UP_SILENCE_SEC, _say_wrap_up)
             return "wrap_up"
 
         return None
