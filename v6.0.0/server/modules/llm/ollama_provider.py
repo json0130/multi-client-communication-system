@@ -64,6 +64,25 @@ class OllamaProvider(LLMProvider):
         messages.append({"role": "user", "content": user_message})
         return self._call(messages)
 
+    ANSWER_MAX_TOKENS = 110
+    """Hard ceiling on a spoken answer.
+
+    Not a style preference — a latency bound. Measured on the demo machine
+    the model runs at roughly 12 tokens/sec, so every token it chooses to
+    emit is ~80ms a visitor spends watching a robot think. Generation was
+    unbounded, and the Q&A prompt asks for "1-2 sentences maximum" while the
+    grounding block hands over several facts and says "USE THESE": two
+    instructions in tension, which a 7B resolves by writing longer. Asking
+    more firmly does not bound anything; this does.
+
+    110 is about 2.5x what a compliant two-sentence answer needs, so it never
+    clips one — it catches the runaway, where the model keeps finding another
+    fact worth mentioning and the visitor waits eight seconds for it."""
+
+    STEP_MAX_TOKENS = 260
+    """The same ceiling for scripted step text, which is legitimately longer
+    than an answer — a project introduction is a short paragraph."""
+
     def stream_with_history(
         self,
         system_prompt: str,
@@ -83,6 +102,7 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 temperature=0.6,
+                max_tokens=self.ANSWER_MAX_TOKENS,
                 timeout=30,
                 stream=True,
             )
@@ -116,6 +136,7 @@ class OllamaProvider(LLMProvider):
                 model=self._model,
                 messages=messages,
                 temperature=0.6,
+                max_tokens=self.STEP_MAX_TOKENS,
                 timeout=30,
             )
             raw = resp.choices[0].message.content.strip()
