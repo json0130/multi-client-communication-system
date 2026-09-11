@@ -286,6 +286,10 @@ class DemoOrchestrator:
             self._pause_event.set()
         if self._recorder is not None:
             self._recorder.clear()
+        # Before the first step, outside the lock: the planner reads status.
+        plan_at_start = getattr(self._ws, "plan_at_start", None)
+        if callable(plan_at_start):
+            plan_at_start()
         self._runner = threading.Thread(target=self._run_loop, daemon=True, name="demo-runner")
         self._runner.start()
         logger.info(
@@ -899,6 +903,14 @@ class DemoOrchestrator:
                 # orchestrator could tell.
                 "visitor_style":   (self._visitor_profile.style
                                     if self._visitor_profile else None),
+                # The rest of the run's condition, so every logged decision
+                # says which visitor it was made for. Without these a run
+                # could not be told apart from another afterwards.
+                "visitor_interest": (self._visitor_profile.interest_text
+                                     if self._visitor_profile else ""),
+                "visitor_topics":  (list(self._visitor_profile.topics)
+                                    if self._visitor_profile else []),
+                "run_id":          self._run_id,
                 # Full step list for the dashboard timeline
                 "steps": [
                     {

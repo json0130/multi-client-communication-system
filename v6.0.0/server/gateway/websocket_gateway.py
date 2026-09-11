@@ -254,6 +254,8 @@ class WebSocketGateway:
         # LLM calls injected as callables so decision/ never imports robot/.
         self._recorder = recorder if recorder is not None else DecisionRecorder()
         self._tracker = DemoRunTracker()
+        # Kept here as well as in the policy: plan_at_start calls it directly.
+        self._flow_planner = flow_planner
         self._policy = policy if policy is not None else HeuristicPolicy(
             intent_classifier=self._classify_intent,
             wrap_up_judge=self._judge_wrap_up,
@@ -1125,6 +1127,50 @@ class WebSocketGateway:
               f"({result.mechanism})")
         self._demo_orchestrator.qa_end(source="policy")
         return result
+
+    def plan_at_start(self) -> None:
+        """Share out the tour's Q&A time before the first window opens.
+
+        The allocation (decision.planner.allocate_qa) only ever ran when the
+        planner did, and the planner only ran under time pressure. So in a
+        tour that was never short of time no window got a budget, and a
+        visitor's stated interest had no effect on Q&A at all; in a tight tour
+        it arrived only once the time was gone, and could cut only what was
+        left. A live run lost Silbot's block that way while Navel, which the
+        lab ranks lower, had already had its full Q&A.
+
+        Only the Q&A budgets are applied here. Compressing and skipping stay
+        reactive — they are for a tour actually running late, not for one
+        that merely might. No-op without a time budget: with nothing to fit
+        into there is nothing to share out.
+        """
+        orch = self._demo_orchestrator
+        planner = getattr(self, "_flow_planner", None)
+        if orch is None or planner is None:
+            return
+        try:
+            from decision.models import Action, PlanOpKind
+            status = orch.get_status()
+            guide_id, _ = guide_and_presenter(status)
+            decider = self._registry.get(guide_id) if guide_id else None
+            obs = build_observation(status=status, registry=self._registry,
+                                    tracker=self._tracker, decider=decider)
+            plan = planner(obs)
+            if not plan:
+                return
+            ops = [op for op in plan.get("ops", ())
+                   if op.kind is PlanOpKind.SET_QA_BUDGET]
+            if not ops:
+                return
+            orch.revise_script(ops, source="planner", reason="Q&A allocated at start")
+            self._recorder.record(build_decision(
+                point=DecisionPoint.PLAN_REVISE, action=Action.revise(ops),
+                mechanism="flow_planner_start", observation=obs,
+            ))
+            logger.info("[Plan] Q&A allocated at start: " + ", ".join(
+                f"{op.robot_id} {op.seconds}s" for op in ops))
+        except Exception as e:
+            logger.warning(f"[WS Gateway] start-of-tour allocation failed: {e}")
 
     def check_plan_revision(self, decider, user_text: str) -> bool:
         """

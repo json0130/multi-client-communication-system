@@ -278,6 +278,12 @@ class Observation:
     # The tour ahead of the play head — see the docstring above.
     remaining_steps: tuple = ()
 
+    # The run's condition — who the tour was for. Set once per run.
+    run_id: Optional[str] = None
+    visitor_style: Optional[str] = None
+    visitor_interest: str = ""
+    visitor_topics: tuple = ()
+
     # RBAC context — same identifiers as rbac_audit_log so the tables join
     decider_robot_id: Optional[str] = None
     decider_access_level: Optional[str] = None
@@ -314,6 +320,10 @@ class Observation:
             ],
             "guide_robot_id": self.guide_robot_id,
             "presenting_robot_id": self.presenting_robot_id,
+            "run_id": self.run_id,
+            "visitor_style": self.visitor_style,
+            "visitor_interest": self.visitor_interest,
+            "visitor_topics": list(self.visitor_topics),
             "decider_robot_id": self.decider_robot_id,
             "decider_access_level": self.decider_access_level,
             "scenario_id": self.scenario_id,

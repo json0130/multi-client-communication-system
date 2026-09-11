@@ -396,6 +396,11 @@ def build_observation(
         presenting_robot_id=presenter_id,
         remaining_steps=remaining,
 
+        run_id=status.get("run_id"),
+        visitor_style=status.get("visitor_style"),
+        visitor_interest=status.get("visitor_interest") or "",
+        visitor_topics=tuple(status.get("visitor_topics") or ()),
+
         decider_robot_id=getattr(decider, "client_id", None),
         decider_access_level=_access_level_str(getattr(decider, "access_level", None)),
         scenario_id=getattr(identity, "scenario_id", None),
