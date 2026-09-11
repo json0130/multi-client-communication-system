@@ -255,8 +255,8 @@ class TestTheBudgetIsNotLearnedFromItsOwnConstants:
     def test_per_block_medians_apply_the_same_exclusion(self, monkeypatch):
         # The loop guard has to hold everywhere a window length feeds a
         # figure that SETS window lengths, and the moment two estimators
-        # apply it separately one of them drifts. _visitor_ended is the one
-        # place it is written down.
+        # apply it separately one of them drifts. _windows_by_block is the
+        # one place it is written down.
         from data import demo_duration_repo
         rows = ([self._w(40.0, "policy", "silbot_01") for _ in range(6)]
                 + [self._w(5.0, "timeout", "silbot_01") for _ in range(50)])
@@ -278,3 +278,76 @@ class TestTheBudgetIsNotLearnedFromItsOwnConstants:
         rows = [self._w(40.0, "policy", None) for _ in range(20)]
         monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
         assert demo_duration_repo.qa_median_by_block() == {}
+
+
+class TestLimitHitWindowsCountAsAtLeastThatLong:
+    """
+    Dropping the windows that hit their time limit was safe while few windows
+    had one. With a limit on every window from the start of the tour, the
+    windows that hit it are the long ones, for the projects visitors want
+    more of — so dropping them pushed exactly those projects' medians down,
+    which shrank their next allocation, which made them hit the limit sooner.
+    On the first allocated live runs, Navel came out at 39s dropped against
+    57s counted as censored.
+    """
+
+    def _m(self, obs):
+        from data.demo_duration_repo import censored_median
+        return censored_median(obs)
+
+    def test_without_censoring_it_is_the_ordinary_median(self):
+        assert self._m([(10, True), (20, True), (30, True)]) == (20, False)
+        assert self._m([(10, True), (20, True), (30, True), (40, True)]) == (25, False)
+
+    def test_the_live_navel_case(self):
+        obs = [(4, True), (18, True), (39, True), (57, True), (61, True),
+               (60, False), (104, False)]
+        median, lower = self._m(obs)
+        assert median == 57 and lower is False
+
+    def test_censoring_never_lowers_the_estimate_below_dropping_it(self):
+        import random
+        import statistics
+        rng = random.Random(3)
+        for _ in range(200):
+            ended = [rng.uniform(5, 120) for _ in range(rng.randint(3, 12))]
+            cut = [rng.uniform(5, 150) for _ in range(rng.randint(0, 8))]
+            m, _ = self._m([(t, True) for t in ended] + [(t, False) for t in cut])
+            # The ordinary median of the ended windows alone, lower-middle
+            # convention to match Kaplan-Meier on an exact half.
+            dropped = sorted(ended)[(len(ended) - 1) // 2]
+            assert m >= dropped - 1e-9
+
+    def test_all_the_long_windows_cut_off_gives_a_lower_bound(self):
+        obs = [(10, True), (100, False), (120, False), (140, False)]
+        median, lower = self._m(obs)
+        assert lower is True and median == 140
+
+    def test_short_cut_off_windows_say_almost_nothing(self):
+        # Windows cut after 5s say only "longer than five seconds" — the old
+        # corpus had 19 of them, and they must not drag the estimate.
+        obs = [(30, True)] * 20 + [(5, False)] * 40
+        assert self._m(obs) == (30, False)
+
+    def test_nothing_to_estimate(self):
+        assert self._m([]) == (None, False)
+
+    def test_the_per_block_median_uses_the_cut_off_windows(self, monkeypatch):
+        from data import demo_duration_repo
+        rows = ([self._w(s) for s in (4, 18, 39, 57, 61)]
+                + [self._w(s, "timeout") for s in (60, 104)])
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        assert demo_duration_repo.qa_median_by_block()["navel_01"] == 57.0
+
+    def test_cut_off_windows_do_not_count_toward_the_trust_threshold(self, monkeypatch):
+        # Four visitor-ended windows plus any number cut off is still four.
+        from data import demo_duration_repo
+        rows = ([self._w(40) for _ in range(4)]
+                + [self._w(90, "timeout") for _ in range(10)])
+        monkeypatch.setattr(demo_duration_repo, "qa_windows", lambda **k: rows)
+        assert "navel_01" not in demo_duration_repo.qa_median_by_block()
+
+    def _w(self, seconds, closed_by="policy"):
+        return {"seconds": seconds, "closed_by": closed_by,
+                "block_robot_id": "navel_01"}
+

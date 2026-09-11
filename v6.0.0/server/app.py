@@ -404,12 +404,12 @@ def build_flow_plan(obs) -> Optional[dict]:
                                   visitor_topics=visitor_topics or None,
                                   kg_edges=edges, kg_links=links)
 
-    # How long a window of each block ACTUALLY runs, from visitor-ended
-    # windows only. demo_duration_repo enforces that exclusion in one place
-    # (_visitor_ended) because setting a window's length from observed window
-    # lengths is the same shape as the loop already found and fixed once: a
-    # window cut to 5s recorded 5s, which pulled the estimate down, which cut
-    # more windows. Passing a mean over everything here would rebuild it.
+    # How long a window of each block ACTUALLY runs. Setting a window's length
+    # from observed window lengths can loop: a window cut short by its limit
+    # records a short length, which shrinks the next limit. demo_duration_repo
+    # handles this in one place — windows that hit their limit count as "at
+    # least this long" (a censored median), never as their limit and never
+    # dropped. Passing a plain mean over everything here would rebuild the loop.
     measured_qa = {}
     try:
         from data.demo_duration_repo import qa_median_by_block

@@ -206,13 +206,13 @@ def allocate_qa(
     unmeasured tour still allocates on importance alone — which is the case on
     the first run of any new deployment.
 
-    THE MEASUREMENT MUST EXCLUDE BUDGET-TERMINATED WINDOWS. Setting a window's
-    length from observed lengths is the same shape as the loop already found
-    and fixed once: a window cut to 5s recorded 5s, which pulled the estimate
-    down, which cut more windows. demo_duration_repo excludes windows closed
-    by timeout for exactly this reason, and a caller that passes in a mean over
-    everything rebuilds the loop here in a new place. See
-    demo_duration_repo.qa_median_by_block, which is the supported source.
+    THE MEASUREMENT MUST TREAT LIMIT-HIT WINDOWS AS CENSORED. Setting a
+    window's length from observed lengths can loop: a window cut short by its
+    limit records a short length, which shrinks the next limit. Averaging them
+    in rebuilds that loop; dropping them biases exactly the projects visitors
+    want more of downward. demo_duration_repo.qa_median_by_block counts them
+    as "at least this long" (a Kaplan-Meier median) and is the supported
+    source — a caller passing in a mean over everything rebuilds the loop.
 
     Every block clears `floor` or the allocation is not worth making — a
     window below it is a gesture at a question round rather than one.

@@ -104,108 +104,147 @@ def qa_windows(limit: int = 5000) -> list[dict]:
         return []
 
 
-def _visitor_ended(rows) -> tuple[dict, int]:
-    """({block_robot_id: [seconds]}, how many were dropped) — the one place the
-    "not the system's own constants" rule is written down.
+def _windows_by_block(rows) -> dict:
+    """{block_robot_id: [(seconds, ended_by_visitor)]} — the one place the rule
+    for reading a Q&A window is written down.
 
-    Every estimator built on window length has to apply it, and the moment two
-    of them apply it separately one of them will drift. A window closed by
-    `timeout` ran out its own allocation: it measures the allocation, is
-    right-censored with respect to what the visitor wanted, and feeding it back
-    into a figure that SETS allocations closes a loop. See
-    suggested_qa_budget's docstring for the corpus this was found in.
+    A window closed by `timeout` ran out its own allocation. It is not a
+    measurement of what the visitor wanted — they may well have wanted longer
+    — but it is not nothing either: the visitor wanted AT LEAST that long. It
+    is right-censored, and kept as such (ended_by_visitor=False) rather than
+    dropped. See censored_median for why dropping stopped being safe.
+
+    The open-floor Q&A has no block and is not a project window, so it is
+    left out.
     """
     out: dict = {}
-    censored = 0
     for r in rows or ():
         block = r.get("block_robot_id")
         if not block:
-            continue                    # open floor, not a project Q&A window
-        if (r.get("closed_by") or "") == "timeout":
-            censored += 1
             continue
         try:
-            out.setdefault(block, []).append(float(r["seconds"]))
+            secs = float(r["seconds"])
         except (TypeError, ValueError, KeyError):
             continue
-    return out, censored
+        ended = (r.get("closed_by") or "") != "timeout"
+        out.setdefault(block, []).append((secs, ended))
+    return out
+
+
+def censored_median(observations) -> tuple:
+    """Kaplan-Meier median of window lengths: (seconds, is_lower_bound).
+
+    `observations` are (seconds, ended_by_visitor) pairs. A window the visitor
+    ended is an observed length; one that hit its time limit only says the
+    visitor wanted at least that long.
+
+    Dropping the limit-hit windows was the earlier treatment, and it was safe
+    only while few windows had a limit. Once every window gets one at the
+    start of a tour, the windows that hit it are the long ones, for exactly
+    the projects visitors want more of. Dropping them biases those projects'
+    medians DOWN — on the first allocated live runs, Navel's median came out
+    39s with them dropped against 57s here — and a lower median gives that
+    project less time next tour, so it hits the limit sooner. Kaplan-Meier
+    keeps them in the risk set up to the moment they were cut off, which is
+    all they are evidence of.
+
+    The median is the first observed length at which the estimated share of
+    visitors still wanting more falls to one half or below; exactly one half
+    takes the midpoint with the next observed length, so uncensored data gives
+    the ordinary median. If it never falls that far — the longest windows were
+    all cut off — the median is only known to be at least the longest recorded
+    window, which is returned with is_lower_bound=True.
+    """
+    obs = sorted((float(t), bool(e)) for t, e in observations)
+    if not obs:
+        return None, False
+    at_risk, surviving, i = len(obs), 1.0, 0
+    while i < len(obs):
+        t = obs[i][0]
+        ended = cut = 0
+        while i < len(obs) and obs[i][0] == t:
+            if obs[i][1]:
+                ended += 1
+            else:
+                cut += 1
+            i += 1
+        if ended:
+            surviving *= 1.0 - ended / at_risk
+            if abs(surviving - 0.5) < 1e-12:
+                nxt = next((u for u, e in obs[i:] if e), None)
+                return ((t + nxt) / 2 if nxt is not None else t), nxt is None
+            if surviving < 0.5:
+                return t, False
+        at_risk -= ended + cut
+    return obs[-1][0], True
 
 
 MIN_BLOCK_WINDOWS = 5
 """Visitor-ended windows for ONE block before its own median is used.
 
-Lower than MIN_WINDOWS_TO_TRUST because the question is easier: a per-block
-figure only has to beat the pooled one, not stand alone, and a block with no
-median of its own simply takes the pool's flat share."""
+Counted on windows the visitor ended, not all windows: a pile of windows cut
+off after a few seconds says almost nothing past those few seconds, and must
+not make a thin estimate look trusted. Lower than MIN_WINDOWS_TO_TRUST
+because the question is easier: a per-block figure only has to beat the
+pooled one, not stand alone, and a block with no median of its own simply
+takes the pool's flat share."""
 
 
 def qa_median_by_block(rows=None) -> dict:
-    """{block_robot_id: median visitor-ended window seconds} — the BASE that
+    """{block_robot_id: median window seconds} — the BASE that
     decision.planner.allocate_qa distributes on.
 
-    Only blocks with enough of their own windows appear; the rest are absent
+    Censored median (censored_median) over every window of that block, so
+    windows that hit their limit count as "at least this long". Only blocks
+    with MIN_BLOCK_WINDOWS visitor-ended windows appear; the rest are absent
     rather than defaulted, so the planner can tell "this block runs long" from
-    "nothing is known about this block".
+    "nothing is known about this block". Where the median is only a lower
+    bound, the bound is used: it is still the best available base, and it
+    errs toward giving the block more time, not less.
     """
-    by_block, _ = _visitor_ended(rows if rows is not None else qa_windows())
     out = {}
-    for block, secs in by_block.items():
-        if len(secs) < MIN_BLOCK_WINDOWS:
+    for block, obs in _windows_by_block(
+            rows if rows is not None else qa_windows()).items():
+        if sum(1 for _t, e in obs if e) < MIN_BLOCK_WINDOWS:
             continue
-        secs.sort()
-        mid = len(secs) // 2
-        out[block] = round(secs[mid] if len(secs) % 2
-                           else (secs[mid - 1] + secs[mid]) / 2, 1)
+        median, _lower = censored_median(obs)
+        if median is not None:
+            out[block] = round(median, 1)
     return out
 
 
 MIN_WINDOWS_TO_TRUST = 20
-"""Usable windows before an observed budget replaces the constant.
+"""Visitor-ended windows before an observed budget replaces the constant.
 
-Was 10, and counted every window rather than the usable ones. Bootstrapped
-over the real corpus, the median's 95% interval runs 4.3-52.7s at n=10,
-9.7-42.6s at n=20, and 10.4-42.0s at n=30 — a third of the spread bought
-between 10 and 20, and almost nothing after. The remaining width is not
-sampling error: visitor Q&A genuinely runs from 2s to 165s, so no threshold
-makes ONE pooled number good for any particular group. Twenty is where more
-data stops helping a global estimate, which is also the point at which the
-honest next move is a per-block or per-audience one."""
+Bootstrapped over the real corpus, the median's 95% interval runs 4.3-52.7s
+at n=10, 9.7-42.6s at n=20, and 10.4-42.0s at n=30 — a third of the spread
+bought between 10 and 20, and almost nothing after. The remaining width is
+not sampling error: visitor Q&A genuinely runs from 2s to 165s, so no
+threshold makes ONE pooled number good for any particular group."""
 
 
 def suggested_qa_budget(default_sec: float = 90.0) -> dict:
     """
     A defensible default Q&A allocation, from observed windows.
 
-    Uses the MEDIAN rather than the mean: Q&A length is operator-driven and
-    long tails are common, so a mean is dragged upward by the one group that
-    would not stop asking. Falls back to `default_sec` while there is too
-    little data, and says so — a budget invented from three windows should not
-    be presented as measured.
+    The censored median over every project window (see censored_median), so a
+    long tail of one group that would not stop asking cannot drag it, and a
+    window that hit its own limit counts as "at least this long" instead of
+    as either its limit or nothing. Falls back to `default_sec` until there
+    are MIN_WINDOWS_TO_TRUST windows the visitor ended, and says so.
 
-    A WINDOW THAT RAN OUT ITS OWN ALLOCATION IS NOT EVIDENCE ABOUT VISITORS.
-    It is a measurement of the allocation. Half the live corpus was exactly
-    that: 23 of 46 windows closed by timeout, 19 of them at exactly 5.0s
-    (ALREADY_ENGAGED_QA_SEC) and 3 at exactly 60.0s. Feeding those back in
-    made the estimator a closed loop — shrink a window to five seconds,
-    record five seconds, pull the median down, shrink more windows. The
-    pooled median over everything was 5.0s: the system had learned its own
-    constant. Timeout closures are right-censored (the visitor may well have
-    wanted longer), so they are excluded and counted, never averaged in.
-
-    And it now medians the WINDOWS, not the per-step means. Medianing six
-    per-step rows put the answer on whichever row happened to sit in the
-    middle regardless of how many windows stood behind it: on the live
-    corpus that was `open_floor`, n=1 — a single window, of a step that is
-    not a project Q&A at all, returned as "observed" on the strength of 46.
-    Only windows belonging to a project block count, for the same reason.
+    History worth keeping: half the first corpus was windows closed by their
+    own limit, 19 of them at exactly 5.0s, and taking a plain median over
+    everything returned 5.0s — the system's own constant. Treating those as
+    censored at 5.0s makes them harmless: they say only "longer than five
+    seconds". Only project windows count, and the median is over windows, not
+    over per-step means.
     """
-    by_block, censored = _visitor_ended(qa_windows())
-    usable = [s for secs in by_block.values() for s in secs]
-    out = {"windows": len(usable), "self_terminated": censored}
-    if len(usable) < MIN_WINDOWS_TO_TRUST:
+    obs = [o for block in _windows_by_block(qa_windows()).values() for o in block]
+    ended = sum(1 for _t, e in obs if e)
+    out = {"windows": ended, "self_terminated": len(obs) - ended}
+    if ended < MIN_WINDOWS_TO_TRUST:
         return {**out, "budget_sec": default_sec, "basis": "default"}
-    usable.sort()
-    mid = len(usable) // 2
-    centre = (usable[mid] if len(usable) % 2
-              else (usable[mid - 1] + usable[mid]) / 2)
-    return {**out, "budget_sec": round(centre, 0), "basis": "observed"}
+    median, lower = censored_median(obs)
+    return {**out, "budget_sec": round(median, 0),
+            "basis": "lower_bound" if lower else "observed"}
