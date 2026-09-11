@@ -282,6 +282,14 @@ def guide_and_presenter(status: dict) -> tuple[Optional[str], Optional[str]]:
 
     guide = steps[0].get("robot_id")
     idx = min(status.get("step_idx", 0), len(steps) - 1)
+    # Once the tour reaches its closing section nobody is presenting. The walk
+    # below would otherwise keep finding the last project robot, and in the
+    # final open-floor Q&A every question without a clear topic went to it —
+    # a live run sent "can i ask more about the emotion understanding?" to
+    # Silbot, because Silbot's block happened to be the last one.
+    from decision.models import StepRole
+    if steps[idx].get("role") == StepRole.CLOSING:
+        return guide, None
     for s in reversed(steps[: idx + 1]):
         rid = s.get("robot_id")
         if rid and rid != guide:

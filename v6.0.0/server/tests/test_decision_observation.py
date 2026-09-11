@@ -437,3 +437,39 @@ class TestAcknowledgementsAreCaughtBeforeTheModel:
 
     def test_it_is_exported(self):
         from decision import is_acknowledgement          # noqa: F401
+
+
+class TestNobodyPresentsInTheClosing:
+    """The final open-floor Q&A sent every question without a clear topic to
+    the last project robot, because the presenter walk kept finding it."""
+
+    def _status(self, idx):
+        from decision.models import StepRole
+        steps = [
+            {"step_id": "welcome", "robot_id": "pepper_01", "role": StepRole.INTRO},
+            {"step_id": "chatbox_01_project", "robot_id": "chatbox_01", "role": StepRole.PROJECT},
+            {"step_id": "transition_to_silbot_01", "robot_id": "pepper_01", "role": StepRole.INTRO},
+            {"step_id": "silbot_01_project", "robot_id": "silbot_01", "role": StepRole.PROJECT},
+            {"step_id": "qa_invite_silbot_01", "robot_id": "pepper_01", "role": StepRole.QA},
+            {"step_id": "wrap_up", "robot_id": "pepper_01", "role": StepRole.CLOSING},
+            {"step_id": "open_floor", "robot_id": "pepper_01", "role": StepRole.CLOSING},
+        ]
+        return {"steps": steps, "step_idx": idx}
+
+    def test_the_open_floor_has_no_presenter(self):
+        from decision.observation import guide_and_presenter
+        assert guide_and_presenter(self._status(6)) == ("pepper_01", None)
+
+    def test_the_wrap_up_has_no_presenter(self):
+        from decision.observation import guide_and_presenter
+        assert guide_and_presenter(self._status(5)) == ("pepper_01", None)
+
+    def test_the_last_blocks_own_qa_still_belongs_to_it(self):
+        from decision.observation import guide_and_presenter
+        assert guide_and_presenter(self._status(4)) == ("pepper_01", "silbot_01")
+
+    def test_a_transition_still_belongs_to_the_block_just_finished(self):
+        # A live run asked about ChatBox's work while the guide was
+        # introducing the next robot, and it rightly went to ChatBox.
+        from decision.observation import guide_and_presenter
+        assert guide_and_presenter(self._status(2)) == ("pepper_01", "chatbox_01")
