@@ -117,7 +117,7 @@ def _speaking_seconds(text: str) -> float:
     return min(20.0, words / SPEAKING_WORDS_PER_SEC) if words else 0.0
 
 
-QA_AUTO_CLOSE_SEC = 3.0
+QA_AUTO_CLOSE_SEC = 5.0
 
 QA_WRAP_UP_SILENCE_SEC = 8.0
 """Quiet seconds after an answer before the guide offers to move on."""
@@ -484,6 +484,7 @@ class WebSocketGateway:
         # thread-local and a Flask worker handles many turns, so a defer on
         # one turn would otherwise still be readable on the next one.
         self._scratch.deferred_to = None
+        self._scratch.standing_in_for = None
         result = self._policy.decide(point, obs)
 
         # QA_ROUTE only: let the competence graph override the baseline, which
@@ -533,7 +534,36 @@ class WebSocketGateway:
             # Empty with no poses and no overrides, which is the fail-open
             # default: presence never removes a candidate until something
             # actually says where the robots are.
-            absent = self._presence.absent(peers, obs.presenting_robot_id)
+            # Only during a tour: outside one there is no group and no
+            # stations, and "absent" would mean nothing.
+            absent = (self._presence.absent(peers, obs.presenting_robot_id)
+                      if obs.guide_robot_id else set())
+
+            # A robot the visitor NAMED wins over topic matching — it is the
+            # clearest signal there is. "okay can i ask you about chatbox" has
+            # no topic in it at all and used to fall back to whoever presented
+            # last. Exactly one name, or the rule does not fire.
+            from decision.policy import robots_named
+            named = robots_named(obs.user_utterance, obs.connected_peers)
+            if len(named) == 1:
+                from decision.models import Action
+                target = named[0]
+                if target in absent:
+                    if target in remaining_blocks:
+                        self._scratch.deferred_to = target
+                        logger.info(f"[Route] '{obs.user_utterance[:40]}' names "
+                                    f"{target}, away -> deferred to its station")
+                        return PolicyResult(Action.guide_interject(obs.guide_robot_id),
+                                            "named_defer")
+                    if obs.guide_robot_id:
+                        self._scratch.standing_in_for = target
+                        logger.info(f"[Route] '{obs.user_utterance[:40]}' names "
+                                    f"{target}, away -> guide answers for it")
+                        return PolicyResult(Action.route_to(obs.guide_robot_id),
+                                            "named_guide_answers")
+                logger.info(f"[Route] '{obs.user_utterance[:40]}' names {target}")
+                return PolicyResult(Action.route_to(target), "named_robot")
+
             decision = router.decide(
                 obs.user_utterance, peers,
                 remaining_block_ids=remaining_blocks,
@@ -604,6 +634,11 @@ class WebSocketGateway:
                 self._scratch.deferred_to = decision.deferred_to
                 return PolicyResult(Action.guide_interject(obs.guide_robot_id),
                                     mechanism)
+
+            # The guide is answering because the robot that owns this is at
+            # another station. It needs to be told so, or its own prompt makes
+            # it hand the question straight back to that robot.
+            self._scratch.standing_in_for = decision.stands_in_for
 
             # Only a question that actually resolved to a topic is recorded, so
             # the segment can never credit an edge for a turn it did not handle.

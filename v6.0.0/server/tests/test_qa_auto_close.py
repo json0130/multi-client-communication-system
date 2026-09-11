@@ -268,9 +268,9 @@ class TestTheGuardUsesTheRealGuide:
         _settle()
         assert closed == ["policy"]
 
-    def test_the_interval_is_three_seconds(self):
+    def test_the_interval_is_five_seconds(self):
         from gateway.websocket_gateway import QA_AUTO_CLOSE_SEC
-        assert QA_AUTO_CLOSE_SEC == 3.0
+        assert QA_AUTO_CLOSE_SEC == 5.0
 
 
 class TestSpeakingTimeIsWaitedOut:

@@ -165,6 +165,7 @@ class RoutingDecision:
     # question is not an observation about anybody. See decision/kg_feedback.py's
     # Segment silence rule.
     deferred_to: Optional[str] = None
+    stands_in_for: Optional[str] = None   # guide answers because this robot is away
 
     @property
     def is_deferred(self) -> bool:
@@ -360,16 +361,16 @@ class KGRouter:
             if guide_robot_id:
                 return RoutingDecision(
                     robot_id=guide_robot_id, topic_id=topic_id, topic_label=label,
-                    reason=f"guide answers: {absent_pick} absent and its block "
-                           f"was already cut, nothing left to defer to",
-                    score=0.0,
+                    reason=f"guide answers: {absent_pick} absent and its station "
+                           f"is not still ahead, nothing left to defer to",
+                    score=0.0, stands_in_for=absent_pick,
                 )
 
         if self._absent_policy == "guide_answers" and guide_robot_id:
             return RoutingDecision(
                 robot_id=guide_robot_id, topic_id=topic_id, topic_label=label,
                 reason=f"guide answers: {absent_pick} absent",
-                score=0.0,
+                score=0.0, stands_in_for=absent_pick,
             )
 
         # No guide to fall back on. "No opinion" hands the turn to whoever

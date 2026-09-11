@@ -73,6 +73,9 @@ class ScenarioProfile:
     robots: tuple[RobotProfileEntry, ...]
     description: str = ""
     source_path: Optional[str] = None
+    # Each project robot stands at its own station, out of reach of the
+    # others. See PresenceTracker.set_separate_stations.
+    separate_stations: bool = False
 
     def get(self, robot_id: str) -> Optional[RobotProfileEntry]:
         for r in self.robots:
@@ -179,6 +182,7 @@ def parse_profile(raw: object, source_path: Optional[str] = None) -> ScenarioPro
         robots=tuple(entries),
         description=str(raw.get("description") or ""),
         source_path=source_path,
+        separate_stations=bool(raw.get("separate_stations", False)),
     )
 
     if not profile.managers:
@@ -260,6 +264,10 @@ class ProfileRegistry:
         self._by_scenario[profile.scenario_id] = profile
 
     # ── Lookup ────────────────────────────────────────────────────────────────
+
+    def separate_stations(self) -> bool:
+        """True if any loaded scenario puts its robots at separate stations."""
+        return any(p.separate_stations for p in self._by_scenario.values())
 
     def importance_defaults(self, scenario_id: str = "") -> dict:
         """{robot_id: importance} for every robot that declares one.

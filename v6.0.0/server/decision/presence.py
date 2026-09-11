@@ -91,8 +91,20 @@ class PresenceTracker:
     harness thread) writes while the gateway's decision path reads.
     """
 
+    def set_separate_stations(self, value: bool) -> None:
+        """Declare that each robot stands at its own station.
+
+        A layout fact from the scenario profile, used until real poses exist:
+        a robot is then in the conversation only if it is the one the group is
+        standing in front of. With no presenting robot — the tour's closing —
+        no project robot is. Overrides still win.
+        """
+        with self._lock:
+            self._separate_stations = bool(value)
+
     def __init__(self, proximity_m: float = DEFAULT_PROXIMITY_M):
         self._lock = threading.RLock()
+        self._separate_stations = False
         self._locations: dict = {}
         self._overrides: dict = {}
         self._proximity_m = proximity_m
@@ -166,6 +178,8 @@ class PresenceTracker:
         with self._lock:
             if robot_id in self._overrides:
                 return self._overrides[robot_id]
+            if self._separate_stations:
+                return robot_id == reference_robot_id
             own = self._locations.get(robot_id)
             ref = (self._locations.get(reference_robot_id)
                    if reference_robot_id else None)

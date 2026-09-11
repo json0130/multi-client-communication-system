@@ -17,6 +17,12 @@ description: >
   CARES lab tour. Pepper guides visitors and delegates project questions to the
   specialist robots, each of which speaks only to its own research area.
 
+# Each project robot is at its own station in the lab. The group stands with
+# whichever robot is presenting (and Pepper, who walks with them), so any
+# other project robot is out of reach: a question for it is deferred to its
+# station if the tour is still going there, otherwise Pepper answers it.
+separate_stations: true
+
 robots:
   # Main guide. Manager: cross-client visibility over global records within this
   # scenario, so it can maintain a unified view of the visitor across the team.

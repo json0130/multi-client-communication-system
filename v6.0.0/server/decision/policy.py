@@ -282,6 +282,23 @@ to 60s per window under time pressure is, on that evidence, not cutting
 much."""
 
 
+def robots_named(utterance: str, peers) -> list:
+    """client_ids of the robots named in `utterance`, by robot_name or id, as
+    whole words. "can i ask you about chatbox" names chatbox_01; "navel" inside
+    another word does not count."""
+    import re
+    t = (utterance or "").lower()
+    found = []
+    for p in peers or ():
+        cid = (p.get("client_id") or "").strip()
+        for label in {(p.get("robot_name") or "").strip().lower(), cid.lower()}:
+            if len(label) > 2 and re.search(rf"\b{re.escape(label)}\b", t):
+                if cid not in found:
+                    found.append(cid)
+                break
+    return found
+
+
 def _matches(text: str, phrases: list[str]) -> Optional[str]:
     """Return the first phrase present in `text`, or None."""
     t = (text or "").lower()

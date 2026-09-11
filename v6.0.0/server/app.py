@@ -443,6 +443,10 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
                                   kg_router_factory=build_kg_router,
                                   kg_observer=apply_kg_observations,
                                   flow_planner=build_flow_plan)
+    try:
+        ws_gateway.presence.set_separate_stations(profiles.separate_stations())
+    except Exception as e:
+        print(f"[App] station layout unavailable: {e}")
 
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
