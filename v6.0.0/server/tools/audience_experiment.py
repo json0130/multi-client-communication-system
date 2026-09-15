@@ -290,12 +290,26 @@ def main() -> int:
     stats = []
     for style in args.styles:
         path = os.path.join(args.out, f"audience_{style}.txt") if args.out else None
+        # NEVER `with sys.stdout as fh:` — a with-block calls __exit__ on
+        # whatever it wraps when the body finishes, and TextIOWrapper.__exit__
+        # closes the underlying stream. With no --out, `fh` was real stdout on
+        # every iteration, so the first style's block closed process stdout
+        # for good; the second style's very first `say(...)` call then raised
+        # "ValueError: I/O operation on closed file" and the run silently
+        # produced only the first style (interactive, first in AUDIENCES).
+        # Only a file THIS LOOP opened may ever be closed here.
         if path:
             os.makedirs(args.out, exist_ok=True)
             sys.stdout.write(f"[audience] {style} -> {path}\n")
             sys.stdout.flush()
-        with (open(path, "w") if path else sys.stdout) as fh:
+            fh = open(path, "w")
+        else:
+            fh = sys.stdout
+        try:
             stats.append(run_condition(style, fh))
+        finally:
+            if path:
+                fh.close()
 
     print("\n" + "=" * 78)
     print("  Same tour, same visitor words, same interruptions — style only")
