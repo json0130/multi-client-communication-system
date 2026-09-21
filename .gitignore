@@ -23,3 +23,6 @@ v6.0.0/server/robot-dashboard/node_modules/
 
 # Harness rollout logs — generated per run, not source
 v6.0.0/server/runs/
+
+# graphify
+graphify-out/
