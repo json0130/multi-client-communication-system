@@ -48,12 +48,19 @@ def _block(robot):
     }
 
 
-DRIFT_BOUNDARY_BUDGET = 460.0
+DRIFT_BOUNDARY_BUDGET = 485.0
 """A budget sitting just above the skip rung. Undrifted, the tour fits by
 tightening Q&A and compressing; at +15% it no longer does and a project has
 to go. Re-derived when the script gained the merged intro+handoff and the
 per-checklist-point project steps — the old 420s sat comfortably inside the
-compress band under the new arithmetic and demonstrated nothing."""
+compress band under the new arithmetic and demonstrated nothing. Re-derived
+again (460 -> 485) when build_script() grew two more navigation steps
+(approach_visitors before the greeting, and the guide's own nav-in for
+chatbox_01) neither of which has an entry in BOUNDARY_DURATIONS below, so
+each falls back to DEFAULT_STEP_SEC and — being absent from the dict —
+does NOT scale under diff_under_duration_drift's drift_pct multiply,
+diluting the drift's effect and pushing the boundary up by more than the
+steps' own combined ~24s."""
 
 BOUNDARY_DURATIONS = {
     "greeting": 15, "lab_intro": 15, "overview": 10,

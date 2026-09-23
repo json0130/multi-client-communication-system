@@ -97,16 +97,16 @@ FIXED_DURATIONS = {
 
 # The arithmetic every expectation below is derived from, stated once:
 #
-#   fixed (opening 28 + closing 25)                        = 53s
-#   scripted per block, uncompressed  chatbox 48, navel 48, silbot 42   = 138s
-#   compressible per block (greeting 8 + prompt 5)                      =  13s
-#   scripted per block, compressed    chatbox 35, navel 35, silbot 29   =  99s
-#   Q&A at the 90s default × 3 windows                                  = 270s
-#   Q&A at the 45s floor  × 3 windows                                   = 135s
+#   fixed (opening 40 + closing 37)                                      =  77s
+#   scripted per block, uncompressed  chatbox 60, navel 48, silbot 54    = 162s
+#   compressible per block (greeting 8 + prompt 5)                       =  13s
+#   scripted per block, compressed    chatbox 47, navel 35, silbot 41    = 123s
+#   Q&A at the 90s default × 3 windows                                   = 270s
+#   Q&A at the 45s floor  × 3 windows                                    = 135s
 #
-#   uncompressed, default Q&A   53 + 138 + 270 = 461s
-#   Q&A at floor only           53 + 138 + 135 = 326s
-#   Q&A at floor + all compressed 53 +  99 + 135 = 287s
+#   uncompressed, default Q&A     77 + 162 + 270 = 509s
+#   Q&A at floor only             77 + 162 + 135 = 374s
+#   Q&A at floor + all compressed 77 + 123 + 135 = 335s
 #
 # Compression saves LESS than it used to (13s a block, not 19s). The teaser
 # and the hand-off used to be two steps and the teaser was compressible;
@@ -114,6 +114,24 @@ FIXED_DURATIONS = {
 # and so has to survive, since a robot must never start talking with nobody
 # having introduced it. The ladder reaches for a skip sooner as a result —
 # a real consequence of the merge, not an accident of these numbers.
+#
+# Opening/closing both carry one navigation step each ("approach_visitors"
+# before the greeting, "navigate_to_start" — StepRole.CLOSING, see
+# demo_script.py — after the last block): +12s (DEFAULT_STEP_SEC; neither
+# has its own FIXED_DURATIONS entry) apiece, on top of the original 53s fixed
+# baseline. chatbox_01's block carries its own nav-in step
+# ("navigate_to_chatbox_01", the guide's very first leg from the door, +12s).
+# PROJECTS' order here is [chatbox, navel, silbot] — (CHATBOX, NAVEL) has no
+# defined GAZEBO_ROUTES edge (never did, no wall-clear pairing exists between
+# those two stations), so navel_01's block carries no nav-in step here. But
+# (NAVEL, SILBOT) IS defined (+12s on silbot_01's block): after navel_01
+# moved live, in the Gazebo GUI, to (0.25, -5.0) — see
+# launch_demo_env.launch.py's spawn_robot3 — a from-the-south route (down
+# past the bay-dividing walls, west along the clear corridor, back up into
+# the target bay) was driven live end-to-end with direct cmd_vel probing and
+# confirmed working in both directions, including all the way back to START
+# — see demo_script.py's GAZEBO_ROUTES comment on the SILBOT/NAVEL/START
+# edges.
 
 QA_FLOOR = 45.0
 
@@ -282,15 +300,15 @@ SCENARIOS = [
     Scenario(
         id="S1-rung-order",
         description=(
-            "A general-audience group, no stated interest, 5m20s for a tour "
-            "that would take 7m41s at full length. Every robot present."
+            "A general-audience group, no stated interest, 6m8s for a tour "
+            "that would take 8m29s at full length. Every robot present."
         ),
         rationale=(
-            "461s of tour into a 320s budget. This scenario is about the "
+            "509s of tour into a 368s budget. This scenario is about the "
             "ladder's ORDER, not about importance. Rung 1 tightens Q&A, and "
             "Q&A alone nearly absorbs it: three windows dropping from 90s to "
-            "the 45s floor recovers 135s, landing at 326s — 6s over. So rung 2 "
-            "must compress exactly ONE block to reach 313s, and rung 3 is "
+            "the 45s floor recovers 135s, landing at 374s — 6s over. So rung 2 "
+            "must compress exactly ONE block to reach 361s, and rung 3 is "
             "never entered: no robot is skipped. That is the property worth "
             "pinning, because it is the reason the rungs are in this order at "
             "all — a visitor notices a missing robot and does not notice a "
@@ -298,7 +316,7 @@ SCENARIOS = [
             "here and deliberately not asserted; S2 is the scenario that tests "
             "importance, and asserting it here too would just duplicate it."
         ),
-        run=lambda: _outcome(_plan(320)),
+        run=lambda: _outcome(_plan(368)),
         expected=ExpectedPlan(
             surviving_blocks=(CHATBOX, NAVEL, SILBOT),
             feasible=True,
@@ -311,15 +329,15 @@ SCENARIOS = [
     Scenario(
         id="S2-stated-interest-protects",
         description=(
-            "A 4m10s budget, tight enough that one project must be cut "
+            "A 4m50s budget, tight enough that one project must be cut "
             "outright. Visitor stated an interest in retrieval-augmented "
             "generation, which chatbox_01 owns — and chatbox_01 is the block "
             "the lab's own priorities rank LOWEST."
         ),
         rationale=(
-            "250s budget. Q&A to the floor gives 326s; compressing all three "
-            "gives 287s, still over — so rung 3 must skip exactly one block, "
-            "and 207s afterwards is comfortably inside. WHICH block is the "
+            "290s budget. Q&A to the floor gives 374s; compressing all three "
+            "gives 335s, still over — so rung 3 must skip exactly one block, "
+            "and 255s afterwards is comfortably inside. WHICH block is the "
             "entire point.\n"
             "  Hand-set defaults are chatbox 0.3, navel 0.5, silbot 0.7. With "
             "no stated interest the cheapest block to cut is chatbox_01, and "
@@ -340,8 +358,8 @@ SCENARIOS = [
             "asserted as the no-interest control below."
         ),
         run=lambda: {
-            **_outcome(_plan(250, visitor_topics=[RAG])),
-            "without_interest": _outcome(_plan(250))["surviving_blocks"],
+            **_outcome(_plan(290, visitor_topics=[RAG])),
+            "without_interest": _outcome(_plan(290))["surviving_blocks"],
         },
         expected=ExpectedPlan(
             surviving_blocks=(CHATBOX, SILBOT),

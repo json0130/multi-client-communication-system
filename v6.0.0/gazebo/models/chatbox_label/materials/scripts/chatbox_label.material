@@ -1,0 +1,15 @@
+material ChatBox/Label
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture chatbox_label.png
+        filtering trilinear
+      }
+    }
+  }
+}

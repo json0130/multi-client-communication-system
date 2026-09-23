@@ -1,0 +1,15 @@
+material Pepper/Label
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture pepper_label.png
+        filtering trilinear
+      }
+    }
+  }
+}

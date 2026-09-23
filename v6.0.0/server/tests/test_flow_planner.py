@@ -51,7 +51,11 @@ class TestFlowGraph:
         assert [b.robot_id for b in graph.blocks] == [A, B, C]
 
     def test_opening_and_closing_are_separated_from_blocks(self, graph):
-        assert {s.step_id for s in graph.closing} == {"wrap_up", "open_floor"}
+        # navigate_to_start (StepRole.CLOSING) walks the guide back before
+        # wrap_up — it belongs here for the same reason wrap_up/open_floor
+        # do: it has no block_robot_id, and must survive a DROP_REMAINING
+        # rather than strand the guide mid-tour.
+        assert {s.step_id for s in graph.closing} == {"navigate_to_start", "wrap_up", "open_floor"}
         assert all(s.block_robot_id is None for s in graph.opening + graph.closing)
 
     def test_research_content_is_never_compressible(self, graph):
@@ -181,7 +185,13 @@ class TestLadder:
         assert r["ops"] == [] and r["fits_already"]
 
     def test_mild_pressure_only_tightens_qa(self, graph, importance):
-        r = plan_for_budget(graph, 450, importance=importance)
+        # 520, not 450: build_script() now opens with an extra
+        # "approach_visitors" navigation step (guide walks to the door to
+        # greet visitors before the opening speech), which adds ~60s to the
+        # estimated tour length — 450 now falls into "also compress"
+        # territory. 520 keeps this test's actual point (mild pressure only
+        # tightens QA, doesn't compress yet) true under the new estimate.
+        r = plan_for_budget(graph, 520, importance=importance)
         assert {o.kind for o in r["ops"]} == {PlanOpKind.SET_QA_BUDGET}
         assert r["feasible"]
 

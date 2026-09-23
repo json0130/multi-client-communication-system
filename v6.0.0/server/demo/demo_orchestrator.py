@@ -43,6 +43,24 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# gazebo/visitor_follow.py's local reset endpoint — see its module docstring.
+# Best-effort only: a real (non-simulated) demo, or Gazebo simply not
+# running, has nothing listening on this port, which is never a reason to
+# fail demo start.
+GAZEBO_RESET_URL = "http://127.0.0.1:8899/reset"
+GAZEBO_RESET_TIMEOUT_SEC = 2.0
+
+
+def _reset_gazebo_positions():
+    import urllib.error
+    import urllib.request
+    try:
+        req = urllib.request.Request(GAZEBO_RESET_URL, method="POST", data=b"")
+        urllib.request.urlopen(req, timeout=GAZEBO_RESET_TIMEOUT_SEC)
+        logger.info("[Demo] Gazebo robots/visitors reset to spawn for new run.")
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        logger.debug(f"[Demo] Gazebo reset endpoint unreachable (no sim running?): {e}")
+
 
 # ── States ─────────────────────────────────────────────────────────────────────
 
@@ -77,6 +95,14 @@ class DemoStep:
     "ChatBox's part of the tour" without pattern-matching step_id strings. It is
     optional: a hand-written script that omits it still runs normally, but its
     steps cannot be skipped or compressed by robot, only dropped wholesale.
+
+    step_kind distinguishes the one physical-action step from every speech
+    step. "navigation" carries a nav_target instead of text and is completed
+    by the robot reporting arrival (still through send_ack — see
+    _send_step) rather than TTS finishing, but is otherwise driven through
+    the exact same require_ack / timeout_sec / WAITING_ACK machinery as a
+    speech step. Kept as a plain string, like role, so an untagged step
+    ("speech") remains the default and no existing script needs updating.
     """
     step_id:     str
     robot_id:    str
@@ -91,6 +117,20 @@ class DemoStep:
     block_robot_id: Optional[str] = None
     # This step's function within its block. See StepRole.
     role:           str = ""
+
+    # "speech" (default) or "navigation". See class docstring.
+    step_kind:  str = "speech"
+    # {"x": float, "y": float, "frame_id": str} — required when step_kind is
+    # "navigation", unused otherwise.
+    nav_target: Optional[dict] = None
+    # Radians, world frame (0 = +x/east, pi/2 = +y/north) — heading the
+    # robot turns to face, in place, AFTER the last waypoint is reached and
+    # BEFORE acking. Optional, navigation-only. Without it the robot just
+    # keeps whatever heading its last leg of travel left it facing, which
+    # is usually straight at whatever it just walked up to (a project
+    # robot's station) rather than back toward the visitors following
+    # behind — see gazebo_bridge.py's _on_nav_goal/_turn_to_yaw.
+    final_yaw: Optional[float] = None
 
 
 # StepRole moved to decision/models.py — the planner and the orchestrator both
@@ -252,6 +292,36 @@ class DemoOrchestrator:
             if self._state == DemoState.RUNNING:
                 logger.warning("[Demo] Already running.")
                 return
+            # Belt-and-suspenders alongside stop()'s own join: refuse to
+            # start while a previous run's thread is still winding down,
+            # regardless of what self._state says. stop() now joins with a
+            # bounded timeout specifically so this should never actually
+            # trigger — this is the fallback for the timeout case it logs.
+            if self._runner is not None and self._runner.is_alive():
+                logger.warning("[Demo] Previous run's thread is still exiting — "
+                               "try again in a moment.")
+                return
+            # Claimed atomically with the check above, before the network
+            # call below — a second, concurrent /demo/start (rapid
+            # double-click, a frontend retry while the first call is still
+            # in flight) must see RUNNING immediately and bail via the
+            # guard on its own way in. Splitting the check and the claim
+            # across two lock blocks with _reset_gazebo_positions()'s
+            # (up to GAZEBO_RESET_TIMEOUT_SEC) network call in between let
+            # two overlapping calls both pass the guard, both reset
+            # Gazebo — one of them potentially after the guide had already
+            # left its spawn, wiping visitor_follow.py's trailing state
+            # for the rest of that run — and race to start two runner
+            # threads. Reverted below if the script turns out to be empty.
+            self._state = DemoState.RUNNING
+
+        # Outside the lock: a network call (even to localhost) has no
+        # business holding up other threads reading demo state, and this
+        # is best-effort anyway (see _reset_gazebo_positions). Safe now
+        # that RUNNING is already claimed above.
+        _reset_gazebo_positions()
+
+        with self._lock:
             if robot_ids:
                 from demo.demo_script import build_script  # local import avoids circular dependency
                 guide    = robot_ids[0]
@@ -267,6 +337,7 @@ class DemoOrchestrator:
                 logger.info(f"[Demo] Dynamic script built — guide={guide}, projects={projects}")
             if not self._script:
                 logger.error("[Demo] No script loaded.")
+                self._state = DemoState.IDLE  # release the claim above — nothing is actually running
                 return
             self._idx                = 0
             self._state              = DemoState.RUNNING
@@ -316,10 +387,35 @@ class DemoOrchestrator:
             self._skip_next_qa      = False
             self._current_step_text = None
             self._started_at        = None
+            runner = self._runner
         self._ack_event.set()
         self._qa_end_event.set()
         self._pause_event.set()
         self._advance_event.set()   # skip any in-progress transition delay
+        # Joined OUTSIDE the lock — _run_loop acquires self._lock itself at
+        # several points, so holding it here while waiting for the events
+        # above to be noticed would deadlock. Without this join, stop()
+        # returned as soon as the flags above were set, but _run_loop can be
+        # blocked inside a single _send_step() call — a generate_demo_step()
+        # LLM round-trip routinely takes several seconds — with nothing able
+        # to interrupt it mid-call. It only checks state and exits AFTER
+        # that call returns. A caller that saw stop() return and immediately
+        # called start() again raced a second _run_loop against the first
+        # one still winding down: both mutating self._idx/self._script/
+        # self._current_step_text at once, both sending demo_step/demo_nav
+        # to robots — the reported symptom was two different LLM-generated
+        # lines TTS'd for the same step_id, and a navigation step silently
+        # missing its own turn because the other thread's state write raced
+        # past it. Bounded, not unbounded: this must never hang stop()
+        # forever if something is stuck.
+        if runner is not None and runner.is_alive():
+            runner.join(timeout=15.0)
+            if runner.is_alive():
+                logger.error(
+                    "[Demo] stop(): runner thread did not exit within 15s — "
+                    "a start() called now may still race it. Investigate "
+                    "what _run_loop is blocked on."
+                )
         if self._recorder is not None:
             # Flush before the process can exit — the corrections from this run
             # are the training signal and are not reconstructable.
@@ -1390,6 +1486,37 @@ class DemoOrchestrator:
                 return True
 
     def _send_step(self, step: DemoStep):
+        if step.step_kind == "navigation":
+            # Nothing to generate for a physical move — send the target and
+            # wait for the SAME ack path a speech step waits on, just
+            # triggered by the robot reporting arrival instead of TTS
+            # finishing. _run_loop's WAITING_ACK wait is already generic
+            # over what produces the ack, so nothing downstream changes.
+            with self._lock:
+                # Parens, not brackets: nav_target is itself a list, whose repr
+                # carries its own [...] — wrapping that in brackets too produced
+                # a string with two closing "]" at the end, and whatever
+                # upstream strips a leading [...] emotion tag from displayed
+                # text only ate up to the FIRST "]" it found, leaving a stray
+                # trailing "]" visible in the dashboard for every silent
+                # (text="") navigation step — e.g. the turn-only steps in
+                # demo_script.py's _turn_step(). Silent moves now show nothing
+                # at all — None is what the dashboard already skips.
+                self._current_step_text = step.text or None
+                self._step_started_at = time.time()
+            self._ws.send_to_robot(step.robot_id, {
+                "event":       "demo_nav",
+                "step_id":     step.step_id,
+                "target":      step.nav_target,
+                "text":        step.text,
+                "require_ack": step.require_ack,
+                "timeout_sec": step.timeout_sec,
+                "final_yaw":   step.final_yaw,
+            })
+            logger.info(f"[Demo] Sent navigation step '{step.step_id}' to "
+                        f"'{step.robot_id}' -> {step.nav_target}")
+            return
+
         text = step.text
         # Consumed for EVERY step, used only by generated ones. The first step
         # back after an interruption is usually the verbatim resume of the

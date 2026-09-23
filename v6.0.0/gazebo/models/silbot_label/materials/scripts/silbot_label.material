@@ -1,0 +1,15 @@
+material Silbot/Label
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture silbot_label.png
+        filtering trilinear
+      }
+    }
+  }
+}

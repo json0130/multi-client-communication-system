@@ -386,6 +386,7 @@ class BasicClient:
         self.server_connection.register_handler("emotion_update",   self._default_emotion_handler)
         self.server_connection.register_handler("demo_step",        self._on_demo_step)
         self.server_connection.register_handler("tts_stop",         self._on_tts_stop)
+        self.server_connection.register_handler("demo_nav",         self._default_nav_handler)
 
         self.input_modules:  Dict[str, InputModule]  = {}
         self.output_modules: Dict[str, OutputModule] = {}
@@ -421,6 +422,22 @@ class BasicClient:
     def _default_emotion_handler(self, data: dict):
         """Called when server pushes an emotion_update event. Override if needed."""
         pass
+
+    def _default_nav_handler(self, data: dict):
+        """
+        Called when the server pushes a demo_nav event (a navigation DemoStep).
+
+        Safety net: most robots (any real hardware, any client that hasn't
+        overridden this) cannot physically move. Without this, a navigation
+        step sent to one of them would wait for an ack that never comes,
+        stalling the whole demo until timeout_sec. ACK immediately so the
+        demo just skips the walk. GazeboBridge overrides this handler with
+        real movement + an ack sent on actual arrival.
+        """
+        step_id = data.get("step_id", "")
+        logger.info(f"[Nav] '{step_id}': navigation not supported by this client — skipping.")
+        if data.get("require_ack", True):
+            self.send_ack(step_id)
 
     def _on_demo_step(self, data: dict):
         """

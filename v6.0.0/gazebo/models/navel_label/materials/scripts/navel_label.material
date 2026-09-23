@@ -1,0 +1,15 @@
+material Navel/Label
+{
+  technique
+  {
+    pass
+    {
+      lighting off
+      texture_unit
+      {
+        texture navel_label.png
+        filtering trilinear
+      }
+    }
+  }
+}

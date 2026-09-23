@@ -288,6 +288,9 @@ def create_http_gateway(
         message = (data or {}).get("message", "").strip()
         if not message:
             return jsonify({"error": "message field required"}), 400
+        # Dashboard-typed messages already show as the operator's own bubble.
+        if (data or {}).get("source") == "visitor":
+            ws_gateway.record_visitor_line(message, client_id)
 
         # Stop any in-progress TTS immediately — user talking = robot listens
         if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):

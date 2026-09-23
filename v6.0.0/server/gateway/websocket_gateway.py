@@ -375,6 +375,19 @@ class WebSocketGateway:
                 "at": time.time(),
             })
 
+    def record_visitor_line(self, text: str, to_client_id: str) -> None:
+        """A visitor's question, shown in the operator's feed as a 'Visitor' turn."""
+        with self._utterance_lock:
+            self._utterance_seq += 1
+            self._utterances.append({
+                "seq": self._utterance_seq,
+                "robot_id": to_client_id,
+                "robot_name": "Visitor",
+                "text": text,
+                "kind": "visitor",
+                "at": time.time(),
+            })
+
     def utterances_since(self, seq: int = 0) -> dict:
         """Everything said after `seq`. The dashboard polls with its last seq."""
         with self._utterance_lock:

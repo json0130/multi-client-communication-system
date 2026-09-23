@@ -1,5 +1,18 @@
 <sdf version='1.7'>
   <world name='default'>
+    <!-- Needed for /set_entity_state (bare, no namespace) — used by
+         gazebo/visitor_follow.py to move the visitor actors to trail the
+         guide's live odometry every tick. Not loaded via -s on the
+         command line: gazebo_ros_state is a WORLD plugin, only picked up
+         when declared here, unlike gazebo_ros_init/factory/force_system
+         (loaded via launch_demo_env.launch.py's -s flags), which are
+         system plugins. -->
+    <plugin name="gazebo_ros_state" filename="libgazebo_ros_state.so">
+      <ros>
+        <namespace>/</namespace>
+      </ros>
+      <update_rate>10.0</update_rate>
+    </plugin>
     <light name='sun' type='directional'>
       <cast_shadows>1</cast_shadows>
       <pose>0 0 10 0 -0 0</pose>
@@ -136,10 +149,10 @@
         <collision name='Wall_20_Collision'>
           <geometry>
             <box>
-              <size>1.25 0.15 2.5</size>
+              <size>1.25 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -155,10 +168,10 @@
           </surface>
         </collision>
         <visual name='Wall_20_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>1.25 0.15 2.5</size>
+              <size>1.25 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -181,10 +194,10 @@
         <collision name='Wall_22_Collision'>
           <geometry>
             <box>
-              <size>1.75 0.15 2.5</size>
+              <size>1.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -200,10 +213,10 @@
           </surface>
         </collision>
         <visual name='Wall_22_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>1.75 0.15 2.5</size>
+              <size>1.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -226,10 +239,10 @@
         <collision name='Wall_26_Collision'>
           <geometry>
             <box>
-              <size>8.5 0.15 2.5</size>
+              <size>8.5 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -245,10 +258,10 @@
           </surface>
         </collision>
         <visual name='Wall_26_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>8.5 0.15 2.5</size>
+              <size>8.5 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -271,10 +284,10 @@
         <collision name='Wall_31_Collision'>
           <geometry>
             <box>
-              <size>6.55919 0.15 2.5</size>
+              <size>6.55919 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -290,10 +303,10 @@
           </surface>
         </collision>
         <visual name='Wall_31_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>6.55919 0.15 2.5</size>
+              <size>6.55919 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -316,10 +329,10 @@
         <collision name='Wall_33_Collision'>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -335,10 +348,10 @@
           </surface>
         </collision>
         <visual name='Wall_33_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -361,10 +374,10 @@
         <collision name='Wall_35_Collision'>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -380,10 +393,10 @@
           </surface>
         </collision>
         <visual name='Wall_35_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -406,10 +419,10 @@
         <collision name='Wall_36_Collision'>
           <geometry>
             <box>
-              <size>4 0.15 2.5</size>
+              <size>4 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -425,10 +438,10 @@
           </surface>
         </collision>
         <visual name='Wall_36_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4 0.15 2.5</size>
+              <size>4 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -451,10 +464,10 @@
         <collision name='Wall_38_Collision'>
           <geometry>
             <box>
-              <size>4.25 0.15 2.5</size>
+              <size>4.25 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -470,10 +483,10 @@
           </surface>
         </collision>
         <visual name='Wall_38_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.25 0.15 2.5</size>
+              <size>4.25 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -496,10 +509,10 @@
         <collision name='Wall_40_Collision'>
           <geometry>
             <box>
-              <size>4.25 0.15 2.5</size>
+              <size>4.25 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -515,10 +528,10 @@
           </surface>
         </collision>
         <visual name='Wall_40_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.25 0.15 2.5</size>
+              <size>4.25 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -541,10 +554,10 @@
         <collision name='Wall_41_Collision'>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -560,10 +573,10 @@
           </surface>
         </collision>
         <visual name='Wall_41_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -586,10 +599,10 @@
         <collision name='Wall_44_Collision'>
           <geometry>
             <box>
-              <size>1.25 0.15 2.5</size>
+              <size>1.25 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -605,10 +618,10 @@
           </surface>
         </collision>
         <visual name='Wall_44_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>1.25 0.15 2.5</size>
+              <size>1.25 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -631,10 +644,10 @@
         <collision name='Wall_45_Collision'>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -650,10 +663,10 @@
           </surface>
         </collision>
         <visual name='Wall_45_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>4.75 0.15 2.5</size>
+              <size>4.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -676,10 +689,10 @@
         <collision name='Wall_71_Collision'>
           <geometry>
             <box>
-              <size>2 0.15 2.5</size>
+              <size>2 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -695,10 +708,10 @@
           </surface>
         </collision>
         <visual name='Wall_71_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>2 0.15 2.5</size>
+              <size>2 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -721,10 +734,10 @@
         <collision name='Wall_75_Collision'>
           <geometry>
             <box>
-              <size>0.75 0.15 2.5</size>
+              <size>0.75 0.15 1.25</size>
             </box>
           </geometry>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <max_contacts>10</max_contacts>
           <surface>
             <contact>
@@ -740,10 +753,10 @@
           </surface>
         </collision>
         <visual name='Wall_75_Visual'>
-          <pose>0 0 1.25 0 -0 0</pose>
+          <pose>0 0 0.625 0 -0 0</pose>
           <geometry>
             <box>
-              <size>0.75 0.15 2.5</size>
+              <size>0.75 0.15 1.25</size>
             </box>
           </geometry>
           <material>
@@ -884,5 +897,93 @@
         <projection_type>perspective</projection_type>
       </camera>
     </gui>
+    <model name="visitor_1">
+      <!-- Plain physics model, not a Gazebo <actor> — actors forcibly
+           re-assert their own scripted pose every physics tick, which
+           silently overrides external /set_entity_state calls (confirmed
+           live: a teleport reported success=True but the actor never
+           moved). A plain model has no such script fighting external
+           control, so gazebo/visitor_follow.py's teleport-to-trail-the-
+           guide approach actually works. Tradeoff: no walking-leg
+           animation, just a simple visual capsule — appearance can be
+           upgraded later without touching the follow mechanism.
+
+           y=7.2 (was 6.818, same as the DOOR waypoint, then briefly 8.0)
+           — per the floor plan diagram, visitors wait OUTSIDE the door,
+           not right on the threshold. The wall/door itself is ~0.15m
+           thick centered at y=6.818 (see lab_world's Wall_71/Door_0 near
+           x=-2..0), so y=7.2 clears it by ~0.3m — close to the door
+           without sitting on top of it or clipping the wall. Also a safe
+           1.67m from Pepper's own spawn (0.092, 5.528) on the other side
+           of the door, so they can't overlap at start. North of the wall
+           is open/unmodeled space either way. visitor_follow.py's
+           DOOR/ACTIVATE_RADIUS_M constant is unchanged (still the door
+           threshold, y=6.818) — the guide reaching the door is still
+           what starts the visitors trailing him. -->
+      <static>false</static>
+      <pose>-0.308 7.2 0 0 0 0</pose>
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="body">
+          <pose>0 0 0.55 0 0 0</pose>
+          <geometry><cylinder><radius>0.18</radius><length>1.1</length></cylinder></geometry>
+          <material><ambient>0.85 0.25 0.25 1</ambient><diffuse>0.85 0.25 0.25 1</diffuse></material>
+        </visual>
+        <visual name="head">
+          <pose>0 0 1.28 0 0 0</pose>
+          <geometry><sphere><radius>0.13</radius></sphere></geometry>
+          <material><ambient>0.9 0.75 0.6 1</ambient><diffuse>0.9 0.75 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="visitor_2">
+      <static>false</static>
+      <pose>0.092 7.2 0 0 0 0</pose>
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="body">
+          <pose>0 0 0.55 0 0 0</pose>
+          <geometry><cylinder><radius>0.18</radius><length>1.1</length></cylinder></geometry>
+          <material><ambient>0.25 0.55 0.85 1</ambient><diffuse>0.25 0.55 0.85 1</diffuse></material>
+        </visual>
+        <visual name="head">
+          <pose>0 0 1.28 0 0 0</pose>
+          <geometry><sphere><radius>0.13</radius></sphere></geometry>
+          <material><ambient>0.9 0.75 0.6 1</ambient><diffuse>0.9 0.75 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
+    <model name="visitor_3">
+      <static>false</static>
+      <pose>0.492 7.2 0 0 0 0</pose>
+      <link name="link">
+        <gravity>false</gravity>
+        <inertial>
+          <mass>1.0</mass>
+          <inertia><ixx>0.1</ixx><iyy>0.1</iyy><izz>0.1</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+        </inertial>
+        <visual name="body">
+          <pose>0 0 0.55 0 0 0</pose>
+          <geometry><cylinder><radius>0.18</radius><length>1.1</length></cylinder></geometry>
+          <material><ambient>0.3 0.7 0.35 1</ambient><diffuse>0.3 0.7 0.35 1</diffuse></material>
+        </visual>
+        <visual name="head">
+          <pose>0 0 1.28 0 0 0</pose>
+          <geometry><sphere><radius>0.13</radius></sphere></geometry>
+          <material><ambient>0.9 0.75 0.6 1</ambient><diffuse>0.9 0.75 0.6 1</diffuse></material>
+        </visual>
+      </link>
+    </model>
+
   </world>
 </sdf>
