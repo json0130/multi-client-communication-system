@@ -69,6 +69,7 @@ class DemoState(str, Enum):
     RUNNING     = "running"
     WAITING_ACK = "waiting_ack"
     QA_WINDOW   = "qa_window"    # timed Q&A pause between demo steps
+    AWAITING_CUE = "awaiting_cue"  # solo tour: waiting for the human guide's hand-off
     PAUSED      = "paused"
     COMPLETED   = "completed"
     ERROR       = "error"
@@ -103,6 +104,10 @@ class DemoStep:
     the exact same require_ack / timeout_sec / WAITING_ACK machinery as a
     speech step. Kept as a plain string, like role, so an untagged step
     ("speech") remains the default and no existing script needs updating.
+
+    "cue" sends nothing: the run loop waits, with no timeout, until a human
+    guide hands over (cue_received) or the operator presses Next. See
+    build_solo_script.
     """
     step_id:     str
     robot_id:    str
@@ -245,6 +250,10 @@ class DemoOrchestrator:
         # Holds the LLM-generated text for the current step (replaces raw instruction
         # for display in get_status and as what's actually sent to the robot).
         self._current_step_text: Optional[str] = None
+        # What the human guide said to hand over (see cue_received). Consumed
+        # by the next generated step, so the robot answers THAT rather than
+        # greeting as if nobody had spoken to it.
+        self._cue_text: Optional[str] = None
 
     @property
     def visitor_profile(self):
@@ -322,7 +331,14 @@ class DemoOrchestrator:
         _reset_gazebo_positions()
 
         with self._lock:
-            if robot_ids:
+            if robot_ids and len(robot_ids) == 1:
+                # One robot selected = it presents alone after a human guide
+                # hands over. The old meaning (a guide with no projects) had
+                # no use once a human can be the guide.
+                from demo.demo_script import build_solo_script
+                self._script = build_solo_script(robot_ids[0])
+                logger.info(f"[Demo] Solo script built — {robot_ids[0]}")
+            elif robot_ids:
                 from demo.demo_script import build_script  # local import avoids circular dependency
                 guide    = robot_ids[0]
                 projects = robot_ids[1:]
@@ -343,6 +359,7 @@ class DemoOrchestrator:
             self._state              = DemoState.RUNNING
             self._skip_next_qa       = False
             self._current_step_text  = None
+            self._cue_text           = None
             self._started_at         = time.time()
             self._time_budget_sec    = time_budget_sec
             self._run_id             = f"run-{int(self._started_at)}"
@@ -459,8 +476,11 @@ class DemoOrchestrator:
             # Only pre-arm the skip flag when we are NOT already inside a Q&A window.
             # If we ARE inside one, _qa_end_event.set() below is enough to close it;
             # setting the flag here would incorrectly skip the *next* scripted Q&A step.
+            # AWAITING_CUE too: Next there means "the hand-off happened", and
+            # must not also skip the Q&A that comes after the talk.
             if self._state not in (DemoState.QA_WINDOW, DemoState.IDLE,
-                                   DemoState.COMPLETED, DemoState.ERROR):
+                                   DemoState.COMPLETED, DemoState.ERROR,
+                                   DemoState.AWAITING_CUE):
                 self._skip_next_qa = True
         logger.info(f"[Demo] Manual next ({source}).")
         self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason)
@@ -518,6 +538,16 @@ class DemoOrchestrator:
         self._qa_end_event.set()
         logger.info(f"[Demo] Q&A window closed ({source}).")
         self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason)
+
+    def cue_received(self, text: str) -> bool:
+        """The human guide handed over. True if a cue step was waiting for it."""
+        with self._lock:
+            if self._state != DemoState.AWAITING_CUE:
+                return False
+            self._cue_text = text
+        logger.info(f"[Demo] Hand-off cue: '{text[:60]}'")
+        self._ack_event.set()
+        return True
 
     # ── ACK reception ─────────────────────────────────────────────────────────
 
@@ -1190,6 +1220,11 @@ class DemoOrchestrator:
                 self._maybe_compress_pre_engaged_block(step.block_robot_id)
                 self._last_block_robot_id = step.block_robot_id
 
+            if step.step_kind == "cue":
+                if not self._wait_for_cue(step):
+                    return
+                continue
+
             # Never over the top of a robot that is still answering. A
             # streamed answer is dispatched sentence by sentence and never
             # acknowledged, so without this the loop cannot tell speech from
@@ -1239,6 +1274,27 @@ class DemoOrchestrator:
             if delay > 0:
                 self._advance_event.clear()
                 self._advance_event.wait(timeout=delay)
+
+    def _wait_for_cue(self, step: DemoStep) -> bool:
+        """Hold on a cue step until cue_received() or manual_next().
+
+        No timeout: the human guide talks for as long as they talk. The
+        event is cleared BEFORE the state flips, so a cue arriving the instant
+        AWAITING_CUE is visible cannot be wiped out by a late clear().
+        Returns False if the demo was stopped meanwhile.
+        """
+        self._ack_event.clear()
+        with self._lock:
+            self._state = DemoState.AWAITING_CUE
+            self._current_step_text = step.text or None
+        self._ack_event.wait()
+        with self._lock:
+            if self._state in (DemoState.IDLE, DemoState.COMPLETED, DemoState.ERROR):
+                return False
+            self._state = DemoState.RUNNING
+            self._idx += 1
+            self._current_step_text = None
+        return True
 
     def _shrink_if_already_engaged(self, step: DemoStep) -> DemoStep:
         """
@@ -1534,9 +1590,12 @@ class DemoOrchestrator:
             # is a property of the visitor, not of any one robot.
             with self._lock:
                 profile = self._visitor_profile
+                cue, self._cue_text = self._cue_text, None
             instruction = (step.text
                            + resuming
-                           + self._framing_for(step.robot_id, profile))
+                           + self._framing_for(step.robot_id, profile)
+                           + (f' The guide handed over to you by saying: "{cue}". '
+                              "Respond to that naturally as you begin." if cue else ""))
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
             generated = self._ws.generate_demo_step(step.robot_id, instruction)
             # Compare against INSTRUCTION, not step.text: generate_demo_step's

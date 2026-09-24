@@ -390,8 +390,8 @@ class RobotInstance:
 
     # ── Speech ────────────────────────────────────────────────────────────────
 
-    def process_speech(self, audio_b64: str) -> SpeechResult:
-        """Transcribe audio, then optionally run through chat pipeline."""
+    def process_speech(self, audio_b64: str, chat: bool = True) -> SpeechResult:
+        """Transcribe audio, then (if `chat`) run through the chat pipeline."""
         self.last_active = time.time()
 
         if not self.speech or not self.speech.is_available():
@@ -404,7 +404,7 @@ class RobotInstance:
             raise RuntimeError(f"Transcription failed: {result.error}")
 
         chat_result = None
-        if self.llm and self.llm.is_available() and result.transcription.strip():
+        if chat and self.llm and self.llm.is_available() and result.transcription.strip():
             chat_result = self.process_chat(result.transcription)
 
         return SpeechResult(

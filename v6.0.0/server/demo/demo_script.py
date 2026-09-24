@@ -57,6 +57,9 @@ PEPPER  = "pepper_01"    # Main guide robot — full DB access
 CHATBOX = "chatbox_01"   # Project A robot
 NAVEL   = "navel_01"     # Project B robot
 SILBOT  = "silbot_01"    # Project C robot
+# The physical Navel, for the solo demo (build_solo_script). NAVEL above stays
+# the lab-demo/Gazebo test id.
+NAVEL_ROBOT = "navel_001"
 
 # ── Gazebo routes ────────────────────────────────────────────────────────────
 # A straight line between two points in lab_world usually crosses a wall —
@@ -756,6 +759,26 @@ this becomes the default for robots that do not define their own.
 """
 
 
+def _project_point_steps(robot_id: str) -> list:
+    """One PROJECT step per PROJECT_CHECKLIST point — see the comment at the
+    call site in build_script() for why they are separate steps."""
+    return [
+        DemoStep(
+            step_id     = f"{robot_id}_project_{point_id}",
+            robot_id    = robot_id,
+            text        = f"You are explaining your research to a non-expert audience, "
+                          f"one point at a time. Cover ONLY this point now: {point_brief}. "
+                          "Do not summarise the whole project and do not repeat what you "
+                          "have already said. 1-2 sentences. Use [DEFAULT].",
+            generate    = True,
+            timeout_sec = 60,
+            block_robot_id = robot_id,
+            role           = StepRole.PROJECT,
+        )
+        for point_id, point_brief in PROJECT_CHECKLIST
+    ]
+
+
 def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> list:
     """
     Build a demo script dynamically from a guide robot and an ordered list of
@@ -980,19 +1003,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
         # not yet reached are still sitting in the script — they run after the
         # Q&A closes, with no resume machinery involved, because they were
         # never skipped in the first place.
-        for point_id, point_brief in PROJECT_CHECKLIST:
-            steps.append(DemoStep(
-                step_id     = f"{robot_id}_project_{point_id}",
-                robot_id    = robot_id,
-                text        = f"You are explaining your research to a non-expert audience, "
-                              f"one point at a time. Cover ONLY this point now: {point_brief}. "
-                              "Do not summarise the whole project and do not repeat what you "
-                              "have already said. 1-2 sentences. Use [DEFAULT].",
-                generate    = True,
-                timeout_sec = 60,
-                block_robot_id = robot_id,
-                role           = StepRole.PROJECT,
-            ))
+        steps.extend(_project_point_steps(robot_id))
 
         # Back to the visitors — the guide is opening the floor to them.
         steps.append(_turn_step(f"face_visitors_{robot_id}_qa", guide_id, robot_id,
@@ -1089,3 +1100,66 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
     ))
 
     return steps
+
+
+def build_solo_script(robot_id: str) -> list:
+    """
+    One robot presents on its own, with a HUMAN as the guide.
+
+    The human introduces the lab and the robot out loud; the robot waits
+    (the "cue" step — see DemoOrchestrator._wait_for_cue) until they hand
+    over ("Navel, over to you", "can you tell us about your project?"), then
+    greets, presents, takes questions, and hands back. Every step is this
+    robot's, so it is also the guide as far as guide_and_presenter() is
+    concerned — step 0 is its step — and the Q&A logic runs unchanged.
+
+    No navigation or turn steps: this runs on a real robot at a fixed spot.
+    """
+    return [
+        DemoStep(
+            step_id     = "wait_for_handoff",
+            robot_id    = robot_id,
+            text        = "Waiting for the guide to hand over…",
+            step_kind   = "cue",
+            role        = StepRole.OPENING,
+        ),
+        # HANDOFF, not GREETING: this line is the robot answering the human's
+        # hand-off, and GREETING is compressible — dropping it would leave the
+        # robot launching into its project with nobody having been answered.
+        DemoStep(
+            step_id     = f"{robot_id}_greeting",
+            robot_id    = robot_id,
+            text        = "The lab guide has just introduced you to a group of visitors and "
+                          "handed over to you. Greet the visitors warmly, introduce yourself, "
+                          "and say you would love to tell them about your project. "
+                          "2 sentences. Start with [WAVE].",
+            generate    = True,
+            timeout_sec = 50,
+            block_robot_id = robot_id,
+            role           = StepRole.HANDOFF,
+        ),
+        *_project_point_steps(robot_id),
+        DemoStep(
+            step_id     = f"qa_invite_{robot_id}",
+            robot_id    = robot_id,
+            text        = "Invite the visitors, and the guide, to ask you anything about your "
+                          "project. Let them know you are happy to keep answering until they "
+                          "are ready to finish. 2 sentences. Use [DEFAULT].",
+            generate    = True,
+            timeout_sec = 60,
+            qa_window   = True,
+            qa_timeout  = 0,    # manual advance only — operator clicks Move On
+            block_robot_id = robot_id,
+            role           = StepRole.QA,
+        ),
+        DemoStep(
+            step_id     = "wrap_up",
+            robot_id    = robot_id,
+            text        = "Thank the visitors for listening and for their questions, then hand "
+                          "back to the lab guide, who will take it from here. Do not invite "
+                          "more questions. 2 sentences. Use [HAPPY].",
+            generate    = True,
+            timeout_sec = 60,
+            role        = StepRole.CLOSING,
+        ),
+    ]

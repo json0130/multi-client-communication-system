@@ -66,6 +66,15 @@ robots:
     default_visibility: global
     importance: 0.4
 
+  # The physical Navel (navel_client/client_config.json). navel_01 above stays
+  # the lab-demo/Gazebo test id; both are the same robot as far as the
+  # scenario is concerned, so they share role, access and importance.
+  - id: navel_001
+    role: "Emotion-aware interaction researcher"
+    access_level: local
+    default_visibility: global
+    importance: 0.4
+
   - id: silbot_01
     role: "Human-aware navigation researcher"
     access_level: local

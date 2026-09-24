@@ -249,6 +249,6 @@ def test_shipped_profile_ids_match_the_demo_script():
 
     script_ids = {
         demo_script.PEPPER, demo_script.CHATBOX,
-        demo_script.NAVEL, demo_script.SILBOT,
+        demo_script.NAVEL, demo_script.SILBOT, demo_script.NAVEL_ROBOT,
     }
     assert declared == script_ids

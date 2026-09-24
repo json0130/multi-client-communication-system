@@ -292,6 +292,18 @@ def create_http_gateway(
         if (data or {}).get("source") == "visitor":
             ws_gateway.record_visitor_line(message, client_id)
 
+        # Solo robot waiting for its human guide — same rule as spoken input.
+        if ws_gateway._awaiting_cue():
+            ws_gateway._handle_cue(message)
+            return jsonify({
+                "client_id": client_id,
+                "response": "",
+                "emotion_tag": "",
+                "clean_text": "",
+                "is_delegation": False,
+                "delegation_target": None,
+            })
+
         # Stop any in-progress TTS immediately — user talking = robot listens
         if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):
             ws_gateway.send_to_robot(client_id, {"event": "tts_stop"})

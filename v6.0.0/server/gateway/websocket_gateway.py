@@ -51,6 +51,7 @@ from decision import (
     build_observation,
     guide_and_presenter,
     is_acknowledgement,
+    is_handoff_cue,
     looks_like_question,
 )
 
@@ -1019,7 +1020,13 @@ class WebSocketGateway:
         # to ask" and the window stayed open, because Silbot happened to own
         # the step. guide_and_presenter reads the real host off step 0.
         guide_id, _presenter = guide_and_presenter(status)
-        is_guide = bool(guide_id and responding_robot_id == guide_id)
+        # A solo tour (build_solo_script: every step is one robot's) has no
+        # separate host — the guide IS the presenter, and its answers are the
+        # only ones there are to judge. The guard below would leave the
+        # moderator nothing to ever act on. Its own wrap-up line is sent as a
+        # demo_step and never comes back through here, so it cannot loop.
+        solo = all(s.get("robot_id") == guide_id for s in status.get("steps") or [])
+        is_guide = bool(guide_id and responding_robot_id == guide_id and not solo)
 
         decider = self._registry.get(responding_robot_id)
         result = self._decide(DecisionPoint.QA_ADVANCE, decider)
@@ -1533,6 +1540,21 @@ class WebSocketGateway:
 
     # ── Message routing ───────────────────────────────────────────────────────
 
+    def _awaiting_cue(self) -> bool:
+        orch = self._demo_orchestrator
+        return bool(orch and orch.get_status().get("state") == "awaiting_cue")
+
+    def _handle_cue(self, text: str) -> None:
+        """Speech while a solo robot waits for its human guide to hand over.
+
+        A hand-off phrase starts the robot; anything else is the guide's own
+        intro and gets no reply at all — not an answer, not an interruption.
+        """
+        if is_handoff_cue(text):
+            self._demo_orchestrator.cue_received(text)
+        else:
+            logger.info(f"[WS Gateway] Awaiting hand-off, ignored: '{text[:60]}'")
+
     def _on_message(self, client_id: str, data: dict):
         """
         Route an incoming message from a robot to the right handler.
@@ -1552,6 +1574,9 @@ class WebSocketGateway:
         try:
             if msg_type == "chat":
                 message = data.get("message", "")
+                if message and self._awaiting_cue():
+                    self._handle_cue(message)
+                    return
                 if message:
                     # Stop any in-progress TTS immediately — user talking = robot listens.
                     # Still a raw phrase check: barging in is a transport concern,
@@ -1691,6 +1716,12 @@ class WebSocketGateway:
 
             elif msg_type == "speech":
                 audio_b64 = data.get("audio", "")
+                if audio_b64 and self._awaiting_cue():
+                    # Transcribe only: generating here would answer the guide.
+                    heard = instance.process_speech(audio_b64, chat=False).transcription
+                    if heard:
+                        self._handle_cue(heard)
+                    return
                 if audio_b64:
                     result = instance.process_speech(audio_b64)
 

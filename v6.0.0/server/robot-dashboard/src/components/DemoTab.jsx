@@ -160,6 +160,7 @@ const STATE_COLORS = {
   running:     { bg: '#1d4ed8', text: '#eff6ff' },
   waiting_ack: { bg: '#1d4ed8', text: '#eff6ff' },
   qa_window:   { bg: '#6d28d9', text: '#ede9fe' },
+  awaiting_cue: { bg: '#0e7490', text: '#ecfeff' },  // solo robot waiting for the human guide's hand-off
   paused:      { bg: '#92400e', text: '#fef3c7' },
   completed:   { bg: '#065f46', text: '#d1fae5' },
   error:       { bg: '#991b1b', text: '#fee2e2' },
@@ -705,7 +706,7 @@ export default function DemoTab() {
 
   // ── Derived state ───────────────────────────────────────────────────────────
   const inQa      = status?.state === 'qa_window'
-  const isRunning = ['running', 'waiting_ack', 'qa_window', 'paused'].includes(status?.state)
+  const isRunning = ['running', 'waiting_ack', 'qa_window', 'awaiting_cue', 'paused'].includes(status?.state)
   const isIdle    = !status || ['idle', 'completed', 'error'].includes(status.state)
 
   return (

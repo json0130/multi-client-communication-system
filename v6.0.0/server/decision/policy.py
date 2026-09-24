@@ -251,6 +251,35 @@ INTEREST_PHRASES = [
     "most interested in",
 ]
 
+# A human guide handing over to a solo robot (see demo_script.build_solo_script).
+# Every phrase is ADDRESSED to the robot, never just about it: the guide's own
+# intro ("Navel will explain its research in a moment") runs through the same
+# mic first, and a bare "explain" or "tell us about" would fire on that.
+HANDOFF_CUE_PHRASES = [
+    "over to you",
+    "handing over to you",
+    "hand over to you",
+    "take it away",
+    "floor is yours",
+    "your turn",
+    "introduce yourself",
+    "your project",
+    "your research",
+    "can you explain",
+    "could you explain",
+    "please explain",
+    "can you tell us",
+    "could you tell us",
+    "please tell us",
+    "let's hear from",
+    "let us hear from",
+]
+
+
+def is_handoff_cue(text: str) -> bool:
+    return _matches(text, HANDOFF_CUE_PHRASES) is not None
+
+
 # Above this fraction of the budget in projected overrun, trimming individual
 # project blocks will not recover the time — go straight to the wrap-up.
 DROP_REMAINING_OVERRUN_RATIO = 0.5

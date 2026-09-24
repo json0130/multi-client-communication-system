@@ -59,6 +59,7 @@ from decision.policy import (
     QA_ADVANCE_PHRASES,
     QA_CLOSING_PHRASES,
     SKIP_PHRASES,
+    is_handoff_cue,
     TIME_PRESSURE_PHRASES,
 )
 from decision.recorder import (
@@ -106,5 +107,6 @@ __all__ = [
     "build_observation",
     "guide_and_presenter",
     "is_acknowledgement",
+    "is_handoff_cue",
     "looks_like_question",
 ]
