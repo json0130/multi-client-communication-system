@@ -35,3 +35,10 @@ v6.0.0/demo_recordings/
 v6.0.0/gazebo/lab_world.bak_before_wall_halving
 style-audience-evidence.md
 claude/
+
+# Personal / runtime data (face gallery, transcripts, robot memory) — never commit
+*.npz
+sessions.db
+kg_state*.json
+kg_culture*.json
+*.bak
