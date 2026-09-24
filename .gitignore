@@ -26,3 +26,12 @@ v6.0.0/server/runs/
 
 # graphify
 graphify-out/
+
+# Build output (rebuild with `npm run build` in v6.0.0/server/robot-dashboard)
+v6.0.0/server/robot-dashboard/dist/
+
+# Local-only files
+v6.0.0/demo_recordings/
+v6.0.0/gazebo/lab_world.bak_before_wall_halving
+style-audience-evidence.md
+claude/
