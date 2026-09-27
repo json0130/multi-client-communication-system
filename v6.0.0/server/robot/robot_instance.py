@@ -64,7 +64,6 @@ class ChatResult:
 class SpeechResult:
     transcription: str
     confidence: float
-    chat: Optional[ChatResult] = None   # set if GPT module is also enabled
 
 
 class RobotInstance:
@@ -390,28 +389,20 @@ class RobotInstance:
 
     # ── Speech ────────────────────────────────────────────────────────────────
 
-    def process_speech(self, audio_b64: str) -> SpeechResult:
-        """Transcribe audio, then optionally run through chat pipeline."""
+    def transcribe(self, audio_b64: str) -> SpeechResult:
+        """Transcribe audio. Answering it is the caller's job — see
+        conversation/turn.py, which streams, routes and grounds the reply."""
         self.last_active = time.time()
 
         if not self.speech or not self.speech.is_available():
             raise RuntimeError("Speech module not available for this robot.")
 
-        from modules.speech.speech_module import SpeechResult as SR
-        result: SR = self.speech.transcribe_b64(audio_b64)
-
+        result = self.speech.transcribe_b64(audio_b64)
         if not result.success:
             raise RuntimeError(f"Transcription failed: {result.error}")
 
-        chat_result = None
-        if self.llm and self.llm.is_available() and result.transcription.strip():
-            chat_result = self.process_chat(result.transcription)
-
-        return SpeechResult(
-            transcription=result.transcription,
-            confidence=result.confidence,
-            chat=chat_result,
-        )
+        return SpeechResult(transcription=result.transcription,
+                            confidence=result.confidence)
 
     # ── Emotion / image frame ─────────────────────────────────────────────────
 

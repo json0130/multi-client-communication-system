@@ -38,8 +38,7 @@ PEERS = [{"client_id": GUIDE, "robot_name": "Pepper"},
 def _instant_speech(monkeypatch):
     """No real speaking-time pauses; these tests are about who answers."""
     monkeypatch.setattr("gateway.websocket_gateway._speaking_seconds", lambda _t: 0.0)
-    monkeypatch.setattr("gateway.http_gateway._speaking_seconds", lambda _t: 0.0,
-                        raising=False)
+    monkeypatch.setattr("conversation.turn._speaking_seconds", lambda _t: 0.0)
 
 
 # ── Names ────────────────────────────────────────────────────────────────────

@@ -75,6 +75,10 @@ class PepperBridge(BasicClient):
         self.server_connection.register_handler("demo_step",       self._pepper_demo_step)
         self.server_connection.register_handler("chat_response",   self._pepper_chat_response)
         self.server_connection.register_handler("speech_response", self._pepper_speech_response)
+        # Q&A answers, hand-offs and "Of course." arrive as streamed sentences.
+        # BasicClient's default routes them to output modules, and the bridge
+        # has none — so Pepper was silently dropping every one of them.
+        self.server_connection.register_handler("chat_sentence",   self._pepper_chat_sentence)
 
         self._has_speech = "speech" in self.config.get("modules", [])
 
@@ -192,6 +196,14 @@ class PepperBridge(BasicClient):
         clean = re.sub(r"\[.*?\]", "", text).strip()
         if clean:
             logger.info(f"[TTS] Chat response queued for Pepper: {clean[:70]}")
+            self._tts_queue.put(clean)
+
+    def _pepper_chat_sentence(self, data: dict):
+        """One streamed sentence: queue it for Pepper TTS like a chat response."""
+        if data.get("emotion_tag"):
+            self.on_emotion_detected(data["emotion_tag"])
+        clean = re.sub(r"\[.*?\]", "", data.get("text", "")).strip()
+        if clean:
             self._tts_queue.put(clean)
 
     def _pepper_speech_response(self, data: dict):
