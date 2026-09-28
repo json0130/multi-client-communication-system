@@ -41,6 +41,7 @@ rather than assuming its own saving.
 
 from __future__ import annotations
 
+import math
 from typing import Iterable, Optional, Sequence
 
 from decision.flow import DEFAULT_QA_BUDGET_SEC, FlowGraph
@@ -369,8 +370,11 @@ def plan_for_budget(
             # units the command actually uses makes the estimate and the plan
             # the same object by construction, and errs toward cutting
             # slightly more rather than promising a fit that is only
-            # reachable at fractional precision.
-            reduced = max(qa_floor, float(round(current_qa - needed / windows)))
+            # reachable at fractional precision. Floor, not round: round()
+            # went UP a third of the time, left the tour a second or two over,
+            # and a whole block got compressed to cover what one more second
+            # of Q&A would have.
+            reduced = max(qa_floor, float(math.floor(current_qa - needed / windows)))
             if reduced < current_qa:
                 current_qa = reduced
                 for b in graph.blocks:
