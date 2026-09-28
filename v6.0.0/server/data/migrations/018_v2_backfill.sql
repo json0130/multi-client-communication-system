@@ -276,7 +276,7 @@ UPDATE public.demo_correction_log SET origin = 'test'           -- labelled by t
  WHERE origin IS NULL AND reason IN ('auto-test-advance', 'testing');
 UPDATE public.demo_correction_log SET origin = 'scripted'       -- tools/video_scenarios.py's default reason
  WHERE origin IS NULL AND reason = 'operator move-on';
--- The rest are live and unlabelled: a person or an unmarked script, unknown.
+-- The rest are unlabelled: a person or an unmarked script, unknown.
 -- They keep origin NULL and are attributed to nobody in particular.
 UPDATE public.demo_correction_log SET supervisor_id = 'legacy_unattributed'
  WHERE origin IS NULL AND supervisor_id IS NULL;
