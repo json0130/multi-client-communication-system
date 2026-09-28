@@ -8,6 +8,7 @@ Responsibilities:
   - Initialize its modules based on the robot's DB configuration
   - Look up instances by client_id
   - Mark robots active/inactive in Supabase on connect/disconnect
+  - Open a sessions row per connection, and close it on disconnect
   - Clean up instances that have been idle too long
 
 The gateway layer (HTTP + WebSocket) only ever calls:
@@ -21,7 +22,7 @@ import time
 import threading
 from typing import Optional
 
-from data import robot_repo, user_repo
+from data import robot_repo, session_repo, user_repo
 from core.rbac import GrantStore, RBACFilter, Visibility
 from robot.robot_instance import RobotInstance
 
@@ -110,6 +111,13 @@ class RobotRegistry:
 
             self._instances[client_id] = instance
             robot_repo.set_active(client_id, True)
+            # legacy_user_id: users is still written (dual write) until a
+            # later phase drops it; this is the link between the two.
+            session_repo.start_session(
+                instance.identity.session_id, client_id,
+                scenario_id=robot.scenario_id, legacy_user_id=user_id,
+                started_at=instance.created_at,
+            )
             print(f"[Registry] {client_id} connected. "
                   f"Modules: {list(instance.enabled_modules)}")
             return instance
@@ -136,6 +144,7 @@ class RobotRegistry:
             instance = self._instances.pop(client_id, None)
             if instance:
                 print(f"[Registry] {client_id} disconnected.")
+                session_repo.end_session(instance.identity.session_id)
             robot_repo.set_active(client_id, False)
 
     def is_connected(self, client_id: str) -> bool:
@@ -165,8 +174,9 @@ class RobotRegistry:
     def shutdown(self):
         """Mark all robots inactive and clear the registry."""
         with self._lock:
-            for client_id in list(self._instances.keys()):
+            for client_id, instance in list(self._instances.items()):
                 robot_repo.set_active(client_id, False)
+                session_repo.end_session(instance.identity.session_id)
             self._instances.clear()
         print("[Registry] Shutdown complete.")
 
@@ -291,5 +301,7 @@ class RobotRegistry:
             ]
             for cid in idle:
                 print(f"[Registry] Cleaning up idle instance: {cid}")
-                self._instances.pop(cid, None)
+                instance = self._instances.pop(cid, None)
                 robot_repo.set_active(cid, False)
+                if instance:
+                    session_repo.end_session(instance.identity.session_id)
