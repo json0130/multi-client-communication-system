@@ -120,10 +120,14 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
         Assign a persona to a robot.
 
         1. Validates robot + persona exist
-        2. Updates robots.persona_id in Supabase
-        3. Updates robots.robot_role + allowed_tags (for existing queries)
-        4. Pushes live persona_update event to robot via WebSocket
+        2. Updates robots.persona_id + robot_role in Supabase
+        3. Pushes live persona_update event to robot via WebSocket
            so it takes effect immediately without reboot
+
+        modules / allowed_tags are NOT touched, in the DB or in the event: they
+        describe the robot's hardware ("speech", "navigation", the gestures it
+        can perform), not its persona. Overwriting them let a persona switch
+        take navigation away from a robot that can move.
 
         Body: { "persona_id": "<uuid>" }
         """
@@ -142,17 +146,9 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
         if not persona:
             return jsonify({"error": f"Persona '{persona_id}' not found"}), 404
 
-        # 1. Update Supabase — store persona_id + sync role/tags/modules
-        from data.connection import get_client as db
-        try:
-            db().table("robots").update({
-                "persona_id":  persona_id,
-                "robot_role":  persona.robot_role,
-                "allowed_tags": persona.allowed_tags,
-                "modules":     persona.modules,
-            }).eq("client_id", client_id).execute()
-        except Exception as e:
-            return jsonify({"error": f"DB update failed: {e}"}), 500
+        # 1. Update Supabase — persona_id + role only (see docstring)
+        if not robot_repo.set_persona(client_id, persona_id, persona.robot_role):
+            return jsonify({"error": "DB update failed"}), 500
 
         # 2. Push live update to robot via WebSocket (if connected)
         ws_connected = False
@@ -162,8 +158,6 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
                 "persona_id":   persona_id,
                 "persona_name": persona.name,
                 "robot_role":   persona.robot_role,
-                "allowed_tags": persona.allowed_tags,
-                "modules":      persona.modules,
                 "voice_config": persona.voice_config,
                 "capabilities": persona.capabilities,
                 "personality":  persona.personality,

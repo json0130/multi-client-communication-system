@@ -227,6 +227,19 @@ def update_robot(client_id: str, **fields) -> bool:
         return False
 
 
+def set_persona(client_id: str, persona_id: str, robot_role: str) -> bool:
+    """Assign a persona: persona_id and the role prompt it carries. Never
+    modules / allowed_tags — those are the robot's hardware, not its persona."""
+    try:
+        (get_client().table("robots")
+            .update({"persona_id": persona_id, "robot_role": robot_role})
+            .eq("client_id", client_id).execute())
+        return True
+    except Exception as e:
+        print(f"[robot_repo] set_persona error: {e}")
+        return False
+
+
 def delete_robot(client_id: str) -> bool:
     """Permanently delete a robot from the database. Returns True on success."""
     try:
