@@ -132,6 +132,7 @@ class FakeSupabaseTable:
     def eq(self, *_a, **_k): return self
     def neq(self, *_a, **_k): return self
     def in_(self, *_a, **_k): return self
+    def is_(self, *_a, **_k): return self
     def order(self, *_a, **_k): return self
     def limit(self, *_a, **_k): return self
     def single(self, *_a, **_k): return self

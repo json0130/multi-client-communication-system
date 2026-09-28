@@ -57,18 +57,11 @@ def create_http_gateway(
 
     @bp.route("/robots", methods=["GET"])
     def list_robots():
-        """List all robots registered in the DB with their connection status."""
+        """List registered robots with their connection status. Retired
+        ("deleted") robots are hidden unless ?include_retired=1."""
         connected = set(ws_gateway.get_connected_ids())
-        robots = robot_repo.get_all_active_robots()
-
-        # Also get all robots (active or not) — get_all_active_robots only
-        # returns is_active=True, so we query all here for the management view
-        from data.connection import get_client
-        try:
-            resp = get_client().table("robots").select("*").execute()
-            all_rows = resp.data or []
-        except Exception:
-            all_rows = []
+        include_retired = request.args.get("include_retired") in ("1", "true")
+        all_rows = robot_repo.list_robot_rows(include_retired=include_retired)
 
         return jsonify({
             "robots": [
@@ -82,6 +75,7 @@ def create_http_gateway(
                     "ws_port": r.get("ws_port"),
                     "ws_connected": r["client_id"] in connected,
                     "is_active": r.get("is_active", False),
+                    "retired_at": r.get("retired_at"),
                 }
                 for r in all_rows
             ]
@@ -137,14 +131,15 @@ def create_http_gateway(
     def manage_robot(client_id: str):
         """
         PUT    — update name, IP, port, or modules.
-        DELETE — disconnect then permanently delete from the database.
+        DELETE — disconnect, then retire: the row stays (logs reference it),
+                 hidden from GET /robots. Registering it again brings it back.
         """
         if request.method == "DELETE":
             ws_gateway.disconnect_robot(client_id)
-            ok = robot_repo.delete_robot(client_id)
+            ok = robot_repo.retire_robot(client_id)
             if not ok:
                 return jsonify({"error": "Delete failed"}), 500
-            return jsonify({"success": True, "message": f"'{client_id}' deleted."})
+            return jsonify({"success": True, "message": f"'{client_id}' retired."})
 
         # PUT
         data = request.get_json()

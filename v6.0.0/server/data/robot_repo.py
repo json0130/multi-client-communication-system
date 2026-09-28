@@ -15,7 +15,8 @@ Supabase schema expected (RBAC columns added by data/migrations/002_rbac.sql):
     ip_address      text,
     ws_port         integer,
     access_level    text NOT NULL DEFAULT 'local',   -- 'global' (Manager) | 'local' (Worker)
-    scenario_id     text
+    scenario_id     text,
+    retired_at      timestamptz     -- 015; set by "delete", cleared on register
   )
 
 Note robot_role is a free-text persona prompt fragment, NOT an access role.
@@ -23,6 +24,7 @@ Authorization is governed solely by access_level.
 """
 
 from __future__ import annotations
+from datetime import datetime, timezone
 from typing import Optional
 from dataclasses import dataclass, field
 
@@ -178,6 +180,7 @@ def upsert_robot(
             "allowed_tags": allowed_tags,
             "modules": modules,
             "is_active": False,  # becomes True when the server connects
+            "retired_at": None,  # registering a retired robot brings it back
         }
         if ip_address:
             payload["ip_address"] = ip_address
@@ -240,14 +243,35 @@ def set_persona(client_id: str, persona_id: str, robot_role: str) -> bool:
         return False
 
 
-def delete_robot(client_id: str) -> bool:
-    """Permanently delete a robot from the database. Returns True on success."""
+def retire_robot(client_id: str) -> bool:
+    """
+    What the dashboard's "delete" does: stamp retired_at, keep the row.
+
+    Log rows and (from phase 4) knowledge-graph rows reference robots, so a
+    real delete would orphan them or be refused. Not is_active — that is the
+    connection flag. Registering the robot again clears it (upsert_robot).
+    """
     try:
-        get_client().table("robots").delete().eq("client_id", client_id).execute()
+        (get_client().table("robots")
+            .update({"retired_at": datetime.now(timezone.utc).isoformat()})
+            .eq("client_id", client_id).execute())
         return True
     except Exception as e:
-        print(f"[robot_repo] delete_robot error: {e}")
+        print(f"[robot_repo] retire_robot error: {e}")
         return False
+
+
+def list_robot_rows(include_retired: bool = False) -> list[dict]:
+    """Every registered robot's raw row, connected or not — the management
+    view. Retired robots are left out unless asked for."""
+    try:
+        query = get_client().table("robots").select("*")
+        if not include_retired:
+            query = query.is_("retired_at", "null")
+        return query.execute().data or []
+    except Exception as e:
+        print(f"[robot_repo] list_robot_rows error: {e}")
+        return []
 
 
 def update_role_and_tags(
