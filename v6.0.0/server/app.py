@@ -280,8 +280,13 @@ def record_duration(kind: str, row: dict) -> None:
         print(f"[App] Could not record {kind} duration: {e}")
 
 
-def _step_durations() -> dict:
-    """{step_id: mean_sec} from every run logged so far.
+def _step_durations(live: bool = False) -> dict:
+    """{step_id: mean_sec} from full-tour runs of the current run's kind.
+
+    `live` True: only live runs (every robot physical). False: only simulated
+    runs whose timings are evidence (demo_duration_repo.SIM_MODES). The two are
+    never mixed: a simulated tour's pacing is not a real robot's, and solo
+    runs reuse full-tour step ids so they are left out of both.
 
     Read fresh at most once per _SNAPSHOT_TTL_SEC — the same reasoning as the KG
     snapshot. Early in a campaign this is mostly empty and FlowGraph.estimate()
@@ -289,13 +294,16 @@ def _step_durations() -> dict:
     result says how much of an estimate is actually earned versus guessed.
     """
     import time as _time
-    if _time.time() - _duration_cache["at"] < _SNAPSHOT_TTL_SEC:
-        return _duration_cache["durations"]
+    cached = _duration_cache.get("by_kind", {}).get(live)
+    if cached is not None and _time.time() - _duration_cache["at"] < _SNAPSHOT_TTL_SEC:
+        return cached
     durations = {}
     try:
-        from data.demo_duration_repo import step_stats
+        from data.demo_duration_repo import SIM_MODES, step_stats_by_mode
         from decision.flow import MIN_RUNS_TO_TRUST
-        rows = step_stats()
+        wanted = ("live",) if live else SIM_MODES
+        rows = [r for r in step_stats_by_mode()
+                if r.get("mode") in wanted and r.get("format") == "full_tour"]
         # demo_step_duration_stats groups by (step_id, block_robot_id), and
         # one step_id can legitimately appear under several blocks: with the
         # robots in a different order, transition_to_silbot_01 belongs to
@@ -322,12 +330,64 @@ def _step_durations() -> dict:
                      if n >= MIN_RUNS_TO_TRUST}
         untrusted = sum(1 for n, _ in agg.values() if n < MIN_RUNS_TO_TRUST)
         if untrusted:
-            print(f"[App] {len(durations)} step timing(s) trusted, {untrusted} below "
-                  f"{MIN_RUNS_TO_TRUST} runs — planning those from defaults")
+            print(f"[App] {len(durations)} {'live' if live else 'sim'} step timing(s) "
+                  f"trusted, {untrusted} below {MIN_RUNS_TO_TRUST} runs")
     except Exception as e:
         print(f"[App] step duration stats unavailable, planning from defaults: {e}")
-    _duration_cache.update(at=_time.time(), durations=durations)
+    _duration_cache.setdefault("by_kind", {})[live] = durations
+    _duration_cache["at"] = _time.time()
     return durations
+
+
+def _duration_basis(live: bool, steps=()) -> tuple:
+    """(durations, sources) for planning a run of this kind.
+
+    A live run uses its own observations once a step has MIN_RUNS_TO_TRUST of
+    them, else the newest sim-to-real transfer's prior for that step
+    (current_duration_priors), else the planner's default. A simulated run uses
+    simulated observations, else the default. `sources` names, for every step
+    in `steps`, which one it got — 'live', 'sim', 'prior#<version>' or
+    'default' — so no estimate falls back silently.
+    """
+    durations = dict(_step_durations(live))
+    sources = {sid: ("live" if live else "sim") for sid in durations}
+    if live:
+        try:
+            from data.demo_duration_repo import current_priors
+            for p in current_priors():
+                if p.get("kind") == "step" and p["step_id"] not in durations:
+                    durations[p["step_id"]] = float(p["median_sec"])
+                    sources[p["step_id"]] = f"prior#{p.get('version')}"
+        except Exception as e:
+            print(f"[App] duration priors unavailable: {e}")
+    per_step = {s.step_id: sources.get(s.step_id, "default") for s in steps}
+    return durations, per_step
+
+
+def _qa_basis(live: bool, blocks=()) -> tuple:
+    """(measured_qa, sources): per-block Q&A median from windows of runs of
+    this kind (censored, MIN_BLOCK_WINDOWS visitor-ended windows), else for a
+    live run the transferred prior, else absent (the planner's flat share)."""
+    measured, sources = {}, {}
+    try:
+        from data.demo_duration_repo import SIM_MODES, qa_median_by_block, qa_windows
+        from data.demo_run_repo import run_modes
+        runs = run_modes()
+        wanted = ("live",) if live else SIM_MODES
+        rows = [w for w in qa_windows()
+                if (runs.get(w.get("run_id")) or {}).get("mode") in wanted
+                and (runs.get(w.get("run_id")) or {}).get("format") == "full_tour"]
+        measured = qa_median_by_block(rows)
+        sources = {b: ("live" if live else "sim") for b in measured}
+        if live:
+            from data.demo_duration_repo import current_priors
+            for p in current_priors():
+                if p.get("kind") == "qa" and p["robot_id"] not in measured:
+                    measured[p["robot_id"]] = float(p["median_sec"])
+                    sources[p["robot_id"]] = f"prior#{p.get('version')}"
+    except Exception as e:
+        print(f"[App] per-block Q&A medians unavailable: {e}")
+    return measured, {b: sources.get(b, "default") for b in blocks}
 
 
 _style_cache: dict = {"at": 0.0, "fits": {}}
@@ -430,7 +490,12 @@ def build_flow_plan(obs) -> Optional[dict]:
         return None
 
     remaining_budget = max(0.0, obs.time_budget_sec - obs.elapsed_sec)
-    durations = _price_movement(_step_durations(), obs.remaining_steps)
+    # Live evidence and priors for a live run; simulated evidence otherwise.
+    orch = _orchestrator_ref["o"]
+    run_mode = (orch.get_status().get("mode") if orch else None) or "sim_unknown"
+    live = run_mode == "live"
+    durations, step_sources = _duration_basis(live, obs.remaining_steps)
+    durations = _price_movement(durations, obs.remaining_steps)
     topics, edges, links = _kg_snapshot()
 
     # EXPLICIT trigger-type ordering, made a named sequence rather than
@@ -475,21 +540,28 @@ def build_flow_plan(obs) -> Optional[dict]:
     # handles this in one place — windows that hit their limit count as "at
     # least this long" (a censored median), never as their limit and never
     # dropped. Passing a plain mean over everything here would rebuild the loop.
-    measured_qa = {}
-    try:
-        from data.demo_duration_repo import qa_median_by_block
-        measured_qa = qa_median_by_block()
-    except Exception as e:
-        print(f"[App] per-block Q&A medians unavailable: {e}")
+    measured_qa, qa_sources = _qa_basis(live, [b.robot_id for b in graph.blocks])
 
     # allocate=True: the same total Q&A time, split by measured length and
     # this run's importance, BEFORE the ladder cuts anything. A visitor who
     # came for the emotion work gets a longer Navel round paid for by shorter
     # others, which costs them nothing they came for — where cutting always
     # costs somebody something.
-    return plan_for_budget(graph, remaining_budget, durations=durations,
+    plan = plan_for_budget(graph, remaining_budget, durations=durations,
                            importance=importance, measured_qa=measured_qa,
                            allocate=True)
+    # Which evidence every estimate rested on — logged with the decision, so
+    # a plan built from priors or defaults is never mistaken for a measured one.
+    counts: dict = {}
+    for src in step_sources.values():
+        key = "prior" if src.startswith("prior#") else src
+        counts[key] = counts.get(key, 0) + 1
+    plan["estimate_sources"] = {"run_mode": run_mode, "steps": counts, "qa": qa_sources,
+                                "prior_versions": sorted({v for v in list(step_sources.values())
+                                                          + list(qa_sources.values())
+                                                          if v.startswith("prior#")})}
+    print(f"[App] Plan estimates ({run_mode}): steps {counts}, Q&A {qa_sources}")
+    return plan
 
 
 def install_write_token(app: Flask, token: str) -> None:

@@ -53,6 +53,32 @@ def step_stats(block_robot_id: Optional[str] = None) -> list[dict]:
         return []
 
 
+SIM_MODES = ("mock", "gazebo", "scripted_visitor")
+"""Simulated runs whose timings are evidence for simulated tours. Not
+headless_sim (no robots, no speech) or sim_unknown (client type unknown)."""
+
+
+def step_stats_by_mode() -> list[dict]:
+    """demo_step_duration_stats_by_mode rows: the per-step aggregates, split by
+    run mode and format (migration 015). Needs the service_role key: the
+    view joins demo_runs, which anon cannot read."""
+    try:
+        return get_client().table("demo_step_duration_stats_by_mode").select("*").execute().data or []
+    except Exception as e:
+        print(f"[demo_duration_repo] step_stats_by_mode error: {e}")
+        return []
+
+
+def current_priors() -> list[dict]:
+    """current_duration_priors rows: the newest sim-to-real transfer's duration
+    prior per physical robot and step (migration 017)."""
+    try:
+        return get_client().table("current_duration_priors").select("*").execute().data or []
+    except Exception as e:
+        print(f"[demo_duration_repo] current_priors error: {e}")
+        return []
+
+
 def qa_stats() -> list[dict]:
     """[{step_id, windows, mean_sec, sd_sec, mean_turns, overruns, budgeted}].
 

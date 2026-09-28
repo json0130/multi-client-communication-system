@@ -44,3 +44,14 @@ def upsert_run(row: dict) -> bool:
         except Exception as e2:
             print(f"[demo_run_repo] upsert_run error: {e2}")
             return False
+
+
+def run_modes() -> dict:
+    """{run_id: {"mode", "format"}} for every run — how duration rows are split
+    into live evidence and simulated evidence."""
+    try:
+        rows = get_client().table(RUNS).select("id, mode, format").limit(10000).execute().data or []
+        return {r["id"]: r for r in rows}
+    except Exception as e:
+        print(f"[demo_run_repo] run_modes error: {e}")
+        return {}

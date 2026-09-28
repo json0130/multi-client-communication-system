@@ -158,6 +158,10 @@ class Action:
     kind: ActionKind
     robot_id: Optional[str] = None
     ops: tuple[PlanOp, ...] = ()
+    # For a plan: which evidence its duration estimates rested on (live
+    # observations, a sim-to-real prior, simulated runs, or the default).
+    # Carried into the logged payload; not part of the action's identity.
+    basis: Optional[dict] = field(default=None, compare=False, hash=False)
 
     # ── Constructors ──────────────────────────────────────────────────────────
 
@@ -178,8 +182,8 @@ class Action:
         return cls(ActionKind.GUIDE_INTERJECT, robot_id=robot_id)
 
     @classmethod
-    def revise(cls, ops: Sequence[PlanOp]) -> "Action":
-        return cls(ActionKind.REVISE, ops=tuple(ops))
+    def revise(cls, ops: Sequence[PlanOp], basis: Optional[dict] = None) -> "Action":
+        return cls(ActionKind.REVISE, ops=tuple(ops), basis=basis)
 
     # ── Serialization ─────────────────────────────────────────────────────────
 
@@ -189,6 +193,8 @@ class Action:
             d["robot_id"] = self.robot_id
         if self.ops:
             d["ops"] = [o.payload() for o in self.ops]
+        if self.basis:
+            d["basis"] = self.basis
         return d
 
     @classmethod

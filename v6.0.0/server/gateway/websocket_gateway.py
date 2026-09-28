@@ -1278,7 +1278,8 @@ class WebSocketGateway:
                 return
             orch.revise_script(ops, source="planner", reason="Q&A allocated at start")
             self._recorder.record(build_decision(
-                point=DecisionPoint.PLAN_REVISE, action=Action.revise(ops),
+                point=DecisionPoint.PLAN_REVISE,
+                action=Action.revise(ops, basis=plan.get("estimate_sources")),
                 mechanism="flow_planner_start", observation=obs,
             ))
             logger.info("[Plan] Q&A allocated at start: " + ", ".join(
