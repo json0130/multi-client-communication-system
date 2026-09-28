@@ -197,7 +197,14 @@ RAG_EMBED_MODEL=nomic-embed-text
 
 # Server
 SERVER_PORT=5000
+API_TOKEN=                 # set it: required as X-API-Token on every non-GET request
+DASHBOARD_HOST=            # unset = dashboard on localhost only; 0.0.0.0 = whole LAN
 ```
+
+Robots and tools send `API_TOKEN` from their own environment (never from
+`client_config.json`, which is committed): `export API_TOKEN=...` on each robot
+machine, or `Environment=API_TOKEN=...` in its systemd unit. The dashboard's
+Vite proxy attaches it from this `.env`, so the browser never sees it.
 
 ---
 

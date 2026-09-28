@@ -28,6 +28,7 @@ import threading
 import requests
 import base64
 import logging
+import os
 from abc import ABC, abstractmethod
 from urllib.parse import urlparse
 from typing import Dict, Optional, Any
@@ -37,6 +38,15 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def api_headers() -> dict:
+    """The server's write token, when one is set.
+
+    Read from the API_TOKEN environment variable, never from
+    client_config.json: those files are committed."""
+    token = os.environ.get("API_TOKEN", "")
+    return {"X-API-Token": token} if token else {}
 
 
 # ── "Power-on and ready" helpers ──────────────────────────────────────────────
@@ -340,7 +350,7 @@ class ServerConnection:
             "ws_port": self.ws_port,
         }
         try:
-            resp = requests.post(url, json=payload, timeout=10)
+            resp = requests.post(url, json=payload, headers=api_headers(), timeout=10)
             if resp.status_code == 200:
                 logger.info(f"[Registration] Registered with server: {resp.json().get('message', 'OK')}")
                 return True

@@ -32,7 +32,7 @@ import time
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, "..", "client"))
 
-from client import BasicClient  # noqa: E402
+from client import BasicClient, api_headers  # noqa: E402
 from InputModules.text_input import TextInputModule  # noqa: E402
 from OutputModules.edge_tts_output import EdgeTTSOutputModule  # noqa: E402
 
@@ -261,6 +261,7 @@ class GazeboBridge(BasicClient):
             requests.post(
                 url,
                 json={"x": x, "y": y, "frame_id": self._frame_id, "source": "gazebo"},
+                headers=api_headers(),
                 timeout=3,
             )
         except requests.RequestException as e:

@@ -60,7 +60,9 @@ def main():
     print(f"\nConnecting to server at {server_url} ...")
     for r in robots:
         try:
-            resp = requests.post(f"{server_url}/robots/{r['id']}/connect", timeout=5)
+            token = os.environ.get("API_TOKEN")
+            resp = requests.post(f"{server_url}/robots/{r['id']}/connect", timeout=5,
+                                 headers={"X-API-Token": token} if token else {})
             status = "OK" if resp.ok else f"FAILED — {resp.text}"
         except Exception as e:
             status = f"ERROR — {e}"

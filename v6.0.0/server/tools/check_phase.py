@@ -39,6 +39,12 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 BASE = "http://127.0.0.1:5000"
 
+# The server's write token (API_TOKEN in server/.env), if one is set.
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv()
+_TOKEN = os.environ.get("API_TOKEN")
+HEADERS = {"X-API-Token": _TOKEN} if _TOKEN else {}
+
 
 def check(label: str, condition: bool, detail: str = "") -> bool:
     icon = "  PASS" if condition else "  FAIL"
@@ -125,7 +131,7 @@ def run():
         "voice_config": {"gender": "male", "language": "en", "rate": "+0%"},
         "capabilities": {"navigation": False},
         "personality": {"O": 0.5, "C": 0.5, "E": 0.5, "A": 0.5, "N": 0.5},
-    }, timeout=5)
+    }, headers=HEADERS, timeout=5)
     test_id = None
     if resp.status_code == 200:
         test_id = resp.json().get("persona", {}).get("id")
@@ -146,7 +152,7 @@ def run():
         total += 1
         resp = requests.put(f"{BASE}/personas/{test_id}",
                             json={"name": "_Test Persona UPDATED"},
-                            timeout=5)
+                            headers=HEADERS, timeout=5)
         updated_name = resp.json().get("persona", {}).get("name", "")
         if check("PUT /personas/<id> updates the name",
                  resp.status_code == 200 and "UPDATED" in updated_name):
@@ -158,7 +164,7 @@ def run():
         resp = requests.post(
             f"{BASE}/robots/jay_mock_001/persona",
             json={"persona_id": default["id"]},
-            timeout=5,
+            headers=HEADERS, timeout=5,
         )
         ok = resp.status_code == 200
         body = resp.json() if ok else {}
@@ -174,7 +180,7 @@ def run():
     # ── 8. Delete test persona ────────────────────────────────
     if test_id:
         total += 1
-        resp = requests.delete(f"{BASE}/personas/{test_id}", timeout=5)
+        resp = requests.delete(f"{BASE}/personas/{test_id}", headers=HEADERS, timeout=5)
         if check("DELETE /personas/<id> removes test persona",
                  resp.status_code == 200):
             passed += 1
@@ -182,7 +188,7 @@ def run():
     # ── 9. Cannot delete default ──────────────────────────────
     if default:
         total += 1
-        resp = requests.delete(f"{BASE}/personas/{default['id']}", timeout=5)
+        resp = requests.delete(f"{BASE}/personas/{default['id']}", headers=HEADERS, timeout=5)
         if check("Cannot delete default persona (returns 400)",
                  resp.status_code == 400):
             passed += 1

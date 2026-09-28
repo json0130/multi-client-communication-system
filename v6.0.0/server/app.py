@@ -451,6 +451,34 @@ def build_flow_plan(obs) -> Optional[dict]:
                            allocate=True)
 
 
+def install_write_token(app: Flask, token: str) -> None:
+    """Require `X-API-Token: <token>` on every request that changes something.
+
+    The server listens on the lab network (robots register and report
+    presence over it) and had no auth at all, so anyone on that network could
+    re-role a robot, start a demo or rewrite personas. GETs stay open: they
+    are what the dashboard polls and what a person debugging reads. With no
+    token configured nothing is enforced, which is how every existing setup
+    keeps working until API_TOKEN is set.
+    """
+    import hmac
+    from flask import jsonify, request
+
+    if not token:
+        print("[App] WARNING: API_TOKEN is not set — write routes are open to "
+              "anyone who can reach this server.")
+        return
+
+    @app.before_request
+    def _check_token():
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        sent = request.headers.get("X-API-Token", "")
+        if not hmac.compare_digest(sent.encode(), token.encode()):
+            return jsonify({"error": "missing or wrong X-API-Token"}), 401
+        return None
+
+
 def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     """
     Build and return the configured Flask app plus the gateway objects.
@@ -476,6 +504,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
     app.config["JSON_SORT_KEYS"] = False
+    install_write_token(app, cfg.server.api_token if cfg else "")
 
     # Suppress Werkzeug HTTP access logs (auto-refresh polling is noisy)
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
