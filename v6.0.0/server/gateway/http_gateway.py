@@ -340,22 +340,4 @@ def create_http_gateway(
             "delegation_result": turn.delegation_result,
         })
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
-
-    @bp.after_request
-    def add_cors(response):
-        from core.config import cfg
-        response.headers["Access-Control-Allow-Origin"] = cfg.server.cors_origins
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization"
-        )
-        response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, DELETE, OPTIONS"
-        )
-        return response
-
-    @bp.route("/<path:path>", methods=["OPTIONS"])
-    def options_handler(path):
-        return jsonify({}), 200
-
     return bp

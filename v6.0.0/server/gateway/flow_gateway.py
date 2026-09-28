@@ -174,14 +174,4 @@ def create_flow_gateway(orchestrator) -> Blueprint:
             "interest_resolved": bool(visitor_topics),
         })
 
-    @bp.route("/flow/<path:path>", methods=["OPTIONS"])
-    @bp.route("/flow", methods=["OPTIONS"])
-    def options(path=""):
-        from flask import make_response
-        r = make_response()
-        r.headers["Access-Control-Allow-Origin"] = "*"
-        r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        r.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return r
-
     return bp

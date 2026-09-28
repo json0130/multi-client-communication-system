@@ -183,21 +183,6 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
             "live_updated": ws_connected,
         })
 
-    # ── CORS ─────────────────────────────────────────────────────────────────
-
-    @bp.after_request
-    def add_cors(response):
-        response.headers["Access-Control-Allow-Origin"] = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        return response
-
-    @bp.route("/personas", methods=["OPTIONS"])
-    @bp.route("/personas/<path:path>", methods=["OPTIONS"])
-    @bp.route("/robots/<path:path>/persona", methods=["OPTIONS"])
-    def options_handler(path=""):
-        return jsonify({}), 200
-
     return bp
 
 

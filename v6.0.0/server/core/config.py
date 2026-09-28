@@ -68,7 +68,6 @@ class RagConfig:
 class ServerConfig:
     host: str
     port: int
-    cors_origins: str
 
 
 @dataclass(frozen=True)
@@ -149,7 +148,6 @@ def load_config() -> AppConfig:
         server=ServerConfig(
             host=_optional("SERVER_HOST", "0.0.0.0"),
             port=_int("SERVER_PORT", 5000),
-            cors_origins=_optional("CORS_ORIGINS", "*"),
         ),
     )
 

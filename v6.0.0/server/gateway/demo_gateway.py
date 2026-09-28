@@ -190,15 +190,4 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
             **orchestrator.get_status(),
         })
 
-    # CORS pre-flight (matches the pattern used by the existing gateways)
-    @bp.route("/demo/<path:path>", methods=["OPTIONS"])
-    @bp.route("/demo", methods=["OPTIONS"])
-    def options(path=""):
-        from flask import request, make_response
-        response = make_response()
-        response.headers["Access-Control-Allow-Origin"]  = "*"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return response
-
     return bp
