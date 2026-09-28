@@ -53,7 +53,7 @@ GAZEBO_RESET_TIMEOUT_SEC = 2.0
 
 # demo_runs.mode's CHECK constraint (014_v2_add.sql). Only 'live' runs feed the
 # planner's duration estimates — see data/demo_duration_repo.py.
-RUN_MODES = ("live", "scripted_visitor", "gazebo", "headless_sim")
+RUN_MODES = ("live", "scripted_visitor", "gazebo", "headless_sim", "mock", "sim_unknown")
 
 
 def _reset_gazebo_positions():
@@ -303,7 +303,8 @@ class DemoOrchestrator:
         block_importance as the standing baseline until a fresh utterance
         supersedes them — see decision.planner.resolve_emphasis.
 
-        *mode* is one of RUN_MODES; None means run_mode(guide), else 'live'.
+        *mode* is one of RUN_MODES; None means run_mode(the run's robots),
+        else 'sim_unknown' (never 'live' by default).
         *supervisor_id* is who is supervising; every correction in the run
         carries it.
         """
@@ -964,13 +965,18 @@ class DemoOrchestrator:
                    supervisor_id) -> None:
         """Open this run's demo_runs row. Outside the lock: session_context()
         reads get_status()."""
+        with self._lock:
+            robots = sorted({s.robot_id for s in self._script if s.robot_id})
         if mode is None:
-            mode = "live"
+            # Never 'live' by default: live means every robot is physical, and
+            # only the run-mode lookup (the profile) can say so.
+            mode = "sim_unknown"
             if self._run_mode is not None:
                 try:
-                    mode = self._run_mode(guide_id) or "live"
+                    mode = self._run_mode([guide_id] + [r for r in robots if r != guide_id]) \
+                        or "sim_unknown"
                 except Exception as e:
-                    logger.warning(f"[Demo] run mode lookup failed, using 'live': {e}")
+                    logger.warning(f"[Demo] run mode lookup failed, using 'sim_unknown': {e}")
         ctx = {}
         if self._session_context is not None:
             try:
@@ -982,6 +988,9 @@ class DemoOrchestrator:
                 "id": self._run_id,
                 "scenario_id": ctx.get("scenario_id"),
                 "mode": mode,
+                # One robot and no guide: its timings reuse full-tour step ids
+                # and must not feed the full-tour planner priors.
+                "format": "solo" if len(robots) == 1 else "full_tour",
                 "started_at": datetime.fromtimestamp(
                     self._started_at, timezone.utc).isoformat(),
                 "time_budget_sec": time_budget_sec,

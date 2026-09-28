@@ -63,6 +63,20 @@ def _row_to_record(row: dict) -> RobotRecord:
 _warned_missing_rbac_columns = False
 
 
+def set_embodiment(client_id: str, embodiment: Optional[str],
+                   sim_twin: Optional[str]) -> bool:
+    """Mirror the profile's embodiment / sim_twin into robots (migration 015).
+    Called at boot; the profile stays the source of truth."""
+    try:
+        (get_client().table("robots")
+            .update({"embodiment": embodiment, "sim_twin": sim_twin})
+            .eq("client_id", client_id).execute())
+        return True
+    except Exception as e:
+        print(f"[robot_repo] set_embodiment error for {client_id}: {e}")
+        return False
+
+
 def set_access_level(
     client_id: str,
     access_level: str,

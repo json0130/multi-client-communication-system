@@ -115,9 +115,10 @@ def _next(server: str, reason: str = "operator move-on") -> None:
 
 
 def _start(server: str, robot_ids: list[str] | None, interest: str = "") -> None:
+    # No explicit mode: the server derives it (gazebo when the guide can move,
+    # mock otherwise, live only for all-physical robots). Every correction this
+    # script makes is marked origin "scripted".
     body = {"robot_ids": robot_ids} if robot_ids else {}
-    # The visitor is this script, so the run must not feed the planner's priors.
-    body["mode"] = "scripted_visitor"
     if interest:
         body["visitor_interest"] = interest
     resp = requests.post(f"{server}/demo/start", json=body, headers=HEADERS, timeout=10)

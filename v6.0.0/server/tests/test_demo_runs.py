@@ -42,7 +42,7 @@ def runs(monkeypatch):
         StubGateway(), recorder=DecisionRecorder(sink),
         session_context=lambda: {"scenario_id": "lab_demo", "session_id": "s1"},
         run_sink=rows.append,
-        run_mode=lambda guide: "gazebo" if guide == "sim_guide" else "live",
+        run_mode=lambda robots: "gazebo" if robots[0] == "sim_guide" else "mock",
     )
     o._run_loop = lambda: None      # don't actually run the tour
     return o, rows, sink
@@ -81,7 +81,7 @@ class TestRunRow:
         o.start(robot_ids=[GUIDE, A], time_budget_sec=600, supervisor_id="jay")
         (row,) = rows
         assert row["id"] == o._run_id and row["id"].startswith("run-")
-        assert row["mode"] == "live" and row["scenario_id"] == "lab_demo"
+        assert row["mode"] == "mock" and row["scenario_id"] == "lab_demo"
         assert row["time_budget_sec"] == 600 and row["supervisor_id"] == "jay"
         assert "ended_at" not in row and row["started_at"]
 
@@ -90,16 +90,17 @@ class TestRunRow:
         o.start(robot_ids=[GUIDE, A], mode="scripted_visitor")
         assert rows[0]["mode"] == "scripted_visitor"
 
-    def test_the_default_mode_comes_from_the_guide(self, runs):
+    def test_the_default_mode_comes_from_the_runs_robots(self, runs):
         o, rows, _ = runs
         o.start(robot_ids=["sim_guide", A])
         assert rows[0]["mode"] == "gazebo"
+        assert rows[0]["format"] == "full_tour"
 
-    def test_a_failing_mode_lookup_is_live_not_a_crash(self, runs):
+    def test_a_failing_mode_lookup_is_sim_unknown_never_live(self, runs):
         o, rows, _ = runs
-        o._run_mode = lambda guide: 1 / 0
+        o._run_mode = lambda robots: 1 / 0
         o.start(robot_ids=[GUIDE, A])
-        assert rows[0]["mode"] == "live"
+        assert rows[0]["mode"] == "sim_unknown"
 
     def test_stop_ends_the_run_once_with_the_whole_row(self, runs):
         o, rows, _ = runs
@@ -242,5 +243,18 @@ class TestDefaultMode:
             enabled_modules = {"navigation"}
         monkeypatch.setitem(app._registry_ref, "r",
                             type("R", (), {"get": lambda s, cid: Inst() if cid == "g" else None})())
-        assert app.default_run_mode("g") == "gazebo"
-        assert app.default_run_mode("pepper_01") == "live"
+        monkeypatch.setitem(app._profiles_ref, "p", None)
+        assert app.default_run_mode(["g", "navel_01"]) == "gazebo"
+        assert app.default_run_mode(["pepper_01", "navel_01"]) == "mock"
+
+    def test_live_only_when_every_robot_is_physical(self, monkeypatch):
+        import app
+
+        class Profiles:
+            def is_physical(self, rid):
+                return rid.endswith("_001")
+        monkeypatch.setitem(app._registry_ref, "r", None)
+        monkeypatch.setitem(app._profiles_ref, "p", Profiles())
+        assert app.default_run_mode(["pepper_001", "navel_001"]) == "live"
+        assert app.default_run_mode(["pepper_001", "navel_01"]) == "mock"   # one twin: not live
+        assert app.default_run_mode([]) == "mock"

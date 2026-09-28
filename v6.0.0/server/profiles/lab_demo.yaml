@@ -71,3 +71,19 @@ robots:
     access_level: local
     default_visibility: global
     importance: 0.6
+
+  # ── Physical robots ─────────────────────────────────────────────────────────
+  # sim_twin names the simulation robot each one was trained on (Gazebo / mock
+  # clients use the *_01 ids). An entry with a sim_twin is PHYSICAL and inherits
+  # role, access_level, default_visibility and importance from its twin unless
+  # it sets them. A run is live only when every robot in it is physical, and
+  # what a twin knows reaches its physical robot only through a recorded
+  # transfer (tools/model_transfer.py), never by sharing an id.
+  - id: pepper_001
+    sim_twin: pepper_01
+
+  - id: chatbox_jetson_001
+    sim_twin: chatbox_01
+
+  - id: navel_001
+    sim_twin: navel_01

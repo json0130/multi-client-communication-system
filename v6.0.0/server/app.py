@@ -78,6 +78,16 @@ def build_rbac() -> tuple[ProfileRegistry, RBACFilter, GrantStore]:
             print(f"[App] Reconciled access level for {synced} robot(s).")
         except Exception as e:
             print(f"[App] Could not reconcile access levels (continuing): {e}")
+        try:
+            from data import robot_repo, scenario_repo
+            # Scenarios first: robots.scenario_id and every log row point at them.
+            for sc in profiles.scenarios():
+                scenario_repo.upsert_scenario(sc.scenario_id, sc.description.strip()[:120],
+                                              sc.source_path)
+            mirrored = profiles.sync_embodiment_to_db(robot_repo.set_embodiment)
+            print(f"[App] Mirrored embodiment / sim_twin for {mirrored} robot(s).")
+        except Exception as e:
+            print(f"[App] Could not mirror scenarios / embodiment (continuing): {e}")
 
     try:
         from data.rbac_audit_repo import write_events
@@ -155,10 +165,20 @@ def _can_move(robot_id: str) -> bool:
     return bool(inst and "navigation" in inst.enabled_modules)
 
 
-def default_run_mode(guide_id: str) -> str:
-    """demo_runs.mode when /demo/start named none. A guide that can move is
-    the Gazebo bridge today (see _price_movement), so its tour is simulated."""
-    return "gazebo" if _can_move(guide_id) else "live"
+def default_run_mode(robot_ids) -> str:
+    """demo_runs.mode when /demo/start named none.
+
+    live    only when EVERY robot in the run is declared physical in the
+            profile (it names a sim_twin). Nothing else is ever live.
+    gazebo  otherwise, if the guide can move: the Gazebo bridge declares
+            "navigation" (see _price_movement).
+    mock    otherwise: simulation-twin clients that cannot move.
+    """
+    ids = [r for r in (robot_ids or []) if r]
+    profiles = _profiles_ref["p"]
+    if ids and profiles is not None and all(profiles.is_physical(r) for r in ids):
+        return "live"
+    return "gazebo" if ids and _can_move(ids[0]) else "mock"
 
 
 def record_run(row: dict) -> None:

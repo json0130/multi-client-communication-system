@@ -59,10 +59,20 @@ class RobotProfileEntry:
     # the skip order fell through to the alphabetical tie-break. Which
     # project a visitor loses was decided by robot_id spelling.
     importance: Optional[float] = None
+    # The simulation twin this PHYSICAL robot was trained on (e.g. navel_001's
+    # is navel_01). Its presence is what makes a robot physical; a robot named
+    # as someone's twin is a simulation robot. A run is live only when every
+    # robot in it is physical. Mirrored into robots.embodiment / sim_twin at boot.
+    sim_twin: Optional[str] = None
+    embodiment: Optional[str] = None      # 'physical' | 'sim' | None (undeclared)
 
     @property
     def is_manager(self) -> bool:
         return self.access_level is AccessLevel.GLOBAL
+
+    @property
+    def is_physical(self) -> bool:
+        return self.embodiment == "physical"
 
 
 @dataclass(frozen=True)
@@ -113,6 +123,9 @@ def parse_profile(raw: object, source_path: Optional[str] = None) -> ScenarioPro
 
     entries: list[RobotProfileEntry] = []
     seen: set[str] = set()
+    # A physical robot inherits whatever it does not set from its twin, so the
+    # twin's entry must be read first wherever it appears in the list.
+    by_id = {it.get("id"): it for it in robots_raw if isinstance(it, dict)}
 
     for i, item in enumerate(robots_raw):
         if not isinstance(item, dict):
@@ -132,6 +145,39 @@ def parse_profile(raw: object, source_path: Optional[str] = None) -> ScenarioPro
                 f"Each robot may appear once per scenario."
             )
         seen.add(robot_id)
+
+        twin_id = item.get("sim_twin")
+        if twin_id is not None:
+            if not isinstance(twin_id, str) or twin_id == robot_id:
+                raise ProfileError(
+                    f"Scenario '{scenario_id}'{where}: robot '{robot_id}' has an invalid "
+                    f"sim_twin {twin_id!r} (must name a different robot).")
+            twin = by_id.get(twin_id)
+            if twin is None:
+                raise ProfileError(
+                    f"Scenario '{scenario_id}'{where}: robot '{robot_id}' names sim_twin "
+                    f"'{twin_id}', which this scenario does not declare.")
+            if twin.get("sim_twin"):
+                raise ProfileError(
+                    f"Scenario '{scenario_id}'{where}: '{robot_id}' names '{twin_id}' as its "
+                    f"sim_twin, but '{twin_id}' is itself physical (it has a sim_twin).")
+            # Inherit the twin's identity; anything set here wins.
+            item = {**{k: v for k, v in twin.items() if k not in ("id", "sim_twin", "embodiment")},
+                    **item}
+
+        raw_emb = item.get("embodiment")
+        if raw_emb is not None and raw_emb not in ("physical", "sim"):
+            raise ProfileError(
+                f"Scenario '{scenario_id}'{where}: robot '{robot_id}' has embodiment "
+                f"{raw_emb!r}; valid values are 'physical' and 'sim'.")
+        if twin_id is not None and raw_emb == "sim":
+            raise ProfileError(
+                f"Scenario '{scenario_id}'{where}: robot '{robot_id}' has a sim_twin, so it "
+                f"is physical; it cannot also declare embodiment: sim.")
+        is_a_twin = any(isinstance(o, dict) and o.get("sim_twin") == robot_id
+                        for o in robots_raw)
+        embodiment = ("physical" if twin_id is not None
+                      else "sim" if is_a_twin else raw_emb)
 
         raw_level = item.get("access_level")
         try:
@@ -175,6 +221,8 @@ def parse_profile(raw: object, source_path: Optional[str] = None) -> ScenarioPro
             default_visibility=visibility.value,
             persona=item.get("persona"),
             importance=importance,
+            sim_twin=twin_id,
+            embodiment=embodiment,
         ))
 
     profile = ScenarioProfile(
@@ -308,6 +356,25 @@ class ProfileRegistry:
         return len(self._by_scenario)
 
     # ── Reconciliation ────────────────────────────────────────────────────────
+
+    def is_physical(self, robot_id: str) -> bool:
+        """Declared physical in any loaded scenario (it names a sim_twin)."""
+        entry = self.get_robot(robot_id)
+        return bool(entry and entry.is_physical)
+
+    def sync_embodiment_to_db(self, writer: Callable[[str, Optional[str], Optional[str]], bool]) -> int:
+        """Mirror embodiment and sim_twin into robots, so SQL (the backfill's live
+        rule, the paper stats) can tell a physical robot from its twin.
+        `writer(robot_id, embodiment, sim_twin) -> bool`. Returns rows written."""
+        written = 0
+        for profile in self._by_scenario.values():
+            for robot in profile.robots:
+                try:
+                    if writer(robot.id, robot.embodiment, robot.sim_twin):
+                        written += 1
+                except Exception as e:
+                    print(f"[ProfileRegistry] embodiment sync error for '{robot.id}': {e}")
+        return written
 
     def sync_to_db(self, writer: Callable[[str, str, Optional[str]], bool]) -> int:
         """

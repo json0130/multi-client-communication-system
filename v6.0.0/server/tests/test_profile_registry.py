@@ -226,7 +226,8 @@ def test_the_lab_demo_profile_is_valid():
     p = r.get_scenario("lab_demo")
     assert p is not None
     assert p.get("pepper_01").access_level is AccessLevel.GLOBAL
-    assert len(p.managers) == 1
+    # The guide and its physical twin, which inherits the guide's access.
+    assert {m.id for m in p.managers} == {"pepper_01", "pepper_001"}
     # Derived from the script rather than hardcoded: these ids drifted once
     # already — the profile went on naming chatbox_jetson_001 and navel_001
     # after the live clients had become chatbox_01 and navel_01, so the two
@@ -245,10 +246,68 @@ def test_shipped_profile_ids_match_the_demo_script():
 
     server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     r = ProfileRegistry.from_directory(os.path.join(server_dir, "profiles"))
-    declared = {e.id for e in r.get_scenario("lab_demo").robots}
+    robots = r.get_scenario("lab_demo").robots
 
     script_ids = {
         demo_script.PEPPER, demo_script.CHATBOX,
         demo_script.NAVEL, demo_script.SILBOT,
     }
-    assert declared == script_ids
+    # The simulation robots are exactly the script's; every other entry is a
+    # physical robot whose twin is one of them.
+    assert {e.id for e in robots if not e.is_physical} == script_ids
+    assert all(e.sim_twin in script_ids for e in robots if e.is_physical)
+
+
+# ── sim_twin / embodiment ────────────────────────────────────────────────────
+
+class TestSimTwin:
+    def _profile(self, extra):
+        import yaml
+        from core.profiles.registry import parse_profile
+        return parse_profile(yaml.safe_load("""
+scenario_id: t
+robots:
+  - {id: guide_01, role: Guide, access_level: global}
+  - {id: bot_01, role: Researcher, access_level: local, default_visibility: global, importance: 0.4}
+""" + extra))
+
+    def test_a_physical_robot_inherits_from_its_twin(self):
+        p = self._profile("  - {id: bot_001, sim_twin: bot_01}\n")
+        phys, twin = p.get("bot_001"), p.get("bot_01")
+        assert phys.is_physical and phys.sim_twin == "bot_01"
+        assert twin.embodiment == "sim"
+        assert (phys.role, phys.access_level, phys.importance, phys.default_visibility) == \
+               (twin.role, twin.access_level, twin.importance, twin.default_visibility)
+
+    def test_own_settings_win_over_the_twins(self):
+        p = self._profile("  - {id: bot_001, sim_twin: bot_01, importance: 0.9}\n")
+        assert p.get("bot_001").importance == 0.9
+
+    def test_undeclared_robots_are_not_physical(self):
+        p = self._profile("")
+        assert p.get("guide_01").embodiment is None and not p.get("guide_01").is_physical
+
+    def test_a_twin_the_scenario_does_not_declare_stops_the_boot(self):
+        from core.profiles.registry import ProfileError
+        with pytest.raises(ProfileError, match="does not declare"):
+            self._profile("  - {id: bot_001, sim_twin: ghost_01}\n")
+
+    def test_a_robot_cannot_be_its_own_twin(self):
+        from core.profiles.registry import ProfileError
+        with pytest.raises(ProfileError, match="invalid sim_twin"):
+            self._profile("  - {id: bot_001, sim_twin: bot_001}\n")
+
+    def test_a_physical_twin_is_rejected(self):
+        from core.profiles.registry import ProfileError
+        with pytest.raises(ProfileError, match="itself physical"):
+            self._profile("  - {id: bot_001, sim_twin: bot_01}\n"
+                          "  - {id: bot_002, sim_twin: bot_001}\n")
+
+    def test_the_lab_profile_pairs_every_physical_robot(self):
+        import os
+        from core.profiles.registry import ProfileRegistry
+        reg = ProfileRegistry.from_directory(
+            os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "profiles"))
+        assert reg.is_physical("navel_001") and not reg.is_physical("navel_01")
+        assert reg.get_robot("navel_001").importance == reg.get_robot("navel_01").importance
+        assert reg.get_robot("chatbox_jetson_001").sim_twin == "chatbox_01"
