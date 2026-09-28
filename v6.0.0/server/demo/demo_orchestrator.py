@@ -26,6 +26,7 @@ import threading
 import time
 import logging
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 from enum import Enum
 from typing import Callable, Optional, Sequence, TYPE_CHECKING
 
@@ -49,6 +50,10 @@ logger = logging.getLogger(__name__)
 # fail demo start.
 GAZEBO_RESET_URL = "http://127.0.0.1:8899/reset"
 GAZEBO_RESET_TIMEOUT_SEC = 2.0
+
+# demo_runs.mode's CHECK constraint (014_v2_add.sql). Only 'live' runs feed the
+# planner's duration estimates — see data/demo_duration_repo.py.
+RUN_MODES = ("live", "scripted_visitor", "gazebo", "headless_sim")
 
 
 def _reset_gazebo_positions():
@@ -176,6 +181,8 @@ class DemoOrchestrator:
         duration_sink: Optional[Callable[[str, dict], None]] = None,
         style_fit: Optional[Callable[[str, str], object]] = None,
         subject_lookup: Optional[Callable[[str], str]] = None,
+        run_sink: Optional[Callable[[dict], None]] = None,
+        run_mode: Optional[Callable[[str], str]] = None,
     ):
         self._ws     = ws_gateway
         self._script: list[DemoStep] = []
@@ -213,6 +220,13 @@ class DemoOrchestrator:
         # from the SAME declared scope routing uses, so the subject the guide
         # announces and the subject questions get routed on cannot drift.
         self._subject_lookup = subject_lookup
+        # run_sink(row) persists the demo_runs row, at start and again with
+        # ended_at at the end; run_mode(guide_id) is the mode when the start
+        # request named none. Injected for the same reason as the two above.
+        self._run_sink = run_sink
+        self._run_mode = run_mode
+        # The active run's demo_runs row, until the run ends.
+        self._run_row: Optional[dict] = None
         self._run_id: Optional[str] = None
         self._step_started_at: Optional[float] = None
         self._visitor_profile = None   # decision.visitor_profile.VisitorProfile | None
@@ -268,7 +282,8 @@ class DemoOrchestrator:
     # ── Controls ──────────────────────────────────────────────────────────────
 
     def start(self, robot_ids: list = None, time_budget_sec: Optional[float] = None,
-              visitor_profile=None):
+              visitor_profile=None, mode: Optional[str] = None,
+              supervisor_id: Optional[str] = None):
         """
         Start the demo.  If *robot_ids* is provided (non-empty list), a script is
         built dynamically: first entry is the guide/host, the rest are project
@@ -287,6 +302,10 @@ class DemoOrchestrator:
         every generated step's instruction in _send_step; its topics feed
         block_importance as the standing baseline until a fresh utterance
         supersedes them — see decision.planner.resolve_emphasis.
+
+        *mode* is one of RUN_MODES; None means run_mode(guide), else 'live'.
+        *supervisor_id* is who is supervising; every correction in the run
+        carries it.
         """
         with self._lock:
             if self._state == DemoState.RUNNING:
@@ -314,6 +333,7 @@ class DemoOrchestrator:
             # for the rest of that run — and race to start two runner
             # threads. Reverted below if the script turns out to be empty.
             self._state = DemoState.RUNNING
+            self._run_id = None     # not the previous run's while this one sets up
 
         # Outside the lock: a network call (even to localhost) has no
         # business holding up other threads reading demo state, and this
@@ -355,6 +375,9 @@ class DemoOrchestrator:
             self._ack_event.clear()
             self._qa_end_event.clear()
             self._pause_event.set()
+            guide_id = self._script[0].robot_id
+        self._end_run()     # a run left in ERROR was never ended
+        self._begin_run(guide_id, time_budget_sec, visitor_profile, mode, supervisor_id)
         if self._recorder is not None:
             self._recorder.clear()
         # Per-tour counts start from zero. Nothing reset them, so a server that
@@ -416,6 +439,7 @@ class DemoOrchestrator:
                     "a start() called now may still race it. Investigate "
                     "what _run_loop is blocked on."
                 )
+        self._end_run()
         if self._recorder is not None:
             # Flush before the process can exit — the corrections from this run
             # are the training signal and are not reconstructable.
@@ -446,7 +470,7 @@ class DemoOrchestrator:
                 self._pause_event.set()
                 logger.info(f"[Demo] Resumed ({source}).")
 
-    def manual_next(self, source: str = "auto", reason: str = ""):
+    def manual_next(self, source: str = "auto", reason: str = "", origin: str = "human"):
         """
         Force-advance past current wait (ACK timeout, Q&A window, or transition delay).
 
@@ -463,13 +487,15 @@ class DemoOrchestrator:
                                    DemoState.COMPLETED, DemoState.ERROR):
                 self._skip_next_qa = True
         logger.info(f"[Demo] Manual next ({source}).")
-        self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason)
+        self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason,
+                                origin)
         self._ack_event.set()
         self._qa_end_event.set()
         self._pause_event.set()
         self._advance_event.set()   # skip transition delay if currently waiting
 
-    def qa_interrupt(self, message: str = "", source: str = "auto", reason: str = ""):
+    def qa_interrupt(self, message: str = "", source: str = "auto", reason: str = "",
+                     origin: str = "human"):
         """
         Ad-hoc Q&A — works at ANY point during the demo (running, waiting_ack,
         paused, or even during the scripted Q&A window).
@@ -510,14 +536,16 @@ class DemoOrchestrator:
                     "require_ack": False,
                 })
         logger.info(f"[Demo] Entered ad-hoc Q&A window (interrupt, {source}).")
-        self._record_correction(DecisionPoint.QA_ADVANCE, Action.stay(), source, reason)
+        self._record_correction(DecisionPoint.QA_ADVANCE, Action.stay(), source, reason,
+                                origin)
 
-    def qa_end(self, source: str = "auto", reason: str = ""):
+    def qa_end(self, source: str = "auto", reason: str = "", origin: str = "human"):
         """End the current Q&A window and advance the demo."""
         self._qa_closed_by = source
         self._qa_end_event.set()
         logger.info(f"[Demo] Q&A window closed ({source}).")
-        self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason)
+        self._record_correction(DecisionPoint.QA_ADVANCE, Action.advance(), source, reason,
+                                origin)
 
     # ── ACK reception ─────────────────────────────────────────────────────────
 
@@ -673,6 +701,7 @@ class DemoOrchestrator:
         ops: Sequence[PlanOp],
         source: str = "auto",
         reason: str = "",
+        origin: str = "human",
     ) -> dict:
         """
         Change the *remaining* tour: skip a project, reorder, trim, extend a Q&A,
@@ -738,7 +767,7 @@ class DemoOrchestrator:
 
         if applied:
             self._record_correction(
-                DecisionPoint.PLAN_REVISE, Action.revise(ops), source, reason
+                DecisionPoint.PLAN_REVISE, Action.revise(ops), source, reason, origin
             )
         return {"applied": applied, "ignored": ignored, "total": total}
 
@@ -929,6 +958,70 @@ class DemoOrchestrator:
         rebuilt.extend(loose)
         return rebuilt, f"moved '{robot_id}' to position {target}"
 
+    # ── Run record ────────────────────────────────────────────────────────────
+
+    def _begin_run(self, guide_id, time_budget_sec, visitor_profile, mode,
+                   supervisor_id) -> None:
+        """Open this run's demo_runs row. Outside the lock: session_context()
+        reads get_status()."""
+        if mode is None:
+            mode = "live"
+            if self._run_mode is not None:
+                try:
+                    mode = self._run_mode(guide_id) or "live"
+                except Exception as e:
+                    logger.warning(f"[Demo] run mode lookup failed, using 'live': {e}")
+        ctx = {}
+        if self._session_context is not None:
+            try:
+                ctx = self._session_context() or {}
+            except Exception as e:
+                logger.warning(f"[Demo] session_context failed: {e}")
+        with self._lock:
+            self._run_row = {
+                "id": self._run_id,
+                "scenario_id": ctx.get("scenario_id"),
+                "mode": mode,
+                "started_at": datetime.fromtimestamp(
+                    self._started_at, timezone.utc).isoformat(),
+                "time_budget_sec": time_budget_sec,
+                "visitor_style": visitor_profile.style if visitor_profile else None,
+                "visitor_interest": (visitor_profile.interest_text or None
+                                     if visitor_profile else None),
+                "supervisor_id": supervisor_id,
+            }
+            row = dict(self._run_row)
+        self._emit_run(row)
+
+    def _end_run(self) -> None:
+        """Close the active run, once. The whole row is resent rather than just
+        ended_at, so the write is an upsert that cannot create a half row."""
+        with self._lock:
+            row, self._run_row = self._run_row, None
+        if row is not None:
+            self._emit_run({**row, "ended_at": datetime.now(timezone.utc).isoformat()})
+
+    def _emit_run(self, row: dict) -> None:
+        if self._run_sink is None:
+            return
+        try:
+            self._run_sink(row)
+        except Exception as e:
+            # Same rule as the duration sink: a tour never stops for a log row.
+            logger.warning(f"[Demo] Could not record run {row.get('id')}: {e}")
+
+    def active_run_id(self) -> Optional[str]:
+        """The run in progress, or None — what log rows are stamped with."""
+        with self._lock:
+            return self._active_run_id_locked()
+
+    def _active_run_id_locked(self) -> Optional[str]:
+        # A stopped or finished tour has no active run; ERROR is recoverable
+        # with /demo/next, so it still does.
+        if self._state in (DemoState.IDLE, DemoState.COMPLETED):
+            return None
+        return self._run_id
+
     # ── Correction recording ──────────────────────────────────────────────────
 
     def _record_correction(
@@ -937,9 +1030,13 @@ class DemoOrchestrator:
         corrected_to: Action,
         source: str,
         reason: str,
+        origin: str = "human",
     ) -> None:
         """
         Log a supervisor override.
+
+        `origin` says whether a person made it at all ('human') or a script,
+        test or simulation did — see decision.models.CORRECTION_ORIGINS.
 
         Only 'operator' is recorded. The system calling qa_end() on its own is a
         decision, already logged where it was made — recording it here too would
@@ -969,6 +1066,8 @@ class DemoOrchestrator:
                 step_idx=idx,
                 scenario_id=ctx.get("scenario_id"),
                 session_id=ctx.get("session_id"),
+                run_id=self.active_run_id(),
+                origin=origin,
             ))
         except Exception as e:
             # A logging failure must never propagate into a live demo.
@@ -1014,7 +1113,12 @@ class DemoOrchestrator:
                                      if self._visitor_profile else ""),
                 "visitor_topics":  (list(self._visitor_profile.topics)
                                     if self._visitor_profile else []),
-                "run_id":          self._run_id,
+                # Only while the run is active, so a decision made after the
+                # tour ended is not attributed to it.
+                "run_id":          self._active_run_id_locked(),
+                "mode":            self._run_row["mode"] if self._run_row else None,
+                "supervisor_id":   (self._run_row["supervisor_id"]
+                                    if self._run_row else None),
                 # Full step list for the dashboard timeline
                 "steps": [
                     {
@@ -1168,6 +1272,7 @@ class DemoOrchestrator:
                 with self._lock:
                     self._state = DemoState.COMPLETED
                 logger.info("[Demo] All steps completed.")
+                self._end_run()
                 return
 
             step = self._script[idx]

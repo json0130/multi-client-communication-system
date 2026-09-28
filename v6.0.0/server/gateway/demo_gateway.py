@@ -4,7 +4,7 @@ gateway/demo_gateway.py
 HTTP endpoints for controlling the CARES lab demo state machine.
 
 Endpoints:
-    POST /demo/start    — Load script and start from step 0 (optional time_budget_sec)
+    POST /demo/start    — Load script and start from step 0 (optional time_budget_sec, mode)
     POST /demo/stop     — Stop and reset to IDLE
     POST /demo/pause    — Pause at current step
     POST /demo/resume   — Resume from current step
@@ -18,6 +18,10 @@ and only the human's version is recorded as a supervisor correction. A route tha
 forgets it silently drops a training label. See decision/ and
 demo/demo_orchestrator.py::_record_correction.
 
+`origin` ('human' by default) is accepted wherever a correction can be recorded:
+tools/video_scenarios.py clicks Move On too, and says so with 'scripted', so its
+clicks are never mistaken for a supervisor's. One of CORRECTION_ORIGINS, else 400.
+
 `reason` is optional everywhere it is accepted. An operator running a live demo
 will not stop to fill in a form, and an un-annotated click is still a label — the
 timestamp and step say what was wrong with the timing.
@@ -25,13 +29,23 @@ timestamp and step say what was wrong with the timing.
 
 from flask import Blueprint, jsonify, request
 
-from decision.models import PlanOp
+from decision.models import CORRECTION_ORIGINS, PlanOp
 from decision.visitor_profile import STYLE_FRAMING, VisitorProfile
+from demo.demo_orchestrator import RUN_MODES
 
 
 def _reason(data: dict) -> str:
     """Operator's note, if they left one. Truncated — this is a label, not a log."""
     return str((data or {}).get("reason") or "")[:500]
+
+
+def _origin(data: dict):
+    """(origin, error_response) — who made this correction; 'human' if unsaid."""
+    origin = (data or {}).get("origin") or "human"
+    if origin not in CORRECTION_ORIGINS:
+        return None, (jsonify({
+            "error": f"origin must be one of: {', '.join(CORRECTION_ORIGINS)}"}), 400)
+    return origin, None
 
 
 def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
@@ -65,6 +79,12 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
             }), 400
         interest = str(data.get("visitor_interest") or "").strip()
 
+        # What kind of run this is. Omitted, the orchestrator decides between
+        # 'live' and 'gazebo'; only 'live' runs feed the planner's durations.
+        mode = data.get("mode") or None
+        if mode is not None and mode not in RUN_MODES:
+            return jsonify({"error": f"mode must be one of: {', '.join(RUN_MODES)}"}), 400
+
         topics = ()
         if interest:
             # Resolved ONCE here, not re-resolved every turn — see
@@ -89,6 +109,7 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
             robot_ids=robot_ids if robot_ids else None,
             time_budget_sec=budget,
             visitor_profile=profile,
+            mode=mode,
         )
         return jsonify({
             "message": "Demo started.",
@@ -116,7 +137,10 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
     @bp.route("/demo/next", methods=["POST"])
     def next_step():
         data = request.get_json(silent=True) or {}
-        orchestrator.manual_next(source="operator", reason=_reason(data))
+        origin, err = _origin(data)
+        if err:
+            return err
+        orchestrator.manual_next(source="operator", reason=_reason(data), origin=origin)
         return jsonify({"message": "Advanced to next step.", **orchestrator.get_status()})
 
     @bp.route("/demo/transcript", methods=["GET"])
@@ -145,17 +169,24 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
     @bp.route("/demo/qa", methods=["POST"])
     def qa_start():
         data = request.get_json(silent=True) or {}
+        origin, err = _origin(data)
+        if err:
+            return err
         orchestrator.qa_interrupt(
             message=data.get("message", ""),
             source="operator",
             reason=_reason(data),
+            origin=origin,
         )
         return jsonify({"message": "Q&A window opened.", **orchestrator.get_status()})
 
     @bp.route("/demo/qa_end", methods=["POST"])
     def qa_stop():
         data = request.get_json(silent=True) or {}
-        orchestrator.qa_end(source="operator", reason=_reason(data))
+        origin, err = _origin(data)
+        if err:
+            return err
+        orchestrator.qa_end(source="operator", reason=_reason(data), origin=origin)
         return jsonify({"message": "Q&A window closed.", **orchestrator.get_status()})
 
     @bp.route("/demo/revise", methods=["POST"])
@@ -172,6 +203,9 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
         asks for something that is partly already true.
         """
         data = request.get_json(silent=True) or {}
+        origin, err = _origin(data)
+        if err:
+            return err
         raw_ops = data.get("ops")
         if not isinstance(raw_ops, list) or not raw_ops:
             return jsonify({"error": "ops must be a non-empty list."}), 400
@@ -182,7 +216,7 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
             return jsonify({"error": str(e)}), 400
 
         result = orchestrator.revise_script(
-            ops, source="operator", reason=_reason(data)
+            ops, source="operator", reason=_reason(data), origin=origin
         )
         return jsonify({
             "message": f"Applied {len(result['applied'])} of {len(ops)} op(s).",

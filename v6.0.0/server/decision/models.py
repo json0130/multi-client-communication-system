@@ -363,6 +363,9 @@ class DecisionEvent:
     step_id: Optional[str]
     step_idx: int
     decided_at: datetime
+    # The demo run this was decided in, or None outside one. Recorded here, so
+    # run_id_source says 'recorded'; the backfill marks the ones it guessed.
+    run_id: Optional[str] = None
 
     def as_row(self) -> dict:
         return {
@@ -380,7 +383,13 @@ class DecisionEvent:
             "step_id": self.step_id,
             "step_idx": self.step_idx,
             "decided_at": self.decided_at.isoformat(),
+            "run_id": self.run_id,
+            "run_id_source": "recorded" if self.run_id else None,
         }
+
+
+# demo_correction_log.origin's CHECK constraint (014_v2_add.sql).
+CORRECTION_ORIGINS = ("human", "scripted", "test", "synthetic")
 
 
 @dataclass(frozen=True)
@@ -408,6 +417,10 @@ class CorrectionEvent:
     scenario_id: Optional[str]
     session_id: Optional[str]
     corrected_at: datetime
+    run_id: Optional[str] = None
+    # Who clicked: 'human' | 'scripted' | 'test' | 'synthetic'. supervisor_id
+    # names a person; this says whether a person was involved at all.
+    origin: str = "human"
 
     def as_row(self) -> dict:
         return {
@@ -424,6 +437,9 @@ class CorrectionEvent:
             "scenario_id": self.scenario_id,
             "session_id": self.session_id,
             "corrected_at": self.corrected_at.isoformat(),
+            "run_id": self.run_id,
+            "run_id_source": "recorded" if self.run_id else None,
+            "origin": self.origin,
         }
 
 
@@ -450,6 +466,7 @@ def build_decision(
         step_id=observation.step_id,
         step_idx=observation.step_idx,
         decided_at=now or datetime.now(timezone.utc),
+        run_id=observation.run_id,
     )
 
 
@@ -465,6 +482,8 @@ def build_correction(
     scenario_id: Optional[str] = None,
     session_id: Optional[str] = None,
     now: Optional[datetime] = None,
+    run_id: Optional[str] = None,
+    origin: str = "human",
 ) -> CorrectionEvent:
     return CorrectionEvent(
         correction_id=_new_id(),
@@ -480,4 +499,6 @@ def build_correction(
         scenario_id=scenario_id,
         session_id=session_id,
         corrected_at=now or datetime.now(timezone.utc),
+        run_id=run_id,
+        origin=origin,
     )

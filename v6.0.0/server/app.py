@@ -27,6 +27,7 @@ import os
 import signal
 import sys
 import logging
+import threading
 
 from typing import Optional
 
@@ -142,15 +143,35 @@ def _price_movement(durations: dict, steps) -> dict:
     projects that would have fit. A measured value is overridden too: the
     stats table averages by step_id across sim and real runs alike.
     """
-    reg = _registry_ref["r"]
-
-    def can_move(robot_id):
-        inst = reg.get(robot_id) if reg else None
-        return bool(inst and "navigation" in inst.enabled_modules)
-
     frozen = {s.step_id: 0.0 for s in steps
-              if s.step_kind == "navigation" and not can_move(s.robot_id)}
+              if s.step_kind == "navigation" and not _can_move(s.robot_id)}
     return {**durations, **frozen} if frozen else durations
+
+
+def _can_move(robot_id: str) -> bool:
+    """True for a connected robot that declared the "navigation" module."""
+    reg = _registry_ref["r"]
+    inst = reg.get(robot_id) if reg else None
+    return bool(inst and "navigation" in inst.enabled_modules)
+
+
+def default_run_mode(guide_id: str) -> str:
+    """demo_runs.mode when /demo/start named none. A guide that can move is
+    the Gazebo bridge today (see _price_movement), so its tour is simulated."""
+    return "gazebo" if _can_move(guide_id) else "live"
+
+
+def record_run(row: dict) -> None:
+    """Persist the demo_runs row, off the caller's thread — /demo/start and
+    /demo/stop must not wait on the database. Both writes carry the whole row,
+    so the order they land in does not matter (see demo_run_repo.upsert_run)."""
+    def _write():
+        try:
+            from data.demo_run_repo import upsert_run
+            upsert_run(row)
+        except Exception as e:
+            print(f"[App] Could not record run {row.get('id')}: {e}")
+    threading.Thread(target=_write, daemon=True, name="demo-run-write").start()
 
 
 def _kg_snapshot():
@@ -528,6 +549,8 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         duration_sink=record_duration,
         style_fit=lookup_style_fit,
         subject_lookup=lookup_subject,
+        run_sink=record_run,
+        run_mode=default_run_mode,
     )
     # Unreviewed project facts are usable — that is how they get tested — but
     # they must never be demoed without someone knowing. A robot states them

@@ -186,7 +186,8 @@ def fake_supabase(monkeypatch):
     import data.connection
     monkeypatch.setattr(data.connection, "get_client", _get_client)
     for mod_name in ("data.chat_log_repo", "data.robot_repo",
-                     "data.project_repo", "data.rbac_audit_repo"):
+                     "data.project_repo", "data.rbac_audit_repo",
+                     "data.demo_run_repo"):
         try:
             mod = __import__(mod_name, fromlist=["get_client"])
             monkeypatch.setattr(mod, "get_client", _get_client, raising=False)
@@ -218,7 +219,8 @@ def no_network(monkeypatch, request):
     import data.connection
     monkeypatch.setattr(data.connection, "get_client", _boom)
     for mod_name in ("data.chat_log_repo", "data.robot_repo",
-                     "data.project_repo", "data.rbac_audit_repo"):
+                     "data.project_repo", "data.rbac_audit_repo",
+                     "data.demo_run_repo"):
         try:
             mod = __import__(mod_name, fromlist=["get_client"])
             monkeypatch.setattr(mod, "get_client", _boom, raising=False)

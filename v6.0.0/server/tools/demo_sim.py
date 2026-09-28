@@ -160,16 +160,19 @@ def run(n_robots=3, budget=None, seed=1, correction_rate=0.3,
     )
 
     sink = MemoryDecisionSink()
+    run_sink = None
     if persist:
         from decision import BatchingDecisionSink
         from data.demo_decision_repo import write_corrections, write_events
+        from data.demo_run_repo import upsert_run
         sink = BatchingDecisionSink(decision_writer=write_events,
                                     correction_writer=write_corrections)
+        run_sink = upsert_run
 
     recorder = DecisionRecorder(sink)
     gw = SimGateway(registry, recorder, verbose=verbose)
     orch = DemoOrchestrator(gw, transition_delay=0.0, recorder=recorder,
-                            session_context=gw.session_context)
+                            session_context=gw.session_context, run_sink=run_sink)
     gw.set_demo_orchestrator(orch)
 
     stats = Counter()
@@ -190,7 +193,8 @@ def run(n_robots=3, budget=None, seed=1, correction_rate=0.3,
 
             if not script:
                 # Out of scripted turns — close the window so the tour advances.
-                orch.manual_next(source="operator", reason="end of scripted visitors")
+                orch.manual_next(source="operator", reason="end of scripted visitors",
+                                 origin="synthetic")
                 stats["correction_manual_next"] += 1
                 time.sleep(0.02)
                 continue
@@ -216,11 +220,13 @@ def run(n_robots=3, budget=None, seed=1, correction_rate=0.3,
             if rng.random() < correction_rate:
                 if rng.random() < 0.7:
                     orch.manual_next(source="operator",
-                                     reason=rng.choice(OPERATOR_REASONS))
+                                     reason=rng.choice(OPERATOR_REASONS),
+                                     origin="synthetic")
                     stats["correction_manual_next"] += 1
                 else:
                     orch.qa_interrupt(source="operator",
-                                      reason=rng.choice(OPERATOR_REASONS))
+                                      reason=rng.choice(OPERATOR_REASONS),
+                                      origin="synthetic")
                     stats["correction_qa_interrupt"] += 1
             time.sleep(0.02)
 
@@ -240,7 +246,7 @@ def run(n_robots=3, budget=None, seed=1, correction_rate=0.3,
 
     before = _counts()
     t0 = time.time()
-    orch.start(robot_ids=[guide] + projects, time_budget_sec=budget)
+    orch.start(robot_ids=[guide] + projects, time_budget_sec=budget, mode="headless_sim")
     driver = threading.Thread(target=visitor_thread, daemon=True, name="sim-visitors")
     driver.start()
 

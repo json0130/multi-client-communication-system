@@ -109,11 +109,15 @@ def _block_robot(s: dict) -> str | None:
 
 
 def _next(server: str, reason: str = "operator move-on") -> None:
-    requests.post(f"{server}/demo/next", json={"reason": reason}, headers=HEADERS, timeout=5)
+    # origin "scripted": this click is the script's, not a supervisor's.
+    requests.post(f"{server}/demo/next", json={"reason": reason, "origin": "scripted"},
+                  headers=HEADERS, timeout=5)
 
 
 def _start(server: str, robot_ids: list[str] | None, interest: str = "") -> None:
     body = {"robot_ids": robot_ids} if robot_ids else {}
+    # The visitor is this script, so the run must not feed the planner's priors.
+    body["mode"] = "scripted_visitor"
     if interest:
         body["visitor_interest"] = interest
     resp = requests.post(f"{server}/demo/start", json=body, headers=HEADERS, timeout=10)
