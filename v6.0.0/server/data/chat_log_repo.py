@@ -149,6 +149,34 @@ def get_recent_messages(user_id: int, limit: int = 100) -> list[str]:
         return []
 
 
+def get_session_rows(session_id: Optional[str]) -> list[dict]:
+    """
+    Every message of one robot connection, oldest first, with provenance —
+    what RagModule rebuilds a missing local index from.
+
+    Keyed by session_id, which is per connection, so one visitor's exchange
+    never seeds another connection's index (as user_id did: one users row per
+    connection). UNFILTERED like get_recent_messages; the RAG module applies
+    RBAC at search time.
+    """
+    if not session_id:
+        return []
+    try:
+        resp = (
+            get_client()
+            .table("chat_logs")
+            .select("message, source_robot_id, scenario_id, session_id, "
+                    "visibility, subject_user_id")
+            .eq("session_id", session_id)
+            .order("id")
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        print(f"[chat_log_repo] get_session_rows error: {e}")
+        return []
+
+
 def _to_memory_record(row: dict) -> MemoryRecord:
     """Adapt a chat_logs row into the store-agnostic type the policy operates on."""
     return MemoryRecord(

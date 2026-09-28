@@ -349,37 +349,17 @@ class RagModule(BaseModule):
         """
         print(f"[RagModule] No local index found — rebuilding from Supabase...")
         try:
-            from data.connection import get_client
+            from data import chat_log_repo
 
-            def _fetch(columns: str):
-                return (
-                    get_client()
-                    .table("chat_logs")
-                    .select(columns)
-                    .eq("user_id", self._user_id)
-                    .order("id")
-                    .execute()
-                )
-
-            try:
-                resp = _fetch(
-                    "message, source_robot_id, scenario_id, session_id, "
-                    "visibility, subject_user_id"
-                )
-            except Exception as e:
-                # 002_rbac.sql has not been applied yet. Fall back to the
-                # pre-RBAC column set so the server still boots; the records
-                # below are then stamped with this robot's own identity, which
-                # is the same provenance the migration's backfill would recover.
-                print(f"[RagModule] RBAC columns unavailable ({e}) — "
-                      f"rebuilding without provenance. Apply 002_rbac.sql.")
-                resp = _fetch("message")
-
-            rows = [r for r in (resp.data or []) if (r.get("message") or "").strip()]
+            # This connection's own history only — one session per connection,
+            # so visitors stay isolated between sessions.
+            rows = [r for r in chat_log_repo.get_session_rows(self._session_id)
+                    if (r.get("message") or "").strip()]
             texts = [r["message"].strip() for r in rows]
 
             if not texts:
-                print(f"[RagModule] No chat history for user {self._user_id} — empty index")
+                print(f"[RagModule] No chat history for session {self._session_id} "
+                      f"— empty index")
                 return
 
             # Batch embed
