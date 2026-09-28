@@ -49,10 +49,14 @@ export const getDemoStatus = ()              => req('GET',  '/demo/status')
 // current SCRIPTED step, so Q&A driven by speech never reached the feed.
 export const getDemoTranscript = (since = 0) =>
   req('GET', `/demo/transcript?since=${since}`)
+// Who can supervise a run — the start dialog's list.
+export const getSupervisors = ()             => req('GET',  '/supervisors')
 export const startDemo     = (robotIds = [], timeBudgetSec = null,
-                              visitorInterest = '', visitorStyle = 'general') => req(
+                              visitorInterest = '', visitorStyle = 'general',
+                              supervisorId = '') => req(
   'POST', '/demo/start',
-  (robotIds.length || timeBudgetSec || visitorInterest || (visitorStyle && visitorStyle !== 'general'))
+  (robotIds.length || timeBudgetSec || visitorInterest || supervisorId
+   || (visitorStyle && visitorStyle !== 'general'))
     ? {
         ...(robotIds.length  ? { robot_ids: robotIds }          : {}),
         // Without a budget the tour has nothing to run late against, so the
@@ -63,6 +67,8 @@ export const startDemo     = (robotIds = [], timeBudgetSec = null,
         // something more specific mid-tour. Both optional.
         ...(visitorInterest  ? { visitor_interest: visitorInterest } : {}),
         ...(visitorStyle && visitorStyle !== 'general' ? { visitor_style: visitorStyle } : {}),
+        // Stored on the run; every correction in it names who was supervising.
+        ...(supervisorId     ? { supervisor_id: supervisorId }   : {}),
       }
     : null,
 )

@@ -223,14 +223,4 @@ def create_kg_gateway(registry=None, ws_gateway=None) -> Blueprint:
         except Exception as e:
             return jsonify({"error": str(e)}), 500
 
-    @bp.route("/kg/<path:path>", methods=["OPTIONS"])
-    @bp.route("/kg", methods=["OPTIONS"])
-    def options(path=""):
-        from flask import make_response
-        r = make_response()
-        r.headers["Access-Control-Allow-Origin"] = "*"
-        r.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        r.headers["Access-Control-Allow-Headers"] = "Content-Type"
-        return r
-
     return bp

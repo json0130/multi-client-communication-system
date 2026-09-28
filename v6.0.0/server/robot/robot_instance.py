@@ -28,7 +28,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Callable, Optional, Sequence, TYPE_CHECKING
 
 from data import robot_repo, user_repo, chat_log_repo
 from core.rbac import (
@@ -64,7 +64,6 @@ class ChatResult:
 class SpeechResult:
     transcription: str
     confidence: float
-    chat: Optional[ChatResult] = None   # set if GPT module is also enabled
 
 
 class RobotInstance:
@@ -81,6 +80,7 @@ class RobotInstance:
         scenario_id: Optional[str] = None,
         session_id: Optional[str] = None,
         default_visibility: object = Visibility.LOCAL,
+        active_run_id: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.client_id = client_id
         self.robot_name = robot_name
@@ -115,6 +115,9 @@ class RobotInstance:
         self._scenario_id = scenario_id
         self._session_id = session_id or f"{client_id}:{int(time.time())}"
         self._default_visibility = default_visibility
+        # () -> the demo run in progress, or None. A callable so robot/ never
+        # imports demo/; app.py wires it to the orchestrator.
+        self._active_run_id = active_run_id or (lambda: None)
 
         self.created_at = time.time()
         self.last_active = time.time()
@@ -390,28 +393,20 @@ class RobotInstance:
 
     # ── Speech ────────────────────────────────────────────────────────────────
 
-    def process_speech(self, audio_b64: str, chat: bool = True) -> SpeechResult:
-        """Transcribe audio, then (if `chat`) run through the chat pipeline."""
+    def transcribe(self, audio_b64: str) -> SpeechResult:
+        """Transcribe audio. Answering it is the caller's job — see
+        conversation/turn.py, which streams, routes and grounds the reply."""
         self.last_active = time.time()
 
         if not self.speech or not self.speech.is_available():
             raise RuntimeError("Speech module not available for this robot.")
 
-        from modules.speech.speech_module import SpeechResult as SR
-        result: SR = self.speech.transcribe_b64(audio_b64)
-
+        result = self.speech.transcribe_b64(audio_b64)
         if not result.success:
             raise RuntimeError(f"Transcription failed: {result.error}")
 
-        chat_result = None
-        if chat and self.llm and self.llm.is_available() and result.transcription.strip():
-            chat_result = self.process_chat(result.transcription)
-
-        return SpeechResult(
-            transcription=result.transcription,
-            confidence=result.confidence,
-            chat=chat_result,
-        )
+        return SpeechResult(transcription=result.transcription,
+                            confidence=result.confidence)
 
     # ── Emotion / image frame ─────────────────────────────────────────────────
 
@@ -568,6 +563,10 @@ class RobotInstance:
         """
         visibility = self._visibility_value()
         try:
+            try:
+                run_id = self._active_run_id()
+            except Exception:
+                run_id = None
             chat_log_repo.insert(
                 self.user_id, message, response,
                 source_robot_id=self.client_id,
@@ -575,6 +574,7 @@ class RobotInstance:
                 session_id=self._session_id,
                 visibility=visibility,
                 subject_user_id=self.user_id,
+                run_id=run_id,
             )
         except Exception as e:
             print(f"[RobotInstance] DB log error: {e}")

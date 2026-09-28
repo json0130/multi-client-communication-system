@@ -28,6 +28,8 @@ import threading
 import requests
 import base64
 import logging
+import os
+import queue
 from abc import ABC, abstractmethod
 from urllib.parse import urlparse
 from typing import Dict, Optional, Any
@@ -37,6 +39,15 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+
+
+def api_headers() -> dict:
+    """The server's write token, when one is set.
+
+    Read from the API_TOKEN environment variable, never from
+    client_config.json: those files are committed."""
+    token = os.environ.get("API_TOKEN", "")
+    return {"X-API-Token": token} if token else {}
 
 
 # ── "Power-on and ready" helpers ──────────────────────────────────────────────
@@ -115,8 +126,29 @@ class OutputModule(BaseModule):
     @abstractmethod
     def process_output(self, data: Any) -> bool: ...
 
+    def report_speaking(self, speaking: bool):
+        """Tell the client (and so the server) this robot started talking,
+        or has nothing left to say. Deduplicated; a TTS module calls it on
+        every transition and the server stops guessing from word counts."""
+        if speaking == getattr(self, "_reported_speaking", False):
+            return
+        self._reported_speaking = speaking
+        report = getattr(self.client, "on_tts_state", None)
+        if report:
+            try:
+                report(speaking)
+            except Exception as e:
+                logger.warning(f"[TTS] Could not report speaking={speaking}: {e}")
+
 
 # ── ServerConnection — WebSocket SERVER (robot listens, server connects) ──────
+
+# Handled one at a time, in arrival order, on one thread. They used to get a
+# thread each, so a streamed answer's sentences could reach TTS out of order,
+# and a tts_stop could run before a sentence it was meant to cancel. Their
+# handlers only queue work, so this lane never blocks for long. demo_step is
+# NOT here: it holds its thread until the step has been spoken.
+ORDERED_EVENTS = {"chat_sentence", "tts_stop", "chat_response", "speech_response"}
 
 class ServerConnection:
     """
@@ -140,6 +172,9 @@ class ServerConnection:
         self._connected = threading.Event()      # set when server is connected
         self._handlers: Dict[str, callable] = {} # event -> callback
         self._lock = threading.Lock()
+        self._ordered: "queue.Queue" = queue.Queue()   # see ORDERED_EVENTS
+        threading.Thread(target=self._ordered_worker, daemon=True,
+                         name="ws-ordered").start()
 
     # ── Handler registration ───────────────────────────────────────────────────
 
@@ -229,12 +264,22 @@ class ServerConnection:
         with self._lock:
             handler = self._handlers.get(event)
 
-        if handler:
+        if handler and event in ORDERED_EVENTS:
+            self._ordered.put((handler, data))
+        elif handler:
             threading.Thread(
                 target=handler, args=(data,), daemon=True
             ).start()
         else:
             logger.debug(f"[WS Server] No handler registered for event '{event}'")
+
+    def _ordered_worker(self):
+        while True:
+            handler, data = self._ordered.get()
+            try:
+                handler(data)
+            except Exception as e:
+                logger.error(f"[WS Server] Handler error for '{data.get('event')}': {e}")
 
     def _apply_persona_update(self, data: dict):
         """
@@ -340,7 +385,7 @@ class ServerConnection:
             "ws_port": self.ws_port,
         }
         try:
-            resp = requests.post(url, json=payload, timeout=10)
+            resp = requests.post(url, json=payload, headers=api_headers(), timeout=10)
             if resp.status_code == 200:
                 logger.info(f"[Registration] Registered with server: {resp.json().get('message', 'OK')}")
                 return True
@@ -402,6 +447,8 @@ class BasicClient:
         # what a barge-in actually interrupted, so a cut-off demo step can be
         # reported back and resumed instead of silently dropped.
         self._speaking_step_id: Optional[str] = None
+        # Highest turn_id a tts_stop has named; older sentences are dropped.
+        self._stopped_turn = 0
 
         logger.info(f"[Client] {self.config.get('robot_name', 'Robot')} initialising")
         logger.info(f"         ID      : {self.config.get('client_id')}")
@@ -520,8 +567,20 @@ class BasicClient:
         self._speaking_step_id = None
         self.send_ack(step_id)
 
+    def is_stale(self, data: dict) -> bool:
+        """True for a sentence from a turn older than the last tts_stop.
+
+        The server tags each turn's tts_stop and sentences with an increasing
+        turn_id; anything older that still arrives after a barge-in belongs
+        to a question the visitor has moved past."""
+        tid = data.get("turn_id")
+        return tid is not None and tid < self._stopped_turn
+
     def _on_chat_sentence(self, data: dict):
         """Handle a streamed sentence — dispatch emotion and feed to TTS immediately."""
+        if self.is_stale(data):
+            logger.info(f"[TTS] Dropped a sentence from stopped turn {data.get('turn_id')}")
+            return
         clean = data.get("text", "").strip()
         emotion = data.get("emotion_tag", "")
         if emotion:
@@ -547,7 +606,7 @@ class BasicClient:
             logger.warning(f"[TTS] chat_sentence had NO output module to speak "
                            f"it: {clean[:60]}")
 
-    def _on_tts_stop(self, _data: dict):
+    def _on_tts_stop(self, data: dict):
         """
         Stop in-progress TTS immediately — called by server during QA interrupt.
 
@@ -558,6 +617,7 @@ class BasicClient:
         half-given research explanation is not), report the remainder back so
         the server can resume it instead of moving straight to the next step.
         """
+        self._stopped_turn = max(self._stopped_turn, data.get("turn_id") or 0)
         step_id = self._speaking_step_id
         remainder = ""
         for module in self.output_modules.values():
@@ -576,6 +636,15 @@ class BasicClient:
                 "remaining_text": remainder,
             })
             logger.info(f"[Demo] Reported interrupted remainder for '{step_id}'.")
+
+    def on_tts_state(self, speaking: bool):
+        """Tell the server this robot started talking, or has nothing left to say.
+
+        Called by the TTS output module. The server otherwise guesses when a
+        streamed answer ends from its word count, and paces the tour on that
+        guess (Q&A auto-close, the guide's wrap-up, waiting before the next
+        step)."""
+        self.server_connection.send({"type": "tts_state", "speaking": speaking})
 
     def send_ack(self, step_id: str):
         """Send an ACK packet to the server for the given demo step."""

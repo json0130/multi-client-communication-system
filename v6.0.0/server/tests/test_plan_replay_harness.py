@@ -48,7 +48,7 @@ def _block(robot):
     }
 
 
-DRIFT_BOUNDARY_BUDGET = 485.0
+DRIFT_BOUNDARY_BUDGET = 650.0
 """A budget sitting just above the skip rung. Undrifted, the tour fits by
 tightening Q&A and compressing; at +15% it no longer does and a project has
 to go. Re-derived when the script gained the merged intro+handoff and the
@@ -60,7 +60,10 @@ chatbox_01) neither of which has an entry in BOUNDARY_DURATIONS below, so
 each falls back to DEFAULT_STEP_SEC and — being absent from the dict —
 does NOT scale under diff_under_duration_drift's drift_pct multiply,
 diluting the drift's effect and pushing the boundary up by more than the
-steps' own combined ~24s."""
+steps' own combined ~24s. And again (485 -> 650): the four face_* steps per
+block were missed last time (+144s at DEFAULT_STEP_SEC). The working band is
+627-671s; 650 is its middle. Scan plan_for_budget for it rather than adding
+steps up by hand."""
 
 BOUNDARY_DURATIONS = {
     "greeting": 15, "lab_intro": 15, "overview": 10,

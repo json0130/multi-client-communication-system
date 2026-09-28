@@ -4,6 +4,11 @@
 # whenever it is powered on. It auto-detects its own IP (run.py) so no config edit
 # is needed, and restarts itself if it ever crashes.
 #
+# DEPLOY: copy BOTH folders onto the robot, side by side —
+#   v6.0.0/navel_client -> /home/navel/control-studio/scripts/navel_client_Lab-Demo
+#   v6.0.0/client       -> /home/navel/control-studio/scripts/client
+# (run.py imports the shared robot client from ../client, or ROBOT_CLIENT_DIR.)
+#
 # INSTALL (run on the Navel robot, once):
 #   sudo cp navel-demo.service /etc/systemd/system/navel-demo.service
 #   # --- edit the path/user below if your folder is not the default ---
@@ -31,6 +36,8 @@ ExecStart=/usr/bin/python3 run.py
 # Navel SDK shared-memory lib (run.py also sets a sane default; this is belt-and-braces)
 Environment=NAVEL_SHM_LIB=/usr/lib/python3/dist-packages/navel/libnavel_shm.cpython-311-aarch64-linux-gnu.so
 Environment=PYTHONUNBUFFERED=1
+# The server write token, if the server sets API_TOKEN:
+# Environment=API_TOKEN=...
 
 # Audio device access for the ODAS mic + Navel TTS
 SupplementaryGroups=audio

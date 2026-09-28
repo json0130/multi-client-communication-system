@@ -3,7 +3,7 @@ import {
   getDemoStatus, getDemoTranscript,
   startDemo, stopDemo, pauseDemo, resumeDemo, nextDemoStep,
   startQaMode, endQaMode, reviseDemo,
-  getRobots, chatRobot,
+  getRobots, chatRobot, getSupervisors,
 } from '../api'
 
 // Preset reasons for an operator override. Every control click is recorded as a
@@ -189,6 +189,16 @@ function RobotSelectorModal({ onClose, onStart }) {
   // states something more specific mid-tour, which always takes precedence.
   const [visitorInterest, setVisitorInterest] = useState('')
   const [visitorStyle,    setVisitorStyle]    = useState('general')
+  // Who is supervising this run. Every override they click is recorded
+  // against it; blank leaves the run unattributed.
+  const [supervisors,  setSupervisors]  = useState([])
+  const [supervisorId, setSupervisorId] = useState('')
+
+  useEffect(() => {
+    getSupervisors()
+      .then(data => setSupervisors(data.supervisors || []))
+      .catch(() => {})
+  }, [])
 
   useEffect(() => {
     getRobots()
@@ -400,6 +410,26 @@ function RobotSelectorModal({ onClose, onStart }) {
               </div>
             </div>
 
+            {/* ── Supervisor ── */}
+            <div style={{ marginBottom: 24 }}>
+              <div className="demo-section-title" style={{ marginBottom: 6 }}>
+                Supervisor
+                <span className="muted" style={{ marginLeft: 8, fontWeight: 400, fontSize: '0.75rem' }}>
+                  who is running this tour — recorded with every override
+                </span>
+              </div>
+              <select
+                className="form-select"
+                value={supervisorId}
+                onChange={e => setSupervisorId(e.target.value)}
+              >
+                <option value="">Not recorded</option>
+                {supervisors.map(s => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+            </div>
+
             {/* ── Actions ── */}
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
               <button className="btn btn-sm" onClick={onClose}>Cancel</button>
@@ -411,6 +441,7 @@ function RobotSelectorModal({ onClose, onStart }) {
                   Number(budgetMin) > 0 ? Number(budgetMin) * 60 : null,
                   visitorInterest,
                   visitorStyle,
+                  supervisorId,
                 )}
               >
                 Start Demo →
@@ -942,9 +973,10 @@ export default function DemoTab() {
       {showSelector && (
         <RobotSelectorModal
           onClose={() => setShowSelector(false)}
-          onStart={(robotIds, timeBudgetSec, visitorInterest, visitorStyle) => {
+          onStart={(robotIds, timeBudgetSec, visitorInterest, visitorStyle, supervisorId) => {
             setShowSelector(false)
-            run(() => startDemo(robotIds, timeBudgetSec, visitorInterest, visitorStyle))
+            run(() => startDemo(robotIds, timeBudgetSec, visitorInterest, visitorStyle,
+                                supervisorId))
           }}
         />
       )}

@@ -25,8 +25,10 @@ A, B = "chatbox_01", "navel_01"
 
 
 def _rows(*specs):
-    """(step_id, runs, mean_sec) tuples as demo_step_duration_stats rows."""
-    return [{"step_id": s, "runs": n, "mean_sec": m} for s, n, m in specs]
+    """(step_id, runs, mean_sec) tuples as demo_step_duration_stats_by_mode
+    rows from simulated full-tour runs (what a simulated tour plans with)."""
+    return [{"step_id": s, "runs": n, "mean_sec": m, "mode": "mock", "format": "full_tour"}
+            for s, n, m in specs]
 
 
 @pytest.fixture
@@ -35,7 +37,7 @@ def durations_from(monkeypatch):
     import app
 
     def _run(rows):
-        monkeypatch.setattr("data.demo_duration_repo.step_stats", lambda: rows)
+        monkeypatch.setattr("data.demo_duration_repo.step_stats_by_mode", lambda: rows)
         app._duration_cache["at"] = 0.0        # defeat the TTL cache
         try:
             return app._step_durations()
@@ -86,7 +88,7 @@ class TestFilter:
 
         def boom():
             raise RuntimeError("supabase down")
-        monkeypatch.setattr("data.demo_duration_repo.step_stats", boom)
+        monkeypatch.setattr("data.demo_duration_repo.step_stats_by_mode", boom)
         app._duration_cache["at"] = 0.0
         try:
             assert app._step_durations() == {}

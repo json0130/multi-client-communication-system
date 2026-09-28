@@ -41,6 +41,7 @@ is reimplemented, not its tuning.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
@@ -180,8 +181,9 @@ def derive_plan(
         if windows:
             # Whole seconds: the op carries an integer and the orchestrator
             # enforces exactly that, so a budget is only real at the precision
-            # it can actually be commanded at. See planner.py's rung 1.
-            qa = max(qa_floor, float(round(qa - needed / windows)))
+            # it can actually be commanded at, rounded DOWN so the cut always
+            # covers what is needed. See planner.py's rung 1.
+            qa = max(qa_floor, float(math.floor(qa - needed / windows)))
     if estimate() <= budget_sec:
         return outcome(True)
 

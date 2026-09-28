@@ -6,7 +6,7 @@ All database operations that touch the 'chat_logs' table.
 Supabase schema expected (see data/migrations/002_rbac.sql for the RBAC columns):
   chat_logs (
     id              serial PRIMARY KEY,
-    user_id         integer REFERENCES users(user_id),
+    user_id         integer,           -- users(user_id); FK dropped in 014_v2_add
     message         text,
     response        text,
     created_at      timestamptz DEFAULT now(),
@@ -15,7 +15,8 @@ Supabase schema expected (see data/migrations/002_rbac.sql for the RBAC columns)
     scenario_id     text,
     session_id      text,
     subject_user_id integer,
-    visibility      text NOT NULL DEFAULT 'local'
+    visibility      text NOT NULL DEFAULT 'local',
+    run_id          text               -- 014_v2_add; no FK
   )
 
 Reads that feed a prompt must go through get_recent_records(), which filters via
@@ -54,6 +55,7 @@ def insert(
     session_id: Optional[str] = None,
     visibility: str = "local",
     subject_user_id: Optional[int] = None,
+    run_id: Optional[str] = None,
 ) -> Optional[int]:
     """
     Persist a user message + bot response pair with its provenance.
@@ -70,6 +72,8 @@ def insert(
         "session_id": session_id,
         "visibility": visibility,
         "subject_user_id": subject_user_id if subject_user_id is not None else user_id,
+        # The demo run in progress when this was said, if any (014_v2_add).
+        "run_id": run_id,
     }
     try:
         resp = get_client().table("chat_logs").insert(payload).execute()
@@ -142,6 +146,34 @@ def get_recent_messages(user_id: int, limit: int = 100) -> list[str]:
         return [r["message"] for r in (resp.data or []) if r.get("message")]
     except Exception as e:
         print(f"[chat_log_repo] get_recent_messages error: {e}")
+        return []
+
+
+def get_session_rows(session_id: Optional[str]) -> list[dict]:
+    """
+    Every message of one robot connection, oldest first, with provenance —
+    what RagModule rebuilds a missing local index from.
+
+    Keyed by session_id, which is per connection, so one visitor's exchange
+    never seeds another connection's index (as user_id did: one users row per
+    connection). UNFILTERED like get_recent_messages; the RAG module applies
+    RBAC at search time.
+    """
+    if not session_id:
+        return []
+    try:
+        resp = (
+            get_client()
+            .table("chat_logs")
+            .select("message, source_robot_id, scenario_id, session_id, "
+                    "visibility, subject_user_id")
+            .eq("session_id", session_id)
+            .order("id")
+            .execute()
+        )
+        return resp.data or []
+    except Exception as e:
+        print(f"[chat_log_repo] get_session_rows error: {e}")
         return []
 
 

@@ -108,20 +108,6 @@ def create_project_gateway() -> Blueprint:
             return jsonify({"error": "Revoke failed"}), 500
         return jsonify({"success": True, "message": f"Revoked '{robot_id}' access to '{project_id}'."})
 
-    # ── CORS ──────────────────────────────────────────────────────────────────
-
-    @bp.after_request
-    def add_cors(response):
-        response.headers["Access-Control-Allow-Origin"]  = "*"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
-        return response
-
-    @bp.route("/projects", methods=["OPTIONS"])
-    @bp.route("/projects/<path:path>", methods=["OPTIONS"])
-    def options_handler(path=""):
-        return jsonify({}), 200
-
     return bp
 
 

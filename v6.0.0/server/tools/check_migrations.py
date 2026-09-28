@@ -47,6 +47,15 @@ CHECKS = [
     ("010_kg_declared_scope", "demo_robot_topic", ["specialised"]),
     ("011_robot_style_fit", "demo_robot_style", []),
     ("012_topic_facts", "demo_topic_facts", []),
+    ("014_v2_add", "demo_decision_log", ["run_id", "run_id_source"]),
+    ("014_v2_add", "demo_correction_log", ["run_id", "run_id_source", "origin"]),
+    ("014_v2_add", "chat_logs", ["run_id"]),
+    # scenarios / supervisors / demo_runs / sessions have RLS and no policies:
+    # probe them with the service_role key, or they read as empty.
+    ("014_v2_add", "demo_runs", ["mode"]),
+    ("014_v2_add", "sessions", ["robot_id"]),
+    ("014_v2_add", "supervisors", []),
+    ("014_v2_add", "scenarios", []),
 ]
 
 # Tables the server must be able to INSERT into, with a minimal valid row.
@@ -78,6 +87,9 @@ VIEWS = [
     ("008_demo_durations", "demo_qa_duration_stats"),
     ("011_robot_style_fit", "demo_style_fit"),
     ("012_topic_facts", "demo_topic_fact_coverage"),
+    ("014_v2_add", "demo_step_duration_stats_by_mode"),
+    ("014_v2_add", "demo_qa_duration_stats_by_mode"),
+    ("014_v2_add", "log_integrity"),
 ]
 
 

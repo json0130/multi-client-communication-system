@@ -31,6 +31,7 @@ Requires: pip install websocket-client
 from __future__ import annotations
 import json
 import logging
+import queue
 import re
 import threading
 import time
@@ -50,7 +51,6 @@ from decision import (
     build_decision,
     build_observation,
     guide_and_presenter,
-    is_acknowledgement,
     is_handoff_cue,
     looks_like_question,
 )
@@ -69,6 +69,10 @@ _looks_like_question = looks_like_question
 
 # How long to wait before attempting a reconnect (seconds)
 RECONNECT_DELAY = 5
+
+# Messages that start a visitor turn: STT + LLM, seconds long. They run on a
+# per-connection worker so the reader keeps reading acks and barge-ins.
+TURN_TYPES = {"chat", "speech"}
 MAX_RECONNECT_ATTEMPTS = 10
 
 ADVANCE_ACK = {
@@ -155,6 +159,16 @@ class RobotConnection:
         self._reconnect_attempts = 0
         self._stop = False
 
+        # Turns run here, one at a time and in order. The reader thread used
+        # to run them itself, so while one robot's answer was generating
+        # nothing else from that robot was read: not its acks, not the
+        # visitor talking over it.
+        self._turns: "queue.Queue[Optional[dict]]" = queue.Queue()
+        self._turn_cancel: Optional[threading.Event] = None
+        self._turn_lock = threading.Lock()
+        threading.Thread(target=self._turn_worker, daemon=True,
+                         name=f"turns-{client_id}").start()
+
     @property
     def url(self) -> str:
         return f"ws://{self.ip}:{self.port}"
@@ -167,6 +181,7 @@ class RobotConnection:
     def disconnect(self):
         """Close the connection cleanly."""
         self._stop = True
+        self._turns.put(None)
         if self._ws:
             self._ws.close()
         self._connected = False
@@ -212,7 +227,32 @@ class RobotConnection:
             data = json.loads(raw)
         except json.JSONDecodeError:
             data = {"raw": raw}
-        self._on_message(self.client_id, data)
+        if data.get("type") in TURN_TYPES:
+            # The visitor spoke again: the answer still being generated is
+            # for a question they have moved past. Stop it at its next
+            # sentence rather than let it finish after the new turn.
+            with self._turn_lock:
+                if self._turn_cancel is not None:
+                    self._turn_cancel.set()
+            self._turns.put(data)
+        else:
+            self._on_message(self.client_id, data)
+
+    def _turn_worker(self):
+        while True:
+            data = self._turns.get()
+            if data is None:
+                return
+            cancel = threading.Event()
+            with self._turn_lock:
+                self._turn_cancel = cancel
+            try:
+                self._on_message(self.client_id, data, cancel)
+            except Exception as e:
+                print(f"[WS] Turn error for {self.client_id}: {e}")
+            finally:
+                with self._turn_lock:
+                    self._turn_cancel = None
 
     def _on_error(self, ws, error):
         print(f"[WS] Error from {self.client_id}: {error}")
@@ -307,7 +347,13 @@ class WebSocketGateway:
         # moment GENERATION finished, with the whole utterance still ahead of
         # it. This is the one place that models what is still being said.
         self._speech_lock = threading.Lock()
-        self._quiet_at = 0.0
+        # Per robot, so a robot that REPORTS it has gone quiet (tts_state)
+        # can clear its own estimate without clearing anyone else's.
+        self._quiet_at: dict = {}
+        # client_id -> True/False, for clients that report their TTS state.
+        # A report beats the word-count estimate; silent clients keep the
+        # estimate, so nothing changes for them.
+        self._tts_speaking: dict = {}
         # Whether this window has already invited further questions.
         self._asked_more_questions = False
 
@@ -315,6 +361,8 @@ class WebSocketGateway:
         # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
         self._auto_close_timer = None
         self._auto_close_lock = threading.Lock()
+        # (fn, silence, deadline, fire_at) of a quiet-aware pending action.
+        self._pending_quiet = None
 
         # Per-decision scratch space. Thread-local because every robot's
         # connection dispatches messages on its own reader thread, so two
@@ -412,13 +460,18 @@ class WebSocketGateway:
         """
         try:
             status = self._demo_orchestrator.get_status() if self._demo_orchestrator else {}
+            # The active run's supervisor, so every correction names who
+            # was supervising — even with the guide disconnected.
+            ctx = {"supervisor_id": status["supervisor_id"]} \
+                if status.get("supervisor_id") else {}
             steps = status.get("steps") or []
             guide_id = steps[0].get("robot_id") if steps else None
             instance = self._registry.get(guide_id) if guide_id else None
             if instance is None:
-                return {}
+                return ctx
             identity = instance.identity
             return {
+                **ctx,
                 "scenario_id": identity.scenario_id,
                 "session_id": identity.session_id,
             }
@@ -778,7 +831,7 @@ class WebSocketGateway:
         if event == "tts_stop":
             # Speech was cut off mid-utterance; whatever was queued is gone.
             with self._speech_lock:
-                self._quiet_at = 0.0
+                self._quiet_at.clear()
             return
         if event == "chat_sentence":
             text = data.get("text", "")
@@ -793,7 +846,34 @@ class WebSocketGateway:
         if seconds <= 0:
             return
         with self._speech_lock:
-            self._quiet_at = max(self._quiet_at, time.time()) + seconds
+            self._quiet_at[client_id] = max(self._quiet_at.get(client_id, 0.0),
+                                            time.time()) + seconds
+
+    SPEAKING_FLOOR_SEC = 1.0
+    """What seconds_until_quiet reports for a robot that says it is still
+    speaking after its estimate has run out: enough to keep every wait
+    polling, and the robot's own idle report ends it."""
+
+    def note_tts_state(self, client_id: str, speaking: bool) -> None:
+        """A robot reported that its TTS started or finished.
+
+        Idle is the useful half: the estimate is a word count, and a robot
+        that finishes early should not leave the tour waiting out the rest
+        of it. A pending quiet-aware Q&A action is pulled forward to its
+        silence from now.
+        """
+        with self._speech_lock:
+            self._tts_speaking[client_id] = speaking
+            if not speaking:
+                self._quiet_at.pop(client_id, None)
+        if not speaking and self.seconds_until_quiet() == 0.0:
+            with self._auto_close_lock:
+                pending = self._pending_quiet
+            if pending is not None:
+                fn, silence, deadline, fire_at = pending
+                if time.time() + silence < fire_at:
+                    self._schedule_qa_action(silence, fn, silence=silence,
+                                             _deadline=deadline)
 
     def seconds_until_quiet(self) -> float:
         """How much longer the robots are expected to keep talking, in seconds.
@@ -801,19 +881,24 @@ class WebSocketGateway:
         0.0 when nothing is in flight, which is the common case and makes
         this safe to add to any delay unconditionally.
         """
+        now = time.time()
         with self._speech_lock:
-            remaining = self._quiet_at - time.time()
+            remaining = max([q - now for q in self._quiet_at.values()] or [0.0])
+            if any(self._tts_speaking.values()):
+                remaining = max(remaining, self.SPEAKING_FLOOR_SEC)
         return max(0.0, min(self.MAX_QUIET_WAIT_SEC, remaining))
 
     def cancel_qa_auto_close(self, why: str = "") -> None:
         """Stop a pending auto-close. Idempotent."""
         with self._auto_close_lock:
             timer, self._auto_close_timer = self._auto_close_timer, None
+            self._pending_quiet = None
         if timer is not None:
             timer.cancel()
             logger.info(f"[WS Gateway] Auto-close cancelled{(' — ' + why) if why else ''}.")
 
-    def _schedule_qa_auto_close(self, delay: float) -> None:
+    def _schedule_qa_auto_close(self, delay: float,
+                                silence: Optional[float] = None) -> None:
         """
         Close the Q&A window in `delay` seconds unless something cancels it.
 
@@ -838,9 +923,10 @@ class WebSocketGateway:
                         f"questions and {delay:.0f}s passed in silence.")
             orch.qa_end(source="policy")
 
-        self._schedule_qa_action(delay, fire)
+        self._schedule_qa_action(delay, fire, silence=silence)
 
-    def _schedule_qa_action(self, delay: float, fn) -> None:
+    def _schedule_qa_action(self, delay: float, fn, silence: Optional[float] = None,
+                            _deadline: Optional[float] = None) -> None:
         """Run `fn` in `delay` seconds unless the window changes first.
 
         One timer slot, shared by every deferred reaction to a Q&A turn, so
@@ -848,18 +934,36 @@ class WebSocketGateway:
         must call off a queued auto-close and a queued wrap-up alike. Two
         independent timers would have let a stale wrap-up fire on top of the
         answer to the question that made it stale.
+
+        With `silence`, the action means "after `silence` seconds of quiet":
+        `delay` is the estimate of when that is, and if a robot is still
+        speaking when it fires, it re-arms for the rest of the speech plus
+        the silence, up to MAX_QUIET_WAIT_SEC past the first estimate. An
+        idle report can pull it forward (note_tts_state).
         """
         self.cancel_qa_auto_close()
+        deadline = _deadline or time.time() + delay + self.MAX_QUIET_WAIT_SEC
 
         def run():
             with self._auto_close_lock:
+                if self._auto_close_timer is not timer:
+                    return          # superseded while this one was firing
                 self._auto_close_timer = None
+                self._pending_quiet = None
+            if silence is not None:
+                still = self.seconds_until_quiet()
+                if still > 0 and time.time() < deadline:
+                    self._schedule_qa_action(still + silence, fn, silence=silence,
+                                             _deadline=deadline)
+                    return
             fn()
 
         timer = threading.Timer(delay, run)
         timer.daemon = True
         with self._auto_close_lock:
             self._auto_close_timer = timer
+            self._pending_quiet = (None if silence is None
+                                   else (fn, silence, deadline, time.time() + delay))
         timer.start()
 
     def claim_more_questions_prompt(self) -> bool:
@@ -1054,7 +1158,8 @@ class WebSocketGateway:
             # pause mean what it says: three seconds of silence AFTER the
             # robot finishes, not three seconds from the middle of a sentence.
             self._schedule_qa_auto_close(
-                QA_AUTO_CLOSE_SEC + self.seconds_until_quiet())
+                QA_AUTO_CLOSE_SEC + self.seconds_until_quiet(),
+                silence=QA_AUTO_CLOSE_SEC)
             return "auto_close"
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
@@ -1088,7 +1193,8 @@ class WebSocketGateway:
             # Plus a pause, so a visitor has time to ask a follow-up first;
             # speaking cancels it (check_qa_advance_from_user).
             self._schedule_qa_action(
-                self.seconds_until_quiet() + QA_WRAP_UP_SILENCE_SEC, _say_wrap_up)
+                self.seconds_until_quiet() + QA_WRAP_UP_SILENCE_SEC, _say_wrap_up,
+                silence=QA_WRAP_UP_SILENCE_SEC)
             return "wrap_up"
 
         return None
@@ -1184,7 +1290,8 @@ class WebSocketGateway:
                 return
             orch.revise_script(ops, source="planner", reason="Q&A allocated at start")
             self._recorder.record(build_decision(
-                point=DecisionPoint.PLAN_REVISE, action=Action.revise(ops),
+                point=DecisionPoint.PLAN_REVISE,
+                action=Action.revise(ops, basis=plan.get("estimate_sources")),
                 mechanism="flow_planner_start", observation=obs,
             ))
             logger.info("[Plan] Q&A allocated at start: " + ", ".join(
@@ -1555,9 +1662,13 @@ class WebSocketGateway:
         else:
             logger.info(f"[WS Gateway] Awaiting hand-off, ignored: '{text[:60]}'")
 
-    def _on_message(self, client_id: str, data: dict):
+    def _on_message(self, client_id: str, data: dict,
+                    cancelled: Optional[threading.Event] = None):
         """
         Route an incoming message from a robot to the right handler.
+
+        `cancelled` is set when the visitor starts another turn on this
+        connection; an answer still streaming stops at its next sentence.
 
         Expected message types from the robot:
           - "chat"        : { "type": "chat", "message": "..." }
@@ -1571,6 +1682,9 @@ class WebSocketGateway:
             print(f"[WS Gateway] Message from unregistered robot: {client_id}")
             return
 
+        # Lazy: conversation.turn imports this module's speaking-time helpers.
+        from conversation.turn import handle_turn
+
         try:
             if msg_type == "chat":
                 message = data.get("message", "")
@@ -1578,219 +1692,33 @@ class WebSocketGateway:
                     self._handle_cue(message)
                     return
                 if message:
-                    # Stop any in-progress TTS immediately — user talking = robot listens.
-                    # Still a raw phrase check: barging in is a transport concern,
-                    # not a decision, and it must happen before any LLM call.
-                    if not any(p in message.lower() for p in self._QA_ADVANCE_PHRASES):
-                        self.send_to_robot(client_id, {"event": "tts_stop"})
-                        # Also pause the demo if it was running
-                        if self._demo_orchestrator:
-                            status = self._demo_orchestrator.get_status()
-                            if status["state"] in ("running", "waiting_ack"):
-                                self._demo_orchestrator.qa_interrupt(source="auto")
-
-                    # One QA_ADVANCE decision now covers what used to be two
-                    # separate passes (the advance-phrase check, then the
-                    # question-heuristic/classifier chain). The precedence and
-                    # the outcomes are identical — see HeuristicPolicy.
-                    result = self.check_qa_advance_from_user(instance, message)
-
-                    # PLAN_REVISE first, unconditionally. It used to sit after
-                    # the classifier's early return below, which meant a message
-                    # classified as "done" (closing THIS window) skipped plan
-                    # revision entirely — so "we're running out of time" could
-                    # get read as "no more questions" and the tour never
-                    # shortened, because the request `return`ed before revision
-                    # was ever asked for. The two decisions are independent and
-                    # both must get a chance to fire from the same message.
-                    self.check_plan_revision(instance, message)
-
-                    if result is not None and result.action.kind is ActionKind.ADVANCE:
-                        # EVERY advance mechanism ends the turn here, not just
-                        # the classifier. A phrase match used to fall through
-                        # and generate, on the theory that the visitor might
-                        # have said something else worth answering. In
-                        # practice the window is closing, so the answer
-                        # arrives as the tour is already moving — and the
-                        # reply is generated by whichever robot held the mic,
-                        # which need not be the guide. A live run had a
-                        # visitor tell Navel "I'm running out of time, can we
-                        # skip", and Navel answered "Sure, let's skip it.
-                        # What's next on your agenda?" — asking the visitor
-                        # to run the tour, while the clock they had just
-                        # complained about kept running.
-                        #
-                        # A fixed line from the GUIDE instead: it is the
-                        # robot whose job this is, it costs no generation on
-                        # a turn that has nothing to answer, and time
-                        # pressure is the case where spending seconds is
-                        # exactly wrong.
-                        ack = self.advance_ack_text(result.mechanism)
-                        if ack:
-                            guide_id, _p = guide_and_presenter(
-                                self._demo_orchestrator.get_status())
-                            self.send_to_robot(guide_id or client_id, {
-                                "event": "demo_step",
-                                "step_id": "_qa_advance_ack",
-                                "text": ack,
-                                "require_ack": False,
-                            })
-                        return
-
-                    # A nod, not a question. Answered from a fixed line rather
-                    # than by the LLM: told not to narrate the tour, a 7B
-                    # model still replied to "okay thank you" with "Great,
-                    # let us move on to the next project!", announcing a
-                    # transition the script had not reached. Deciding this in
-                    # code is the same fix the question heuristic got —
-                    # prompt compliance was not enough. Also saves a
-                    # generation on a turn that needs none.
-                    if is_acknowledgement(message):
-                        self.send_to_robot(client_id, {
-                            "event": "chat_sentence",
-                            "text": "Of course.",
-                            "emotion_tag": "DEFAULT",
-                        })
-                        return
-
-                    # Who actually answers. A confident competence-graph read
-                    # can name a DIFFERENT connected robot than the one that
-                    # received this message — the receiver gets a one-line
-                    # handoff and the named robot answers in its own voice,
-                    # instead of the receiver improvising an answer about
-                    # someone else's research just because its mic heard the
-                    # question first.
-                    target_instance, target_id, handoff = self.route_question(instance, message)
-                    if handoff:
-                        self.send_to_robot(client_id, {
-                            "event": "chat_sentence",
-                            "text": handoff,
-                            "emotion_tag": "DEFAULT",
-                        })
-
-                    # Deferred: the guide has just promised the topic will be
-                    # covered at that robot's station, so nobody answers now.
-                    # Returning before process_chat_stream is the point —
-                    # generating a reply here would be the improvised answer
-                    # deferring exists to avoid.
-                    if target_instance is None:
-                        return
-
-                    # Let the hand-off be HEARD before the answer starts —
-                    # see the same guard in http_gateway. Two robots, two
-                    # speakers, nothing else serialising them.
-                    _wait = {"left": _speaking_seconds(handoff) if handoff else 0.0}
-
-                    def _on_sentence(clean_text, emotion_tag):
-                        if _wait["left"] > 0:
-                            time.sleep(_wait["left"])
-                            _wait["left"] = 0.0
-                        if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
-                            return
-                        # A chunk that is only an emotion tag is not speech.
-                        # The model sometimes emits a trailing "[DEFAULT]" of
-                        # its own, and it was sent as a sentence: the robot
-                        # got a line with nothing to say and the transcript
-                        # showed a blank turn under its name.
-                        if not _spoken_text(clean_text):
-                            return
-                        self.send_to_robot(target_id, {
-                            "event": "chat_sentence",
-                            "text": clean_text,
-                            "emotion_tag": emotion_tag,
-                        })
-
-                    result = target_instance.process_chat_stream(
-                        message, _on_sentence,
-                        **self.answer_kwargs(target_id, message),
-                    )
-                    # Did the robot just sign off? If so the window closes on
-                    # its own after a pause, instead of waiting for someone to
-                    # say "move on" out loud.
-                    self.check_qa_auto_close(target_id, result.clean_text or "")
-                    # Handle delegation if needed
-                    if result.is_delegation and result.delegation_target:
-                        from gateway.delegation_handler import DelegationHandler
-                        handler = DelegationHandler(self._registry, self)
-                        handler.handle(target_id, result.response)
+                    handle_turn(self, instance, client_id, message,
+                                cancelled=cancelled)
 
             elif msg_type == "speech":
+                # Transcribe, echo the transcription, then the SAME turn as
+                # typed chat: streamed, routed and grounded. This used to wait
+                # for the whole reply and skip routing — and every voice robot
+                # sends speech, not chat.
                 audio_b64 = data.get("audio", "")
                 if audio_b64 and self._awaiting_cue():
                     # Transcribe only: generating here would answer the guide.
-                    heard = instance.process_speech(audio_b64, chat=False).transcription
+                    heard = instance.transcribe(audio_b64).transcription
                     if heard:
                         self._handle_cue(heard)
                     return
                 if audio_b64:
-                    result = instance.process_speech(audio_b64)
-
-                    _is_advance = result.transcription and any(
-                        p in result.transcription.lower() for p in self._QA_ADVANCE_PHRASES
-                    )
-
-                    # Fast-path: advance phrase in active QA window — robot gives a brief
-                    # acknowledgment, then Pepper's transition generates in parallel.
-                    if _is_advance and (
-                        self._demo_orchestrator and
-                        self._demo_orchestrator.get_status()["state"] == "qa_window"
-                    ):
-                        self.send_to_robot(client_id, {"event": "tts_stop"})
-                        # Use first sentence of the LLM response as a brief acknowledgment.
-                        # Falls back to a fixed phrase if no LLM response was generated.
-                        ack_text = "Of course, let's move on!"
-                        ack_tag  = "DEFAULT"
-                        if result.chat and result.chat.clean_text:
-                            import re as _re
-                            first = _re.split(r'(?<=[.!?])\s+', result.chat.clean_text.strip())[0]
-                            if first:
-                                ack_text = first
-                                ack_tag  = result.chat.emotion_tag or "DEFAULT"
-                        self.send_to_robot(client_id, {
-                            "event": "speech_response",
-                            "transcription": result.transcription,
-                            "confidence": result.confidence,
-                            "response":    f"[{ack_tag}] {ack_text}",
-                            "emotion_tag": ack_tag,
-                            "clean_text":  ack_text,
-                        })
-                        # This is the barge-in fast path for a raw ADVANCE_PHRASE
-                        # match on the transcription — it can fire on a message
-                        # that ALSO states time pressure ("let's move on, we're
-                        # running out of time"), so plan revision gets the same
-                        # chance here as everywhere else before the early return.
-                        self.check_plan_revision(instance, result.transcription)
-                        self.check_qa_advance_from_user(instance, result.transcription)
-                        return
-
-                    # Stop any in-progress TTS immediately — user talking = robot listens
-                    if result.transcription and not _is_advance:
-                        self.send_to_robot(client_id, {"event": "tts_stop"})
-                        if self._demo_orchestrator:
-                            status = self._demo_orchestrator.get_status()
-                            if status["state"] in ("running", "waiting_ack"):
-                                self._demo_orchestrator.qa_interrupt(source="auto")
-                    response_data: dict = {
+                    t0 = time.perf_counter()
+                    stt = instance.transcribe(audio_b64)
+                    stt_sec = time.perf_counter() - t0
+                    self.send_to_robot(client_id, {
                         "event": "speech_response",
-                        "transcription": result.transcription,
-                        "confidence": result.confidence,
-                    }
-                    if result.chat:
-                        response_data.update({
-                            "response": result.chat.response,
-                            "emotion_tag": result.chat.emotion_tag,
-                            "clean_text": result.chat.clean_text,
-                        })
-                        if result.chat.is_delegation and result.chat.delegation_target:
-                            from gateway.delegation_handler import DelegationHandler
-                            handler = DelegationHandler(self._registry, self)
-                            handler.handle(client_id, result.chat.response)
-                    self.send_to_robot(client_id, response_data)
-                    # Check advance intent — and, now, whether the visitor asked
-                    # for the rest of the tour to change.
-                    if result.transcription:
-                        self.check_qa_advance_from_user(instance, result.transcription)
-                        self.check_plan_revision(instance, result.transcription)
+                        "transcription": stt.transcription,
+                        "confidence": stt.confidence,
+                    })
+                    if stt.transcription.strip():
+                        handle_turn(self, instance, client_id, stt.transcription,
+                                    stt_sec=stt_sec, cancelled=cancelled)
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")
@@ -1809,6 +1737,11 @@ class WebSocketGateway:
                 else:
                     print(f"[WS Gateway] ACK from {client_id}: step_id='{step_id}' "
                           "(no orchestrator running)")
+
+            elif msg_type == "tts_state":
+                # The robot's TTS started or finished — the one signal of
+                # "done speaking" the server gets for streamed sentences.
+                self.note_tts_state(client_id, bool(data.get("speaking")))
 
             elif msg_type == "tts_interrupted":
                 # A barge-in cut a demo step off mid-speech — the client reports
@@ -1832,6 +1765,8 @@ class WebSocketGateway:
     def _on_robot_close(self, client_id: str):
         """Called when a robot's connection drops unexpectedly."""
         print(f"[WS Gateway] {client_id} connection dropped.")
+        with self._speech_lock:
+            self._tts_speaking.pop(client_id, None)   # a gone robot isn't talking
         self._registry.disconnect(client_id)
         with self._lock:
             self._connections.pop(client_id, None)

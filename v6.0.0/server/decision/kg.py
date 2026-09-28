@@ -90,6 +90,16 @@ CONFIDENCE_HALFLIFE = 3.0
 0.25 confident and five read 0.63 — deliberately slow, because the failure this
 guards against is a single correction being taken as settled fact."""
 
+LIVE_MIN_OBS = 3
+"""Live observations an edge needs before routing trusts it over a sim-to-real
+prior (migration 017). The same count as CONFIDENCE_HALFLIFE and the planner's
+MIN_RUNS_TO_TRUST: the point where one's own evidence is half-believed."""
+
+SIM_PRIOR_CAP = 3
+"""Most observations sim evidence may count for when a prior stands in for a
+physical robot's own: its confidence can never exceed 0.5. The transfer stores
+the raw count (prior_n); the cap is applied here, when routing reads it."""
+
 LR_DECAY_TAU = 5.0
 """Observations over which the learning rate halves. Chosen so an edge is still
 meaningfully movable at ~5 observations (the realistic per-edge count for a few
@@ -194,6 +204,24 @@ class RobotTopicEdge:
     # as it did before, so the filter is inert until a deployment populates
     # it. See decision/kg_infer.py::route for how it narrows candidates.
     specialised: bool = False
+    # A sim-to-real prior copied from this robot's simulation twin by a model
+    # transfer. Never learned into: `update` leaves it alone and to_row never
+    # writes it. Routing reads it (for_routing) until live evidence suffices.
+    prior_weight: Optional[float] = None
+    prior_n: int = 0
+    # 'live' or 'prior' — which evidence this edge's weight is (for_routing).
+    evidence: str = field(default="live", compare=False)
+
+    def for_routing(self) -> "RobotTopicEdge":
+        """This edge as routing should see it: its own if it has LIVE_MIN_OBS
+        observations or no prior, else the prior with at most SIM_PRIOR_CAP
+        observations behind it. Never written back: learning reads raw rows."""
+        if self.n_obs >= LIVE_MIN_OBS or self.prior_weight is None:
+            return self
+        from dataclasses import replace
+        return replace(self, weight=float(self.prior_weight), n_supervisor=0,
+                       n_outcome=min(int(self.prior_n or 0), SIM_PRIOR_CAP),
+                       n_displaced=0, evidence="prior")
 
     @property
     def n_obs(self) -> int:
@@ -262,6 +290,8 @@ class RobotTopicEdge:
             last_updated=now or datetime.now(timezone.utc),
             eligible=self.eligible,   # a hard exclusion is permanent; learning never lifts it
             specialised=self.specialised,   # declared scope; observation never changes it
+            prior_weight=self.prior_weight,   # a prior is carried, never learned into
+            prior_n=self.prior_n,
         )
 
     def as_row(self) -> dict:
@@ -290,6 +320,9 @@ class RobotTopicEdge:
             last_updated=ts,
             eligible=bool(row.get("eligible", True)),
             specialised=bool(row.get("specialised", False)),
+            prior_weight=(float(row["prior_weight"])
+                          if row.get("prior_weight") is not None else None),
+            prior_n=int(row.get("prior_n") or 0),
         )
 
 

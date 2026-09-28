@@ -549,7 +549,8 @@ class HeuristicPolicy:
                     print(f"[decision.policy] flow planner failed: {e}")
                 if plan is not None:
                     ops = plan.get("ops") or []
-                    action = Action.revise(ops) if ops else Action.stay()
+                    action = (Action.revise(ops, basis=plan.get("estimate_sources"))
+                              if ops else Action.stay())
                     return PolicyResult(action, Mechanism.FLOW_PLANNER)
 
             # Fallback: no planner wired in, or it declined. This is the ORIGINAL

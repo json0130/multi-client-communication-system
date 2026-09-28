@@ -108,6 +108,20 @@ class StyleFit:
     weight: float = PRIOR
     n_supervisor: int = 0
     last_updated: Optional[datetime] = None
+    # Sim-to-real prior (migration 017); see RobotTopicEdge.for_routing.
+    prior_weight: Optional[float] = None
+    prior_n: int = 0
+
+    def for_generation(self) -> "StyleFit":
+        """This fit as generation should see it: its own once it has
+        LIVE_MIN_OBS judgements or when there is no prior, else the prior
+        counted as at most SIM_PRIOR_CAP judgements. Never written back."""
+        from decision.kg import LIVE_MIN_OBS, SIM_PRIOR_CAP
+        if self.n_obs >= LIVE_MIN_OBS or self.prior_weight is None:
+            return self
+        from dataclasses import replace
+        return replace(self, weight=float(self.prior_weight),
+                       n_supervisor=min(int(self.prior_n or 0), SIM_PRIOR_CAP))
 
     @property
     def n_obs(self) -> int:
@@ -138,6 +152,8 @@ class StyleFit:
             weight=self.weight + lr * (target - self.weight),
             n_supervisor=self.n_supervisor + 1,
             last_updated=now or datetime.now(timezone.utc),
+            prior_weight=self.prior_weight,
+            prior_n=self.prior_n,
         )
 
     def as_row(self) -> dict:
@@ -159,6 +175,9 @@ class StyleFit:
             weight=float(row.get("weight", PRIOR)),
             n_supervisor=int(row.get("n_supervisor", 0) or 0),
             last_updated=_parse_ts(row.get("last_updated")),
+            prior_weight=(float(row["prior_weight"])
+                          if row.get("prior_weight") is not None else None),
+            prior_n=int(row.get("prior_n") or 0),
         )
 
 

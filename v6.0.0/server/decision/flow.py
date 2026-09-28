@@ -94,6 +94,7 @@ class StepRef:
     role: str
     qa_window: bool = False
     block_robot_id: Optional[str] = None
+    step_kind: str = "speech"   # "navigation" is priced by whether the robot can move
 
     @property
     def compressible(self) -> bool:

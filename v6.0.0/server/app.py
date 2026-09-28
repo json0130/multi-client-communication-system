@@ -27,6 +27,7 @@ import os
 import signal
 import sys
 import logging
+import threading
 
 from typing import Optional
 
@@ -77,6 +78,16 @@ def build_rbac() -> tuple[ProfileRegistry, RBACFilter, GrantStore]:
             print(f"[App] Reconciled access level for {synced} robot(s).")
         except Exception as e:
             print(f"[App] Could not reconcile access levels (continuing): {e}")
+        try:
+            from data import robot_repo, scenario_repo
+            # Scenarios first: robots.scenario_id and every log row point at them.
+            for sc in profiles.scenarios:
+                scenario_repo.upsert_scenario(sc.scenario_id, sc.description.strip()[:120],
+                                              sc.source_path)
+            mirrored = profiles.sync_embodiment_to_db(robot_repo.set_embodiment)
+            print(f"[App] Mirrored embodiment / sim_twin for {mirrored} robot(s).")
+        except Exception as e:
+            print(f"[App] Could not mirror scenarios / embodiment (continuing): {e}")
 
     try:
         from data.rbac_audit_repo import write_events
@@ -128,6 +139,60 @@ _orchestrator_ref: dict = {"o": None}
 # before create_app() has loaded the profiles.
 _profiles_ref: dict = {"p": None}
 
+# And for the registry, so planning can ask which robots can actually move.
+_registry_ref: dict = {"r": None}
+
+
+def _price_movement(durations: dict, steps) -> dict:
+    """Movement a robot cannot perform takes no time.
+
+    Navigation steps (walking between stations, turning to face someone) are
+    real only for a guide that declared the "navigation" module — today the
+    Gazebo bridge. Every other client ACKs them at once. Priced at
+    DEFAULT_STEP_SEC they added ~190s to a real lab tour, so the planner cut
+    projects that would have fit. A measured value is overridden too: the
+    stats table averages by step_id across sim and real runs alike.
+    """
+    frozen = {s.step_id: 0.0 for s in steps
+              if s.step_kind == "navigation" and not _can_move(s.robot_id)}
+    return {**durations, **frozen} if frozen else durations
+
+
+def _can_move(robot_id: str) -> bool:
+    """True for a connected robot that declared the "navigation" module."""
+    reg = _registry_ref["r"]
+    inst = reg.get(robot_id) if reg else None
+    return bool(inst and "navigation" in inst.enabled_modules)
+
+
+def default_run_mode(robot_ids) -> str:
+    """demo_runs.mode when /demo/start named none.
+
+    live    only when EVERY robot in the run is declared physical in the
+            profile (it names a sim_twin). Nothing else is ever live.
+    gazebo  otherwise, if the guide can move: the Gazebo bridge declares
+            "navigation" (see _price_movement).
+    mock    otherwise: simulation-twin clients that cannot move.
+    """
+    ids = [r for r in (robot_ids or []) if r]
+    profiles = _profiles_ref["p"]
+    if ids and profiles is not None and all(profiles.is_physical(r) for r in ids):
+        return "live"
+    return "gazebo" if ids and _can_move(ids[0]) else "mock"
+
+
+def record_run(row: dict) -> None:
+    """Persist the demo_runs row, off the caller's thread — /demo/start and
+    /demo/stop must not wait on the database. Both writes carry the whole row,
+    so the order they land in does not matter (see demo_run_repo.upsert_run)."""
+    def _write():
+        try:
+            from data.demo_run_repo import upsert_run
+            upsert_run(row)
+        except Exception as e:
+            print(f"[App] Could not record run {row.get('id')}: {e}")
+    threading.Thread(target=_write, daemon=True, name="demo-run-write").start()
+
 
 def _kg_snapshot():
     """(topics, edges, links) from the current competence graph.
@@ -145,7 +210,12 @@ def _kg_snapshot():
         from decision.kg import RobotTopicEdge
         topics = repo.all_topics()
         if topics:
-            edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
+            # Routing's view: a physical robot's sim-to-real prior stands in
+            # for its own evidence until it has LIVE_MIN_OBS observations.
+            edges = [RobotTopicEdge.from_row(r).for_routing() for r in repo.graph()]
+            on_prior = sum(1 for e in edges if e.evidence == "prior")
+            if on_prior:
+                print(f"[App] KG: {on_prior} edge(s) routed on a sim-to-real prior")
             links = [(l["topic_a"], l["topic_b"], float(l["weight"]))
                      for l in repo.all_links()]
     except Exception as e:
@@ -215,8 +285,13 @@ def record_duration(kind: str, row: dict) -> None:
         print(f"[App] Could not record {kind} duration: {e}")
 
 
-def _step_durations() -> dict:
-    """{step_id: mean_sec} from every run logged so far.
+def _step_durations(live: bool = False) -> dict:
+    """{step_id: mean_sec} from full-tour runs of the current run's kind.
+
+    `live` True: only live runs (every robot physical). False: only simulated
+    runs whose timings are evidence (demo_duration_repo.SIM_MODES). The two are
+    never mixed: a simulated tour's pacing is not a real robot's, and solo
+    runs reuse full-tour step ids so they are left out of both.
 
     Read fresh at most once per _SNAPSHOT_TTL_SEC — the same reasoning as the KG
     snapshot. Early in a campaign this is mostly empty and FlowGraph.estimate()
@@ -224,13 +299,16 @@ def _step_durations() -> dict:
     result says how much of an estimate is actually earned versus guessed.
     """
     import time as _time
-    if _time.time() - _duration_cache["at"] < _SNAPSHOT_TTL_SEC:
-        return _duration_cache["durations"]
+    cached = _duration_cache.get("by_kind", {}).get(live)
+    if cached is not None and _time.time() - _duration_cache["at"] < _SNAPSHOT_TTL_SEC:
+        return cached
     durations = {}
     try:
-        from data.demo_duration_repo import step_stats
+        from data.demo_duration_repo import SIM_MODES, step_stats_by_mode
         from decision.flow import MIN_RUNS_TO_TRUST
-        rows = step_stats()
+        wanted = ("live",) if live else SIM_MODES
+        rows = [r for r in step_stats_by_mode()
+                if r.get("mode") in wanted and r.get("format") == "full_tour"]
         # demo_step_duration_stats groups by (step_id, block_robot_id), and
         # one step_id can legitimately appear under several blocks: with the
         # robots in a different order, transition_to_silbot_01 belongs to
@@ -257,12 +335,64 @@ def _step_durations() -> dict:
                      if n >= MIN_RUNS_TO_TRUST}
         untrusted = sum(1 for n, _ in agg.values() if n < MIN_RUNS_TO_TRUST)
         if untrusted:
-            print(f"[App] {len(durations)} step timing(s) trusted, {untrusted} below "
-                  f"{MIN_RUNS_TO_TRUST} runs — planning those from defaults")
+            print(f"[App] {len(durations)} {'live' if live else 'sim'} step timing(s) "
+                  f"trusted, {untrusted} below {MIN_RUNS_TO_TRUST} runs")
     except Exception as e:
         print(f"[App] step duration stats unavailable, planning from defaults: {e}")
-    _duration_cache.update(at=_time.time(), durations=durations)
+    _duration_cache.setdefault("by_kind", {})[live] = durations
+    _duration_cache["at"] = _time.time()
     return durations
+
+
+def _duration_basis(live: bool, steps=()) -> tuple:
+    """(durations, sources) for planning a run of this kind.
+
+    A live run uses its own observations once a step has MIN_RUNS_TO_TRUST of
+    them, else the newest sim-to-real transfer's prior for that step
+    (current_duration_priors), else the planner's default. A simulated run uses
+    simulated observations, else the default. `sources` names, for every step
+    in `steps`, which one it got — 'live', 'sim', 'prior#<version>' or
+    'default' — so no estimate falls back silently.
+    """
+    durations = dict(_step_durations(live))
+    sources = {sid: ("live" if live else "sim") for sid in durations}
+    if live:
+        try:
+            from data.demo_duration_repo import current_priors
+            for p in current_priors():
+                if p.get("kind") == "step" and p["step_id"] not in durations:
+                    durations[p["step_id"]] = float(p["median_sec"])
+                    sources[p["step_id"]] = f"prior#{p.get('version')}"
+        except Exception as e:
+            print(f"[App] duration priors unavailable: {e}")
+    per_step = {s.step_id: sources.get(s.step_id, "default") for s in steps}
+    return durations, per_step
+
+
+def _qa_basis(live: bool, blocks=()) -> tuple:
+    """(measured_qa, sources): per-block Q&A median from windows of runs of
+    this kind (censored, MIN_BLOCK_WINDOWS visitor-ended windows), else for a
+    live run the transferred prior, else absent (the planner's flat share)."""
+    measured, sources = {}, {}
+    try:
+        from data.demo_duration_repo import SIM_MODES, qa_median_by_block, qa_windows
+        from data.demo_run_repo import run_modes
+        runs = run_modes()
+        wanted = ("live",) if live else SIM_MODES
+        rows = [w for w in qa_windows()
+                if (runs.get(w.get("run_id")) or {}).get("mode") in wanted
+                and (runs.get(w.get("run_id")) or {}).get("format") == "full_tour"]
+        measured = qa_median_by_block(rows)
+        sources = {b: ("live" if live else "sim") for b in measured}
+        if live:
+            from data.demo_duration_repo import current_priors
+            for p in current_priors():
+                if p.get("kind") == "qa" and p["robot_id"] not in measured:
+                    measured[p["robot_id"]] = float(p["median_sec"])
+                    sources[p["robot_id"]] = f"prior#{p.get('version')}"
+    except Exception as e:
+        print(f"[App] per-block Q&A medians unavailable: {e}")
+    return measured, {b: sources.get(b, "default") for b in blocks}
 
 
 _style_cache: dict = {"at": 0.0, "fits": {}}
@@ -289,7 +419,8 @@ def lookup_style_fit(robot_id: str, style: str):
         except Exception as e:
             print(f"[App] style fit unavailable, framing from the directive alone: {e}")
             _style_cache.update(at=_time.time(), fits={})
-    return _style_cache["fits"].get((robot_id, style))
+    fit = _style_cache["fits"].get((robot_id, style))
+    return fit.for_generation() if fit is not None else None
 
 
 def lookup_subject(robot_id: str) -> str:
@@ -365,7 +496,12 @@ def build_flow_plan(obs) -> Optional[dict]:
         return None
 
     remaining_budget = max(0.0, obs.time_budget_sec - obs.elapsed_sec)
-    durations = _step_durations()
+    # Live evidence and priors for a live run; simulated evidence otherwise.
+    orch = _orchestrator_ref["o"]
+    run_mode = (orch.get_status().get("mode") if orch else None) or "sim_unknown"
+    live = run_mode == "live"
+    durations, step_sources = _duration_basis(live, obs.remaining_steps)
+    durations = _price_movement(durations, obs.remaining_steps)
     topics, edges, links = _kg_snapshot()
 
     # EXPLICIT trigger-type ordering, made a named sequence rather than
@@ -410,21 +546,56 @@ def build_flow_plan(obs) -> Optional[dict]:
     # handles this in one place — windows that hit their limit count as "at
     # least this long" (a censored median), never as their limit and never
     # dropped. Passing a plain mean over everything here would rebuild the loop.
-    measured_qa = {}
-    try:
-        from data.demo_duration_repo import qa_median_by_block
-        measured_qa = qa_median_by_block()
-    except Exception as e:
-        print(f"[App] per-block Q&A medians unavailable: {e}")
+    measured_qa, qa_sources = _qa_basis(live, [b.robot_id for b in graph.blocks])
 
     # allocate=True: the same total Q&A time, split by measured length and
     # this run's importance, BEFORE the ladder cuts anything. A visitor who
     # came for the emotion work gets a longer Navel round paid for by shorter
     # others, which costs them nothing they came for — where cutting always
     # costs somebody something.
-    return plan_for_budget(graph, remaining_budget, durations=durations,
+    plan = plan_for_budget(graph, remaining_budget, durations=durations,
                            importance=importance, measured_qa=measured_qa,
                            allocate=True)
+    # Which evidence every estimate rested on — logged with the decision, so
+    # a plan built from priors or defaults is never mistaken for a measured one.
+    counts: dict = {}
+    for src in step_sources.values():
+        key = "prior" if src.startswith("prior#") else src
+        counts[key] = counts.get(key, 0) + 1
+    plan["estimate_sources"] = {"run_mode": run_mode, "steps": counts, "qa": qa_sources,
+                                "prior_versions": sorted({v for v in list(step_sources.values())
+                                                          + list(qa_sources.values())
+                                                          if v.startswith("prior#")})}
+    print(f"[App] Plan estimates ({run_mode}): steps {counts}, Q&A {qa_sources}")
+    return plan
+
+
+def install_write_token(app: Flask, token: str) -> None:
+    """Require `X-API-Token: <token>` on every request that changes something.
+
+    The server listens on the lab network (robots register and report
+    presence over it) and had no auth at all, so anyone on that network could
+    re-role a robot, start a demo or rewrite personas. GETs stay open: they
+    are what the dashboard polls and what a person debugging reads. With no
+    token configured nothing is enforced, which is how every existing setup
+    keeps working until API_TOKEN is set.
+    """
+    import hmac
+    from flask import jsonify, request
+
+    if not token:
+        print("[App] WARNING: API_TOKEN is not set — write routes are open to "
+              "anyone who can reach this server.")
+        return
+
+    @app.before_request
+    def _check_token():
+        if request.method in ("GET", "HEAD", "OPTIONS"):
+            return None
+        sent = request.headers.get("X-API-Token", "")
+        if not hmac.compare_digest(sent.encode(), token.encode()):
+            return jsonify({"error": "missing or wrong X-API-Token"}), 401
+        return None
 
 
 def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
@@ -438,6 +609,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     # ── Core objects (order matters — registry first) ─────────────────────────
     registry   = RobotRegistry(rbac=rbac, grants=grants, profiles=profiles)
+    _registry_ref["r"] = registry
     recorder   = build_decision_recorder()
     ws_gateway = WebSocketGateway(registry, recorder=recorder,
                                   kg_router_factory=build_kg_router,
@@ -451,6 +623,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     # ── Flask app ─────────────────────────────────────────────────────────────
     app = Flask(__name__)
     app.config["JSON_SORT_KEYS"] = False
+    install_write_token(app, cfg.server.api_token if cfg else "")
 
     # Suppress Werkzeug HTTP access logs (auto-refresh polling is noisy)
     logging.getLogger('werkzeug').setLevel(logging.ERROR)
@@ -474,6 +647,8 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         duration_sink=record_duration,
         style_fit=lookup_style_fit,
         subject_lookup=lookup_subject,
+        run_sink=record_run,
+        run_mode=default_run_mode,
     )
     # Unreviewed project facts are usable — that is how they get tested — but
     # they must never be demoed without someone knowing. A robot states them
@@ -490,6 +665,8 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         pass
 
     _orchestrator_ref["o"] = orchestrator
+    # chat_logs rows name the run they were said in; robot/ can't import demo/.
+    registry.active_run_id = orchestrator.active_run_id
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 

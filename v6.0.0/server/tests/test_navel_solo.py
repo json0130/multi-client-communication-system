@@ -44,9 +44,9 @@ class FakeInstance:
                              session_id=f"sess-{self.client_id}",
                              access_level=self.access_level, role="researcher")
 
-    def process_speech(self, audio_b64, chat=True):
-        self.speech_calls.append(chat)
-        return SimpleNamespace(transcription=self._heard, confidence=1.0, chat=None)
+    def transcribe(self, audio_b64):
+        self.speech_calls.append(audio_b64)
+        return SimpleNamespace(transcription=self._heard, confidence=1.0)
 
 
 class FakeRegistry:
@@ -202,7 +202,7 @@ class TestTheGatewayStaysQuiet:
 
     def test_audio_is_transcribed_without_generating_a_reply(self, gw):
         gw._on_message(NAVEL, {"type": "speech", "audio": "UklGRg=="})
-        assert gw._registry.get(NAVEL).speech_calls == [False]
+        assert gw._registry.get(NAVEL).speech_calls == ["UklGRg=="]   # transcribe() never generates
         assert gw.cues == ["Navel, over to you"]
         assert gw.sent == []
 

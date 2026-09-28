@@ -24,9 +24,7 @@ from flask import Flask, request, jsonify, Blueprint
 
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
-from decision import ActionKind, Mechanism
-from gateway.websocket_gateway import _speaking_seconds
-from decision.policy import QA_CLOSING_PHRASES, _matches
+from conversation.turn import handle_turn
 from data import robot_repo
 
 
@@ -59,18 +57,11 @@ def create_http_gateway(
 
     @bp.route("/robots", methods=["GET"])
     def list_robots():
-        """List all robots registered in the DB with their connection status."""
+        """List registered robots with their connection status. Retired
+        ("deleted") robots are hidden unless ?include_retired=1."""
         connected = set(ws_gateway.get_connected_ids())
-        robots = robot_repo.get_all_active_robots()
-
-        # Also get all robots (active or not) — get_all_active_robots only
-        # returns is_active=True, so we query all here for the management view
-        from data.connection import get_client
-        try:
-            resp = get_client().table("robots").select("*").execute()
-            all_rows = resp.data or []
-        except Exception:
-            all_rows = []
+        include_retired = request.args.get("include_retired") in ("1", "true")
+        all_rows = robot_repo.list_robot_rows(include_retired=include_retired)
 
         return jsonify({
             "robots": [
@@ -84,6 +75,7 @@ def create_http_gateway(
                     "ws_port": r.get("ws_port"),
                     "ws_connected": r["client_id"] in connected,
                     "is_active": r.get("is_active", False),
+                    "retired_at": r.get("retired_at"),
                 }
                 for r in all_rows
             ]
@@ -139,14 +131,15 @@ def create_http_gateway(
     def manage_robot(client_id: str):
         """
         PUT    — update name, IP, port, or modules.
-        DELETE — disconnect then permanently delete from the database.
+        DELETE — disconnect, then retire: the row stays (logs reference it),
+                 hidden from GET /robots. Registering it again brings it back.
         """
         if request.method == "DELETE":
             ws_gateway.disconnect_robot(client_id)
-            ok = robot_repo.delete_robot(client_id)
+            ok = robot_repo.retire_robot(client_id)
             if not ok:
                 return jsonify({"error": "Delete failed"}), 500
-            return jsonify({"success": True, "message": f"'{client_id}' deleted."})
+            return jsonify({"success": True, "message": f"'{client_id}' retired."})
 
         # PUT
         data = request.get_json()
@@ -304,54 +297,13 @@ def create_http_gateway(
                 "delegation_target": None,
             })
 
-        # Stop any in-progress TTS immediately — user talking = robot listens
-        if not any(p in message.lower() for p in ws_gateway._QA_ADVANCE_PHRASES):
-            ws_gateway.send_to_robot(client_id, {"event": "tts_stop"})
-            # Also pause the demo if it was running
-            if ws_gateway._demo_orchestrator:
-                status = ws_gateway._demo_orchestrator.get_status()
-                if status["state"] in ("running", "waiting_ack"):
-                    ws_gateway._demo_orchestrator.qa_interrupt(source="auto")
+        # The whole Q&A pipeline — barge-in, advance, plan revision, routing,
+        # streaming, auto-close, delegation, "any other questions?" — is
+        # shared with both WebSocket paths. See conversation/turn.py.
+        turn = handle_turn(ws_gateway, instance, client_id, message,
+                           sync_delegation=True)
 
-        # This route carried its own copy of the Q&A cascade, which had to be
-        # kept in step with the WebSocket one by hand. Both now go through the
-        # same decision layer, so a dashboard-typed question and a spoken one
-        # are judged by the same rules and land in the same log.
-        decision = ws_gateway.check_qa_advance_from_user(instance, message)
-        advancing = decision is not None and decision.action.kind is ActionKind.ADVANCE
-
-        # PLAN_REVISE must run BEFORE the classifier's early return below, not
-        # after. "We're running out of time" can be classified by the SAME
-        # message as satisfying "any other questions?" (-> done -> advance) —
-        # the two decisions are about different things, but the early return a
-        # few lines down used to fire first and `return` out of this request
-        # entirely, so the revision was never even asked for. A visitor stating
-        # time pressure must get a shorter tour whether or not the current
-        # window also happens to close.
-        ws_gateway.check_plan_revision(instance, message)
-
-        if advancing:
-            # EVERY advance mechanism ends the turn, not just the classifier.
-            # A phrase or time-pressure match used to fall through and
-            # generate a reply from whichever robot held the mic: a live run
-            # had a visitor tell Navel "I'm running out of time, can we skip"
-            # and Navel answer "Sure, let's skip it. What's next on your
-            # agenda?" — asking the visitor to run the tour while the clock
-            # they had complained about kept running. The window is closing;
-            # there is nothing to answer. See ADVANCE_ACK.
-            from decision import guide_and_presenter
-            ack = ws_gateway.advance_ack_text(decision.mechanism)
-            if ack:
-                guide_id = None
-                if ws_gateway._demo_orchestrator:
-                    guide_id, _p = guide_and_presenter(
-                        ws_gateway._demo_orchestrator.get_status())
-                ws_gateway.send_to_robot(guide_id or client_id, {
-                    "event": "demo_step",
-                    "step_id": "_qa_advance_ack",
-                    "text": ack,
-                    "require_ack": False,
-                })
+        if turn.outcome == "advance":
             return jsonify({
                 "client_id": client_id,
                 "response": "Resuming demonstration.",
@@ -361,132 +313,20 @@ def create_http_gateway(
                 "delegation_target": None,
             })
 
-        # Who actually answers. A confident competence-graph read can name a
-        # DIFFERENT connected robot than the one that received this message —
-        # e.g. a technical follow-up about ChatBox's own research, asked
-        # while Pepper's mic is the one listening. The baseline (no reroute)
-        # is silent here; a reroute gets a one-line handoff spoken by the
-        # original receiver first.
-        target_instance, target_id, handoff = ws_gateway.route_question(instance, message)
-        if handoff:
-            ws_gateway.send_to_robot(client_id, {
-                "event": "chat_sentence",
-                "text": handoff,
-                "emotion_tag": "DEFAULT",
-            })
-
-        # Deferred: the guide has just said the topic will be covered at that
-        # robot's station, and no robot generates an answer this turn. Return
-        # before process_chat_stream — calling it would produce exactly the
-        # improvised answer deferring exists to avoid.
-        if target_instance is None:
+        if turn.outcome in ("acknowledged", "deferred"):
+            spoken = turn.text or turn.handoff
             return jsonify({
                 "client_id": client_id,
-                "response": handoff,
+                "answered_by": turn.target_id or client_id,
+                "handoff": turn.handoff,
+                "response": spoken,
                 "emotion_tag": "DEFAULT",
-                "clean_text": handoff,
+                "clean_text": spoken,
                 "is_delegation": False,
                 "delegation_target": None,
             })
 
-        # Let the hand-off be HEARD before the answer starts. They go to two
-        # different robots with two different speakers, so nothing serialises
-        # them: a live run had Pepper's "ChatBox can tell you more about
-        # that" and ChatBox's first sentence playing over each other, because
-        # generation finished faster than the hand-off took to say.
-        #
-        # Only the first sentence waits; the rest stream normally behind it.
-        _handoff_wait = {"left": _speaking_seconds(handoff) if handoff else 0.0}
-
-        def _on_sentence(clean_text, emotion_tag):
-            if _handoff_wait["left"] > 0:
-                time.sleep(_handoff_wait["left"])
-                _handoff_wait["left"] = 0.0
-            if '```' in clean_text:  # Skip delegation JSON blocks — never speak raw JSON
-                return
-            # A chunk that is only an emotion tag is not speech — see
-            # websocket_gateway._spoken_text.
-            from gateway.websocket_gateway import _spoken_text
-            if not _spoken_text(clean_text):
-                return
-            ws_gateway.send_to_robot(target_id, {
-                "event": "chat_sentence",
-                "text": clean_text,
-                "emotion_tag": emotion_tag,
-            })
-
-        result = target_instance.process_chat_stream(
-            message, _on_sentence,
-            **ws_gateway.answer_kwargs(target_id, message),
-        )
-
-        # Did the robot just sign off ("let me know if you have any other
-        # questions")? If so the window closes on its own after a pause,
-        # instead of waiting for someone to say "move on" out loud.
-        #
-        # `closing` says whether that already put a closing move in flight —
-        # a scheduled auto-close, or the guide's wrap-up line. Either one is
-        # an alternative to the "any other questions?" prompt below, never a
-        # companion to it.
-        closing = ws_gateway.check_qa_auto_close(target_id, result.clean_text or "")
-
-        # Handle delegation — run synchronously so the browser gets the
-        # target's answer. Must run BEFORE the "more questions?" resend below,
-        # not after: a real run had the resend fire while Navel's delegated
-        # answer was still being generated, sent to Pepper — the wrong robot,
-        # before the visitor had even heard the answer. DelegationHandler
-        # sends its own follow-up prompt once the delegated reply actually
-        # lands (see execute_sync -> _prompt_for_more_questions), so the
-        # resend below is skipped entirely when this turn delegated.
-        delegation_result = None
-        if result.is_delegation and result.delegation_target:
-            from gateway.delegation_handler import DelegationHandler
-            handler = DelegationHandler(registry, ws_gateway)
-            target_id_del, task_del = handler._extract(result.response)
-            if target_id_del and task_del:
-                delegation_result = handler.execute_sync(client_id, target_id_del, task_del)
-
-        # Send "more questions?" if still in QA window after response, from
-        # whichever robot just answered — the target if this turn rerouted.
-        #
-        # `advancing` is checked here, not just the orchestrator's live state:
-        # check_qa_advance_from_user() above already called qa_end() when
-        # advancing is True, but qa_end() only sets an event — the run loop's
-        # background thread flips the state later (after recording the
-        # window's duration, which can hit real network I/O). This request's
-        # own process_chat_stream() call above can easily finish first, so a
-        # state check alone can read a stale "qa_window" and re-ask "any
-        # other questions?" right after the visitor was just told the window
-        # was closing. A real run had exactly this: the same "lets move on"
-        # phrase needed saying twice for one robot and once for another —
-        # not a per-robot difference, a race the faster reply happened to lose.
-        #
-        # AND not when the robot just asked the same thing itself. A live run
-        # put "Do you have any other questions, or shall we continue the
-        # demonstration?" after every single answer, including one that had
-        # already ended "Is there anything specific about the model you'd
-        # like to know?" — the visitor was asked twice, in two voices, in a
-        # row. The closing-phrase list already knows what an invitation to
-        # ask more sounds like, so reuse it rather than inventing a second
-        # notion of the same thing.
-        # ONCE PER WINDOW, not once per answer. A live run put "Do you have
-        # any other questions, or shall we continue the demonstration?" after
-        # every single reply — five times in one Q&A round. The visitor is
-        # being asked to decide something they already know they can do, and
-        # after the first time it reads as the robot wanting them to stop.
-        already_invited = _matches(result.clean_text or "", QA_CLOSING_PHRASES)
-        if (ws_gateway._demo_orchestrator and not advancing
-                and not delegation_result and not already_invited
-                and not closing
-                and ws_gateway.claim_more_questions_prompt()):
-            if ws_gateway._demo_orchestrator.get_status()["state"] == "qa_window":
-                ws_gateway.send_to_robot(target_id, {
-                    "event": "demo_step",
-                    "step_id": "_qa_more_questions",
-                    "text": "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?",
-                    "require_ack": False,
-                })
-
+        result = turn.result
         # Strip internal ```json delegation block from what the browser displays
         clean_for_browser = re.sub(r'```(?:json)?\s*[\s\S]*?```', '', result.clean_text or '').strip()
 
@@ -495,37 +335,16 @@ def create_http_gateway(
             # WHO ACTUALLY ANSWERED, which is not always who was addressed.
             # The dashboard attributed every reply to the robot the operator
             # typed to, so a question asked of Pepper and answered by ChatBox
-            # appeared as Pepper's — and was spoken in Pepper's voice. The
-            # reroute was working; the transcript was lying about it.
-            "answered_by":       target_id,
+            # appeared as Pepper's — and was spoken in Pepper's voice.
+            "answered_by":       turn.target_id,
             # What the receiver said out loud before handing over, if it did.
-            # The dashboard shows it as the receiver's own line so the
-            # transition is visible rather than a voice changing unexplained.
-            "handoff":           handoff or "",
+            "handoff":           turn.handoff,
             "response":          result.response,
             "emotion_tag":       result.emotion_tag,
             "clean_text":        clean_for_browser or result.clean_text,
             "is_delegation":     result.is_delegation,
             "delegation_target": result.delegation_target,
-            "delegation_result": delegation_result,
+            "delegation_result": turn.delegation_result,
         })
-
-    # ── CORS ──────────────────────────────────────────────────────────────────
-
-    @bp.after_request
-    def add_cors(response):
-        from core.config import cfg
-        response.headers["Access-Control-Allow-Origin"] = cfg.server.cors_origins
-        response.headers["Access-Control-Allow-Headers"] = (
-            "Content-Type, Authorization"
-        )
-        response.headers["Access-Control-Allow-Methods"] = (
-            "GET, POST, PUT, DELETE, OPTIONS"
-        )
-        return response
-
-    @bp.route("/<path:path>", methods=["OPTIONS"])
-    def options_handler(path):
-        return jsonify({}), 200
 
     return bp

@@ -1,0 +1,157 @@
+{
+  "transfer_id": 2,
+  "applied_at": "2026-09-28T11:27:33.983787+00:00",
+  "code_commit": "74eb20a",
+  "notes": "Transfer #1 for Display Day. Approved by Jay 2026-09-29 after dry run; chatbox_01->chatbox_jetson_001 held back (named via --twin for step-id renaming only). DB snapshot: snapshot_pre_transfer1.",
+  "from": "pepper_01",
+  "to": "pepper_001",
+  "version": 1,
+  "items": {
+    "facts": 0,
+    "scope_rows": 1,
+    "kg_priors": 0,
+    "style_priors": 0,
+    "step_priors": 13,
+    "qa_prior": {
+      "median_sec": 11.0,
+      "lower_bound": false,
+      "windows": 1,
+      "visitor_ended": 1,
+      "copied": false
+    },
+    "prior_modes": [
+      "mock",
+      "gazebo",
+      "scripted_visitor"
+    ],
+    "step_source_modes": "gazebo+mock+scripted_visitor",
+    "excluded": {
+      "movement_steps": 188,
+      "non_prior_runs": 28,
+      "not_its_step": 38,
+      "qa_non_prior_runs": 0
+    },
+    "sim_prior_cap": 3,
+    "twin_map": {
+      "chatbox_01": "chatbox_jetson_001",
+      "navel_01": "navel_001",
+      "pepper_01": "pepper_001"
+    }
+  },
+  "facts": [],
+  "scope": [
+    {
+      "robot_id": "pepper_001",
+      "topic_id": "topic:human-pose-estimation",
+      "eligible": true,
+      "specialised": true
+    }
+  ],
+  "style_priors": [],
+  "duration_priors": [
+    {
+      "robot_id": "pepper_001",
+      "step_id": "chatbox_jetson_001_prompt",
+      "kind": "step",
+      "median_sec": 4.84,
+      "n": 59,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "greeting",
+      "kind": "step",
+      "median_sec": 9.04,
+      "n": 94,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "introduce_chatbox_jetson_001",
+      "kind": "step",
+      "median_sec": 14.19,
+      "n": 59,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "introduce_navel_001",
+      "kind": "step",
+      "median_sec": 13.62,
+      "n": 45,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "introduce_silbot_01",
+      "kind": "step",
+      "median_sec": 14.49,
+      "n": 56,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "lab_intro",
+      "kind": "step",
+      "median_sec": 15.04,
+      "n": 93,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "navel_001_prompt",
+      "kind": "step",
+      "median_sec": 4.99,
+      "n": 38,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "open_floor",
+      "kind": "step",
+      "median_sec": 12.89,
+      "n": 41,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "overview",
+      "kind": "step",
+      "median_sec": 10.06,
+      "n": 87,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "silbot_01_prompt",
+      "kind": "step",
+      "median_sec": 5.0,
+      "n": 55,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "transition_to_navel_001",
+      "kind": "step",
+      "median_sec": 7.22,
+      "n": 54,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "transition_to_silbot_01",
+      "kind": "step",
+      "median_sec": 7.27,
+      "n": 58,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "pepper_001",
+      "step_id": "wrap_up",
+      "kind": "step",
+      "median_sec": 16.55,
+      "n": 43,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    }
+  ]
+}

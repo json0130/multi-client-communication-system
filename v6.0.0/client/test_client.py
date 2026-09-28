@@ -12,6 +12,8 @@ import websockets
 import json
 import re
 import requests
+
+from client import api_headers
 import threading
 import time
 import logging
@@ -50,7 +52,7 @@ class MockJay:
                 "modules":     CONFIG["modules"],
                 "ip_address":  CONFIG["ip_address"],
                 "ws_port":     CONFIG["ws_port"],
-            }, timeout=5)
+            }, headers=api_headers(), timeout=5)
             if resp.status_code == 200:
                 print(f"  Registered with server: {resp.json().get('message', 'OK')}")
             else:

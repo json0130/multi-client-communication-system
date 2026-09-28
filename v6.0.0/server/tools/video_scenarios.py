@@ -38,6 +38,12 @@ import time
 
 import requests
 
+# The server's write token (API_TOKEN in server/.env), if one is set.
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv()
+_TOKEN = os.environ.get("API_TOKEN")
+HEADERS = {"X-API-Token": _TOKEN} if _TOKEN else {}
+
 GUIDE = "pepper_01"
 PROJECT_ROBOTS = ["chatbox_01", "navel_01", "silbot_01"]
 
@@ -91,7 +97,7 @@ def _ask(server: str, client_id: str, text: str, voice: bool = True) -> None:
     else:
         time.sleep(NO_VOICE_DELAY_SEC)
     requests.post(f"{server}/robots/{client_id}/chat",
-                   json={"message": text, "source": "visitor"}, timeout=30)
+                   json={"message": text, "source": "visitor"}, headers=HEADERS, timeout=30)
 
 
 def _block_robot(s: dict) -> str | None:
@@ -103,14 +109,19 @@ def _block_robot(s: dict) -> str | None:
 
 
 def _next(server: str, reason: str = "operator move-on") -> None:
-    requests.post(f"{server}/demo/next", json={"reason": reason}, timeout=5)
+    # origin "scripted": this click is the script's, not a supervisor's.
+    requests.post(f"{server}/demo/next", json={"reason": reason, "origin": "scripted"},
+                  headers=HEADERS, timeout=5)
 
 
 def _start(server: str, robot_ids: list[str] | None, interest: str = "") -> None:
+    # No explicit mode: the server derives it (gazebo when the guide can move,
+    # mock otherwise, live only for all-physical robots). Every correction this
+    # script makes is marked origin "scripted".
     body = {"robot_ids": robot_ids} if robot_ids else {}
     if interest:
         body["visitor_interest"] = interest
-    resp = requests.post(f"{server}/demo/start", json=body, timeout=10)
+    resp = requests.post(f"{server}/demo/start", json=body, headers=HEADERS, timeout=10)
     resp.raise_for_status()
     print("Demo started.")
 
