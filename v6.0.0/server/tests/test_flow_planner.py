@@ -185,13 +185,11 @@ class TestLadder:
         assert r["ops"] == [] and r["fits_already"]
 
     def test_mild_pressure_only_tightens_qa(self, graph, importance):
-        # 520, not 450: build_script() now opens with an extra
-        # "approach_visitors" navigation step (guide walks to the door to
-        # greet visitors before the opening speech), which adds ~60s to the
-        # estimated tour length — 450 now falls into "also compress"
-        # territory. 520 keeps this test's actual point (mild pressure only
-        # tightens QA, doesn't compress yet) true under the new estimate.
-        r = plan_for_budget(graph, 520, importance=importance)
+        # The tour is 738s at full length and 603s with every window at the
+        # Q&A floor, so anything in between is "mild". 670 sits mid-band.
+        # Read these off plan_for_budget when the script grows; hand-derived
+        # figures have missed the navigation/face_* steps twice.
+        r = plan_for_budget(graph, 670, importance=importance)
         assert {o.kind for o in r["ops"]} == {PlanOpKind.SET_QA_BUDGET}
         assert r["feasible"]
 
@@ -540,14 +538,16 @@ class TestTighteningHoldsTheEmphasis:
                 if o.kind is PlanOpKind.SET_QA_BUDGET}
 
     def test_the_emphasised_block_still_leads_after_tightening(self):
-        plan = self._plan(600, allocate=True, importance=self.IMP)
+        # Tight enough to shrink the round (full length fits at 740s), loose
+        # enough that no block is pinned at the floor (all are below ~605s).
+        plan = self._plan(650, allocate=True, importance=self.IMP)
         got = self._budgets(plan)
         assert got, "no allocation emitted"
         assert got[B] > got[A]
 
     def test_allocation_is_off_unless_asked_for(self):
         # Every existing caller keeps the ladder it had.
-        plan = self._plan(600, allocate=False, importance=self.IMP)
+        plan = self._plan(650, allocate=False, importance=self.IMP)
         got = self._budgets(plan)
         assert len(set(got.values())) <= 1, \
             "flat tightening emitted per-block budgets"
