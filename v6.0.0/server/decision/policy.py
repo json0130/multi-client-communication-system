@@ -273,6 +273,10 @@ HANDOFF_CUE_PHRASES = [
     "please tell us",
     "let's hear from",
     "let us hear from",
+    # A question put TO the robot about its work. The LLM fallback
+    # (RobotInstance.classify_handoff) is kept strict and misses these.
+    "what are you working on",
+    "what do you work on",
 ]
 
 

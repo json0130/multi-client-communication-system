@@ -287,7 +287,7 @@ def create_http_gateway(
 
         # Solo robot waiting for its human guide — same rule as spoken input.
         if ws_gateway._awaiting_cue():
-            ws_gateway._handle_cue(message)
+            ws_gateway._handle_cue(instance, message)
             return jsonify({
                 "client_id": client_id,
                 "response": "",

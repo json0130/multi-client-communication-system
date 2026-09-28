@@ -53,3 +53,30 @@ def test_the_model_is_never_offered_continue_as_a_label():
               if "—" in line]
     assert labels == ["done", "more"]
 
+
+# ── classify_handoff: the solo demo's hand-off fallback ──────────────────────
+
+def _handoff(reply, heard="Navel, go ahead", llm=True):
+    robot = RobotInstance("navel_01", "Navel", user_id=1, enabled_modules=set())
+    robot.llm = FakeLLM(reply) if llm else None
+    return robot.classify_handoff(heard), getattr(robot.llm, "system", None)
+
+
+@pytest.mark.parametrize("reply,started", [
+    ("handoff", True),
+    ("Handoff.", True),
+    ("'handoff'", True),                     # quotes around the word are stripped
+    ("wait", False),
+    ("", False),
+])
+def test_only_handoff_starts_the_robot(reply, started):
+    assert _handoff(reply)[0] is started
+
+
+def test_it_keeps_waiting_without_an_llm():
+    assert _handoff("handoff", llm=False)[0] is False
+
+
+def test_the_prompt_names_the_robot_it_is_listening_for():
+    _, system = _handoff("wait")
+    assert "hands the floor to Navel" in system

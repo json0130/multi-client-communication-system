@@ -1651,13 +1651,16 @@ class WebSocketGateway:
         orch = self._demo_orchestrator
         return bool(orch and orch.get_status().get("state") == "awaiting_cue")
 
-    def _handle_cue(self, text: str) -> None:
+    def _handle_cue(self, instance, text: str) -> None:
         """Speech while a solo robot waits for its human guide to hand over.
 
-        A hand-off phrase starts the robot; anything else is the guide's own
-        intro and gets no reply at all — not an answer, not an interruption.
+        A hand-off starts the robot; anything else is the guide's own intro
+        and gets no reply at all — not an answer, not an interruption. The
+        phrase list is checked first because it is instant; only a miss costs
+        an LLM call, which lets any natural hand-off through (see
+        RobotInstance.classify_handoff).
         """
-        if is_handoff_cue(text):
+        if is_handoff_cue(text) or instance.classify_handoff(text):
             self._demo_orchestrator.cue_received(text)
         else:
             logger.info(f"[WS Gateway] Awaiting hand-off, ignored: '{text[:60]}'")
@@ -1689,7 +1692,7 @@ class WebSocketGateway:
             if msg_type == "chat":
                 message = data.get("message", "")
                 if message and self._awaiting_cue():
-                    self._handle_cue(message)
+                    self._handle_cue(instance, message)
                     return
                 if message:
                     handle_turn(self, instance, client_id, message,
@@ -1705,7 +1708,7 @@ class WebSocketGateway:
                     # Transcribe only: generating here would answer the guide.
                     heard = instance.transcribe(audio_b64).transcription
                     if heard:
-                        self._handle_cue(heard)
+                        self._handle_cue(instance, heard)
                     return
                 if audio_b64:
                     t0 = time.perf_counter()

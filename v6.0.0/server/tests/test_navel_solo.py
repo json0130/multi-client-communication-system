@@ -40,6 +40,12 @@ class FakeInstance:
         self.access_level = AccessLevel.LOCAL
         self.speech_calls = []
         self._heard = heard
+        self.says_handoff = False       # what the LLM fallback answers
+        self.asked = []                 # what the LLM fallback was asked about
+
+    def classify_handoff(self, heard):
+        self.asked.append(heard)
+        return self.says_handoff
 
     @property
     def identity(self):
@@ -137,6 +143,7 @@ class TestHandOffPhrases:
         "Could you tell us about your research?",
         "Take it away, Navel!",
         "Navel, please introduce yourself",
+        "Navel, what are you working on?",
     ])
     def test_a_hand_off_is_recognised(self, said):
         assert is_handoff_cue(said)
@@ -193,6 +200,19 @@ class TestTheGatewayStaysQuiet:
         gw.cues = []
         orch.cue_received = lambda text: gw.cues.append(text) or True
         return gw
+
+    def test_an_unlisted_hand_off_starts_it_through_the_llm(self, gw):
+        navel = gw._registry.get(NAVEL)
+        navel.says_handoff = True
+        gw._on_message(NAVEL, {"type": "chat", "message": "Navel, go ahead"})
+        assert navel.asked == ["Navel, go ahead"]
+        assert gw.cues == ["Navel, go ahead"]
+        assert gw.sent == []
+
+    def test_a_listed_phrase_never_waits_for_the_llm(self, gw):
+        gw._on_message(NAVEL, {"type": "chat", "message": "Navel, over to you"})
+        assert gw._registry.get(NAVEL).asked == []
+        assert gw.cues == ["Navel, over to you"]
 
     def test_the_guides_intro_gets_no_reply(self, gw):
         gw._on_message(NAVEL, {"type": "chat", "message": "Welcome to the CARES lab!"})

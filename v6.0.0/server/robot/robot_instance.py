@@ -345,6 +345,44 @@ class RobotInstance:
             print(f"[QA Classifier] LLM error ({e}) → defaulting to 'continue'")
             return "continue"
 
+    def classify_handoff(self, heard: str) -> bool:
+        """
+        Is the human guide handing the floor to this robot right now?
+
+        Asked only when the hand-off phrase list (decision.policy) missed, so
+        "Navel, go ahead" or "say hi to our visitors" start the solo demo too.
+        The hard part is the guide's own intro, which talks ABOUT the robot
+        ("in a moment Navel will explain its research") — measured on
+        qwen2.5:7b, 3 runs each: 12 intro lines incl. rhetorical questions to
+        the visitors never triggered (36/36), 9 of 10 unlisted hand-offs did
+        (27/30). A wider prompt caught the tenth but started early on "What do
+        you think Navel does?" — and a false start cannot be undone, while a
+        missed hand-off is rephrased or skipped. Default: False (keep waiting).
+        """
+        if not heard.strip() or not self.llm or not self.llm.is_available():
+            return False
+        name = self.robot_name
+        system = (
+            f"You are listening for the moment a human lab guide hands the floor to {name}, "
+            "a robot, so that it starts presenting to a group of visitors.\n"
+            f"Reply 'handoff' if the guide is now speaking TO {name} and inviting it to speak, "
+            "greet the visitors, introduce itself or present its work "
+            f"(e.g. '{name}, over to you', 'go ahead {name}', '{name}, tell everyone what you do').\n"
+            f"Reply 'wait' for anything else: the guide speaking to the visitors, describing {name} "
+            "or its research, or saying what will happen later "
+            f"(e.g. 'In a moment {name} will explain its research', '{name} works on gestures').\n"
+            "Reply with exactly one word: handoff or wait."
+        )
+        try:
+            resp = self.llm.generate(system, heard[:200])
+            words = resp.text.strip().lower().split()
+            first = words[0].strip(".,!'\"") if words else ""
+            print(f"[Handoff Classifier] '{heard[:60]}' → '{first}'")
+            return first == "handoff"
+        except Exception as e:
+            print(f"[Handoff Classifier] LLM error ({e}) → keep waiting")
+            return False
+
     # ── Demo speech generation ────────────────────────────────────────────────
 
     def generate_demo_speech(self, instruction: str) -> "ChatResult":
