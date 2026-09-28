@@ -204,11 +204,27 @@ class PepperBridge(BasicClient):
 
     def _pepper_chat_sentence(self, data: dict):
         """One streamed sentence: queue it for Pepper TTS like a chat response."""
+        if self.is_stale(data):
+            return
         if data.get("emotion_tag"):
             self.on_emotion_detected(data["emotion_tag"])
         clean = re.sub(r"\[.*?\]", "", data.get("text", "")).strip()
         if clean:
             self._tts_queue.put(clean)
+
+    def _on_tts_stop(self, data: dict):
+        """Barge-in: drop what is queued for Pepper, not just the output modules.
+
+        The bridge speaks from its own queue, which BasicClient knows nothing
+        about, so a visitor talking over Pepper used to leave the rest of the
+        old answer queued to play after the new one.
+        """
+        super()._on_tts_stop(data)
+        while True:
+            try:
+                self._tts_queue.get_nowait()
+            except _queue.Empty:
+                break
 
     def _pepper_speech_response(self, data: dict):
         """

@@ -64,7 +64,6 @@ class EdgeTTSOutputModule(OutputModule):
         self.stop_event = threading.Event()
         self._pool = concurrent.futures.ThreadPoolExecutor(
             max_workers=4, thread_name_prefix="tts-synth")
-        self._speaking = False          # last state reported to the client
 
         self._interrupt_event = threading.Event()
         self._aplay_proc: Optional[subprocess.Popen] = None
@@ -248,7 +247,7 @@ class EdgeTTSOutputModule(OutputModule):
                 continue
 
             text, callback, jobs = item
-            self._set_speaking(True)
+            self.report_speaking(True)
             try:
                 self._speak_text(jobs, has_callback=callback is not None)
             except Exception as e:
@@ -262,20 +261,7 @@ class EdgeTTSOutputModule(OutputModule):
                     except Exception as e:
                         logger.error(f"[TTS] Callback error: {e}")
                 if self.tts_queue.empty():
-                    self._set_speaking(False)
-
-    def _set_speaking(self, speaking: bool):
-        """Tell the client when this robot starts talking and when it has
-        nothing left to say, so the server stops guessing from word counts."""
-        if speaking == self._speaking:
-            return
-        self._speaking = speaking
-        report = getattr(self.client, "on_tts_state", None)
-        if report:
-            try:
-                report(speaking)
-            except Exception as e:
-                logger.warning(f"[TTS] Could not report speaking={speaking}: {e}")
+                    self.report_speaking(False)
 
     def _synthesise(self, text: str) -> list:
         """Start synthesising every sentence of `text` now; [(sentence, Future)]."""

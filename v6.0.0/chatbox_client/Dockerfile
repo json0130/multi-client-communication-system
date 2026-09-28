@@ -81,7 +81,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/espeak-ng-src
 
-# Copy v6.0.0 base client (needed for 'from client import BasicClient')
+# Copy the shared robot client (chatbox.py imports it from ../client)
 COPY client /app/client
 
 # Copy chatbox client

@@ -1,5 +1,6 @@
 # modules/output/console_output.py - Console text output module
 import logging
+import re
 from typing import Dict, Any
 from client import OutputModule
 
@@ -51,7 +52,7 @@ class ConsoleOutputModule(OutputModule):
         
             # Clean text for display
             display_text = text
-            if hasattr(self, 'remove_emotion_tags') and self.config.get('remove_emotion_tags', True):
+            if self.config.get('remove_emotion_tags', True):
                 display_text = re.sub(r"^\[(.*?)\]\s*", "", display_text)
         
             # Display the text

@@ -21,10 +21,17 @@ import time
 import threading
 from typing import Optional
 
-# Self-contained: import the local client.py + modules bundled in this folder
-# (this folder is deployed standalone to the ChatBox robot — no ../client dependency).
+# The shared robot client (v6.0.0/client): BasicClient, the server protocol,
+# voice input, TTS, console and Arduino output. This folder used to carry its
+# own copies, which fell behind (no voice selection, no synthesis prefetch, no
+# tts_state, no API token). The Dockerfile already copies client/ beside this
+# folder; outside Docker, keep them side by side or set ROBOT_CLIENT_DIR.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
+_CLIENT = os.environ.get("ROBOT_CLIENT_DIR") or os.path.join(_HERE, "..", "client")
+if not os.path.isfile(os.path.join(_CLIENT, "client.py")):
+    sys.exit(f"Shared robot client not found at {os.path.abspath(_CLIENT)}. Copy "
+             f"v6.0.0/client there, or set ROBOT_CLIENT_DIR to where it is.")
+sys.path.insert(0, _CLIENT)
 
 from client import BasicClient
 
