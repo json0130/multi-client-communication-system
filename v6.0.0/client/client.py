@@ -577,6 +577,15 @@ class BasicClient:
             })
             logger.info(f"[Demo] Reported interrupted remainder for '{step_id}'.")
 
+    def on_tts_state(self, speaking: bool):
+        """Tell the server this robot started talking, or has nothing left to say.
+
+        Called by the TTS output module. The server otherwise guesses when a
+        streamed answer ends from its word count, and paces the tour on that
+        guess (Q&A auto-close, the guide's wrap-up, waiting before the next
+        step)."""
+        self.server_connection.send({"type": "tts_state", "speaking": speaking})
+
     def send_ack(self, step_id: str):
         """Send an ACK packet to the server for the given demo step."""
         sent = self.server_connection.send({"type": "ack", "step_id": step_id})

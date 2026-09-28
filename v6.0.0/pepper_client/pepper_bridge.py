@@ -70,6 +70,10 @@ class PepperBridge(BasicClient):
 
         # TTS requests from the server are queued and spoken between recording cycles
         self._tts_queue = _queue.Queue()
+        # How many _speak calls are in progress (demo steps and queued chat can
+        # overlap), so tts_state reports idle only when all of them are done.
+        self._speaking_n = 0
+        self._speaking_lock = threading.Lock()
 
         # Override the handlers that BasicClient registered
         self.server_connection.register_handler("demo_step",       self._pepper_demo_step)
@@ -239,6 +243,11 @@ class PepperBridge(BasicClient):
         words   = len(text.split())
         est_sec = max(1.0, words / self._wps)
 
+        with self._speaking_lock:
+            self._speaking_n += 1
+            first = self._speaking_n == 1
+        if first:
+            self.on_tts_state(True)
         self.is_speaking.set()
         try:
             ok = self._send_pepper({"command": "tts", "content": text})
@@ -250,6 +259,13 @@ class PepperBridge(BasicClient):
                 time.sleep(est_sec)
         finally:
             self.is_speaking.clear()
+            # Idle only when nothing is still queued: queued sentences are
+            # speech the visitor has yet to hear, even between record cycles.
+            with self._speaking_lock:
+                self._speaking_n -= 1
+                last = self._speaking_n == 0 and self._tts_queue.empty()
+            if last:
+                self.on_tts_state(False)
 
     def _speak_async(self, text: str):
         """Non-blocking version of _speak — runs in its own daemon thread."""
