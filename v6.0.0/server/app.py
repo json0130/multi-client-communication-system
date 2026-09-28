@@ -128,6 +128,30 @@ _orchestrator_ref: dict = {"o": None}
 # before create_app() has loaded the profiles.
 _profiles_ref: dict = {"p": None}
 
+# And for the registry, so planning can ask which robots can actually move.
+_registry_ref: dict = {"r": None}
+
+
+def _price_movement(durations: dict, steps) -> dict:
+    """Movement a robot cannot perform takes no time.
+
+    Navigation steps (walking between stations, turning to face someone) are
+    real only for a guide that declared the "navigation" module — today the
+    Gazebo bridge. Every other client ACKs them at once. Priced at
+    DEFAULT_STEP_SEC they added ~190s to a real lab tour, so the planner cut
+    projects that would have fit. A measured value is overridden too: the
+    stats table averages by step_id across sim and real runs alike.
+    """
+    reg = _registry_ref["r"]
+
+    def can_move(robot_id):
+        inst = reg.get(robot_id) if reg else None
+        return bool(inst and "navigation" in inst.enabled_modules)
+
+    frozen = {s.step_id: 0.0 for s in steps
+              if s.step_kind == "navigation" and not can_move(s.robot_id)}
+    return {**durations, **frozen} if frozen else durations
+
 
 def _kg_snapshot():
     """(topics, edges, links) from the current competence graph.
@@ -365,7 +389,7 @@ def build_flow_plan(obs) -> Optional[dict]:
         return None
 
     remaining_budget = max(0.0, obs.time_budget_sec - obs.elapsed_sec)
-    durations = _step_durations()
+    durations = _price_movement(_step_durations(), obs.remaining_steps)
     topics, edges, links = _kg_snapshot()
 
     # EXPLICIT trigger-type ordering, made a named sequence rather than
@@ -438,6 +462,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
 
     # ── Core objects (order matters — registry first) ─────────────────────────
     registry   = RobotRegistry(rbac=rbac, grants=grants, profiles=profiles)
+    _registry_ref["r"] = registry
     recorder   = build_decision_recorder()
     ws_gateway = WebSocketGateway(registry, recorder=recorder,
                                   kg_router_factory=build_kg_router,
