@@ -65,3 +65,18 @@ def test_no_registry_yet_is_treated_as_cannot_move(monkeypatch, steps):
     monkeypatch.setitem(app._registry_ref, "r", None)
     priced = app._price_movement({}, steps)
     assert set(priced) == _nav_ids(steps)
+
+
+def test_the_planners_own_step_view_carries_the_step_kind(monkeypatch, steps):
+    """In production the planner prices obs.remaining_steps — StepRefs built
+    from /demo/status dicts, not DemoSteps. Without step_kind on that path
+    every budgeted plan raised AttributeError and fell back to the ladder."""
+    from decision.observation import DemoRunTracker, build_observation
+    status = {"state": "waiting_ack", "step_idx": 0, "step_id": steps[0].step_id,
+              "steps": [{"step_id": s.step_id, "robot_id": s.robot_id, "role": s.role,
+                         "qa_window": s.qa_window, "block_robot_id": s.block_robot_id,
+                         "step_kind": s.step_kind} for s in steps]}
+    obs = build_observation(status=status, registry=None, tracker=DemoRunTracker())
+    monkeypatch.setitem(app._registry_ref, "r", _Registry(["gpt"]))
+    priced = app._price_movement({}, obs.remaining_steps)
+    assert set(priced) == _nav_ids(steps[1:]) and priced

@@ -366,6 +366,7 @@ def build_observation(
             role=s.get("role") or "",
             qa_window=bool(s.get("qa_window")),
             block_robot_id=s.get("block_robot_id"),
+            step_kind=s.get("step_kind") or "speech",
         )
         for s in (status.get("steps") or [])[idx + 1:]
     )

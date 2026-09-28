@@ -1137,6 +1137,7 @@ class DemoOrchestrator:
                         "qa_window": s.qa_window,
                         "role":      s.role,
                         "block_robot_id": s.block_robot_id,
+                        "step_kind": s.step_kind,
                     }
                     for s in self._script
                 ],
