@@ -1,0 +1,346 @@
+{
+  "transfer_id": 1,
+  "applied_at": "2026-09-28T11:27:33.747068+00:00",
+  "code_commit": "74eb20a",
+  "notes": "Transfer #1 for Display Day. Approved by Jay 2026-09-29 after dry run; chatbox_01->chatbox_jetson_001 held back (named via --twin for step-id renaming only). DB snapshot: snapshot_pre_transfer1.",
+  "from": "navel_01",
+  "to": "navel_001",
+  "version": 1,
+  "items": {
+    "facts": 27,
+    "scope_rows": 7,
+    "kg_priors": 0,
+    "style_priors": 0,
+    "step_priors": 4,
+    "qa_prior": {
+      "median_sec": 48.4,
+      "lower_bound": false,
+      "windows": 36,
+      "visitor_ended": 28,
+      "copied": true
+    },
+    "prior_modes": [
+      "mock",
+      "gazebo",
+      "scripted_visitor"
+    ],
+    "step_source_modes": "gazebo+mock+scripted_visitor",
+    "excluded": {
+      "movement_steps": 1,
+      "non_prior_runs": 0,
+      "not_its_step": 6,
+      "qa_non_prior_runs": 0
+    },
+    "sim_prior_cap": 3,
+    "twin_map": {
+      "chatbox_01": "chatbox_jetson_001",
+      "navel_01": "navel_001",
+      "pepper_01": "pepper_001"
+    }
+  },
+  "facts": [
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:robot-to-robot-communication",
+      "kind": "method",
+      "fact": "The problem: robots can exchange information successfully while people nearby cannot tell what they mean or why they are moving. Project 56 asks how non-verbal behaviour can be generated so that robot-to-robot communication becomes understandable to human observers.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "method",
+      "fact": "Method B, the main contribution, splits a generated reply into communicative segments, estimates how long each takes to say, removes gestures that do not fit, avoids repeating the previous expressive gesture, scores the remaining gestures against what the segment means, and performs one gesture with each segment.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "method",
+      "fact": "Method A, the baseline, attaches one action to the whole response. Method B can choose a different gesture for each part of one reply, such as greeting, then pointing, then showing uncertainty, and checks that each gesture fits its own speaking time.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "kind": "method",
+      "fact": "The language model never controls the motors. It only scores high-level action tags from a fixed list of what Navel can do, using the segment text, the action descriptions, the conversation so far and optionally the visitor's detected emotion. Navel maps the chosen tag to predefined, tested motion code.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:robot-to-robot-communication",
+      "kind": "method",
+      "fact": "People read speech together with gesture, gaze, posture, facial expression and timing, so the project treats robot movement as part of the message rather than decoration. The main scenario is a lab tour with social robots, visitors and question answering.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:speech-segmentation",
+      "kind": "method",
+      "fact": "A deterministic rule-based segmenter divides each reply into ordered communicative units, so different parts of one reply can get different gestures.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "method",
+      "fact": "The Duration Filter keeps a gesture only if its measured duration fits within the estimated speaking time of its segment; missing, unprofiled or overlong gestures are rejected. The timing margin is currently zero seconds.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "method",
+      "fact": "One-segment lookahead: while Navel speaks and gestures for the current segment, the server prepares the next segment's gesture. It plans only one ahead because each choice depends on the one before it.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "kind": "method",
+      "fact": "An expressive gesture is not repeated in the next segment. DEFAULT, a real generic speaking gesture, stays available and alternates between the left arm, right arm and both arms using a shuffled bag. DEFAULT is different from None, which means speech with no gesture.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gaze-coordination",
+      "kind": "method",
+      "fact": "The Navel client keeps face perception active during speech, coordinates head movement with gestures, finds the visitor's face again after a gesture, and can add small head movements while speaking.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "model",
+      "fact": "Speaking time per segment is estimated with a calibrated linear model: about 0.54 seconds plus 0.32 seconds per word.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "kind": "model",
+      "fact": "Reply generation and gesture scoring use the qwen2.5:7b language model served through Ollama.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:speech-segmentation",
+      "kind": "model",
+      "fact": "An LLM segmenter using qwen2.5:7b was tested as a comparison, but the rule-based segmenter was selected for the running system.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "metric",
+      "fact": "Main result so far: end-to-end feasibility. Generated speech has been segmented, timed, filtered, matched to gestures, planned one segment ahead and performed as coordinated speech and movement on the physical Navel robot.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:speech-segmentation",
+      "kind": "metric",
+      "fact": "On a frozen 30-sample held-out set, the rule-based segmenter scored 96.7% exact match and 0.987 boundary F1 with 0.03 ms median latency; the LLM segmenter scored 73.3% and 0.887 with about 221 ms latency.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "metric",
+      "fact": "The duration estimator is off by 0.447 seconds on average for lab-tour speech (0.199 s for utterances of four words or fewer, 0.289 s on Harvard sentences). Its gesture-fits-or-not decisions were 94.7% correct: 142 of 150, with 2 false accepts and 6 false rejects.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "metric",
+      "fact": "A recorded eight-segment run on the physical robot performed DEFAULT, DEFAULT, AGREE, POINT, UNCERTAIN, DEFAULT, DEFAULT, DEFAULT in order, with speech and gesture starting about 1.35 ms apart and all seven lookahead steps ready in time. This is one development run, not a general performance claim.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "kind": "metric",
+      "fact": "In a diagnostic of 25 segments run 5 times each, DEFAULT was chosen 76% of the time and POINT every time it fitted; GREET, HAPPY, SAD, SURPRISE, LISTEN and EMPHASISE were never chosen, and \"That is correct\" varied between AGREE and DENY.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "dataset",
+      "fact": "Speech timing was calibrated by measuring how long Navel actually took to speak: 15 lab-tour sentences with three trials each (45 measurements, median about 2.56 words per second), validated on 10 Harvard sentences with three trials each (median about 2.77 words per second).",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "hardware",
+      "fact": "Navel is the physical robot platform, and the only robot physically integrated with Method B so far. Its action library has eleven gestures: DEFAULT, POINT, EMPHASISE, AGREE, LISTEN, UNCERTAIN, DENY, GREET, HAPPY, SURPRISE and SAD, each with a measured duration from about 1 second (HAPPY, SAD) to about 6 seconds (EMPHASISE).",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:robot-to-robot-communication",
+      "kind": "limitation",
+      "fact": "No human study has been completed, so it has NOT been shown that people understand robot-to-robot communication better. The system is designed to improve comprehensibility; formal human evaluation is still pending.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "limitation",
+      "fact": "The project does not generate new motor movements, full-body motion or facial-expression animation, and the language model does not generate movement. It selects and coordinates gestures from a fixed, tested library for each robot.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "kind": "limitation",
+      "fact": "The gesture scorer has bias and consistency problems, and there are no human-labelled correct answers yet, so selection quality has not been measured. The next step is improving it with human-reviewed labels and comparing against the frozen V1 baseline.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "kind": "limitation",
+      "fact": "The speaking-time estimate is based on word count and is not exact for every utterance. The first arm command can take about 3.2 seconds while the arm controller warms up; that happens once, not before every gesture.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "limitation",
+      "fact": "Navel's action and timing profile is still a static placeholder rather than being loaded from the database, and another robot would need its own profile and tested motion mappings before it could use Method B.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gaze-coordination",
+      "kind": "limitation",
+      "fact": "Gaze and head coordination has been implemented and exercised on the physical robot, but there is no formal gaze-accuracy or naturalness evaluation yet.",
+      "verified": true,
+      "source": "Project 56 Display Day Project Knowledge (2026-09-28)"
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "kind": "limitation",
+      "fact": "Method B runs in its own navel-server codebase, not in this lab demo server, so the gestures in this demo come from simple per-reply emotion tags rather than Method B's per-segment planning.",
+      "verified": true,
+      "source": "this repository: Method B lives in navel-server"
+    }
+  ],
+  "scope": [
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:co-speech-gesture",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gaze-coordination",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-selection",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:gesture-timing",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:non-verbal-interaction",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:robot-to-robot-communication",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "navel_001",
+      "topic_id": "topic:speech-segmentation",
+      "eligible": true,
+      "specialised": true
+    }
+  ],
+  "style_priors": [],
+  "duration_priors": [
+    {
+      "robot_id": "navel_001",
+      "step_id": "navel_001_greeting",
+      "kind": "step",
+      "median_sec": 6.01,
+      "n": 42,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "navel_001",
+      "step_id": "navel_001_project_approach",
+      "kind": "step",
+      "median_sec": 9.86,
+      "n": 37,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "navel_001",
+      "step_id": "navel_001_project_impact",
+      "kind": "step",
+      "median_sec": 10.76,
+      "n": 36,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "navel_001",
+      "step_id": "navel_001_project_problem",
+      "kind": "step",
+      "median_sec": 9.21,
+      "n": 41,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "navel_001",
+      "step_id": "qa_invite_navel_001",
+      "kind": "qa",
+      "median_sec": 48.4,
+      "n": 28,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    }
+  ]
+}
