@@ -20,6 +20,8 @@ pipeline reads and writes.
 
 from __future__ import annotations
 
+import itertools
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -28,25 +30,36 @@ from decision import ActionKind, guide_and_presenter, is_acknowledgement
 from decision.policy import QA_CLOSING_PHRASES, _matches
 from gateway.websocket_gateway import _speaking_seconds, _spoken_text
 
+# One id per turn, increasing across every robot and both transports. Sent on
+# tts_stop and chat_sentence so a client can drop sentences from a turn older
+# than the last barge-in it was told about.
+_turn_ids = itertools.count(1)
+
 MORE_QUESTIONS_TEXT = (
     "[DEFAULT] Do you have any other questions, or shall we continue the demonstration?"
 )
 
 
+class TurnCancelled(Exception):
+    """The visitor started another turn while this one was answering."""
+
+
 @dataclass
 class Turn:
     """What happened on one turn, for callers that need to report it."""
-    outcome: str                      # advance | acknowledged | deferred | answered
+    outcome: str                      # advance | acknowledged | deferred | answered | cancelled
     target_id: str = ""               # who answered (may differ from who heard it)
     handoff: str = ""                 # what the receiver said before handing over
     text: str = ""                    # fixed line spoken, for advance/acknowledged
     result: object = None             # ChatResult when answered
     delegation_result: Optional[dict] = None
     timings: dict = field(default_factory=dict)
+    turn_id: int = 0
 
 
 def handle_turn(gw, instance, client_id: str, message: str, *,
-                sync_delegation: bool = False, stt_sec: Optional[float] = None) -> Turn:
+                sync_delegation: bool = False, stt_sec: Optional[float] = None,
+                cancelled: Optional[threading.Event] = None) -> Turn:
     """Run one visitor utterance through the Q&A pipeline.
 
     `sync_delegation` runs a delegation on this thread so the caller gets the
@@ -55,10 +68,18 @@ def handle_turn(gw, instance, client_id: str, message: str, *,
 
     `stt_sec` is how long transcription took, when the turn was spoken, so the
     timing line covers the whole turn.
+
+    `cancelled`, once set, stops a streaming answer at its next sentence.
     """
     t0 = time.perf_counter()
+    tid = next(_turn_ids)
     marks: dict = {} if stt_sec is None else {"stt": stt_sec}
-    turn = _run(gw, instance, client_id, message, sync_delegation, t0, marks)
+    try:
+        turn = _run(gw, instance, client_id, message, sync_delegation, t0, marks,
+                    tid, cancelled or threading.Event())
+    except TurnCancelled:
+        turn = Turn("cancelled", target_id=client_id)
+    turn.turn_id = tid
     marks["total"] = time.perf_counter() - t0 + (stt_sec or 0.0)
     turn.timings = {k: round(v, 3) for k, v in marks.items()}
     print(f"[Turn] {client_id}->{turn.target_id or client_id} {turn.outcome} "
@@ -66,13 +87,14 @@ def handle_turn(gw, instance, client_id: str, message: str, *,
     return turn
 
 
-def _run(gw, instance, client_id, message, sync_delegation, t0, marks) -> Turn:
+def _run(gw, instance, client_id, message, sync_delegation, t0, marks,
+         tid, cancelled) -> Turn:
     orch = gw._demo_orchestrator
 
     # Barge-in: user talking = robot listens. A raw phrase check, not a
     # decision — it has to happen before any LLM call.
     if not any(p in message.lower() for p in gw._QA_ADVANCE_PHRASES):
-        gw.send_to_robot(client_id, {"event": "tts_stop"})
+        gw.send_to_robot(client_id, {"event": "tts_stop", "turn_id": tid})
         if orch and orch.get_status()["state"] in ("running", "waiting_ack"):
             orch.qa_interrupt(source="auto")
 
@@ -107,6 +129,7 @@ def _run(gw, instance, client_id, message, sync_delegation, t0, marks) -> Turn:
     if is_acknowledgement(message):
         gw.send_to_robot(client_id, {
             "event": "chat_sentence", "text": "Of course.", "emotion_tag": "DEFAULT",
+            "turn_id": tid,
         })
         marks["decide"] = time.perf_counter() - t0
         return Turn("acknowledged", target_id=client_id, text="Of course.")
@@ -117,6 +140,7 @@ def _run(gw, instance, client_id, message, sync_delegation, t0, marks) -> Turn:
     if handoff:
         gw.send_to_robot(client_id, {
             "event": "chat_sentence", "text": handoff, "emotion_tag": "DEFAULT",
+            "turn_id": tid,
         })
     marks["decide"] = time.perf_counter() - t0
 
@@ -134,12 +158,15 @@ def _run(gw, instance, client_id, message, sync_delegation, t0, marks) -> Turn:
         if wait["left"] > 0:
             time.sleep(wait["left"])
             wait["left"] = 0.0
+        if cancelled.is_set():
+            raise TurnCancelled()     # unwinds out of the LLM stream
         if "```" in clean_text:          # never speak a delegation JSON block
             return
         if not _spoken_text(clean_text):  # a bare emotion tag is not speech
             return
         gw.send_to_robot(target_id, {
             "event": "chat_sentence", "text": clean_text, "emotion_tag": emotion_tag,
+            "turn_id": tid,
         })
 
     result = target_instance.process_chat_stream(

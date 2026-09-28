@@ -31,6 +31,7 @@ Requires: pip install websocket-client
 from __future__ import annotations
 import json
 import logging
+import queue
 import re
 import threading
 import time
@@ -67,6 +68,10 @@ _looks_like_question = looks_like_question
 
 # How long to wait before attempting a reconnect (seconds)
 RECONNECT_DELAY = 5
+
+# Messages that start a visitor turn: STT + LLM, seconds long. They run on a
+# per-connection worker so the reader keeps reading acks and barge-ins.
+TURN_TYPES = {"chat", "speech"}
 MAX_RECONNECT_ATTEMPTS = 10
 
 ADVANCE_ACK = {
@@ -153,6 +158,16 @@ class RobotConnection:
         self._reconnect_attempts = 0
         self._stop = False
 
+        # Turns run here, one at a time and in order. The reader thread used
+        # to run them itself, so while one robot's answer was generating
+        # nothing else from that robot was read: not its acks, not the
+        # visitor talking over it.
+        self._turns: "queue.Queue[Optional[dict]]" = queue.Queue()
+        self._turn_cancel: Optional[threading.Event] = None
+        self._turn_lock = threading.Lock()
+        threading.Thread(target=self._turn_worker, daemon=True,
+                         name=f"turns-{client_id}").start()
+
     @property
     def url(self) -> str:
         return f"ws://{self.ip}:{self.port}"
@@ -165,6 +180,7 @@ class RobotConnection:
     def disconnect(self):
         """Close the connection cleanly."""
         self._stop = True
+        self._turns.put(None)
         if self._ws:
             self._ws.close()
         self._connected = False
@@ -210,7 +226,32 @@ class RobotConnection:
             data = json.loads(raw)
         except json.JSONDecodeError:
             data = {"raw": raw}
-        self._on_message(self.client_id, data)
+        if data.get("type") in TURN_TYPES:
+            # The visitor spoke again: the answer still being generated is
+            # for a question they have moved past. Stop it at its next
+            # sentence rather than let it finish after the new turn.
+            with self._turn_lock:
+                if self._turn_cancel is not None:
+                    self._turn_cancel.set()
+            self._turns.put(data)
+        else:
+            self._on_message(self.client_id, data)
+
+    def _turn_worker(self):
+        while True:
+            data = self._turns.get()
+            if data is None:
+                return
+            cancel = threading.Event()
+            with self._turn_lock:
+                self._turn_cancel = cancel
+            try:
+                self._on_message(self.client_id, data, cancel)
+            except Exception as e:
+                print(f"[WS] Turn error for {self.client_id}: {e}")
+            finally:
+                with self._turn_lock:
+                    self._turn_cancel = None
 
     def _on_error(self, ws, error):
         print(f"[WS] Error from {self.client_id}: {error}")
@@ -1532,9 +1573,13 @@ class WebSocketGateway:
 
     # ── Message routing ───────────────────────────────────────────────────────
 
-    def _on_message(self, client_id: str, data: dict):
+    def _on_message(self, client_id: str, data: dict,
+                    cancelled: Optional[threading.Event] = None):
         """
         Route an incoming message from a robot to the right handler.
+
+        `cancelled` is set when the visitor starts another turn on this
+        connection; an answer still streaming stops at its next sentence.
 
         Expected message types from the robot:
           - "chat"        : { "type": "chat", "message": "..." }
@@ -1555,7 +1600,8 @@ class WebSocketGateway:
             if msg_type == "chat":
                 message = data.get("message", "")
                 if message:
-                    handle_turn(self, instance, client_id, message)
+                    handle_turn(self, instance, client_id, message,
+                                cancelled=cancelled)
 
             elif msg_type == "speech":
                 # Transcribe, echo the transcription, then the SAME turn as
@@ -1574,7 +1620,7 @@ class WebSocketGateway:
                     })
                     if stt.transcription.strip():
                         handle_turn(self, instance, client_id, stt.transcription,
-                                    stt_sec=stt_sec)
+                                    stt_sec=stt_sec, cancelled=cancelled)
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")
