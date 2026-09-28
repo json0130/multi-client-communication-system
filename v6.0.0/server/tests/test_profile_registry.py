@@ -311,3 +311,19 @@ robots:
         assert reg.is_physical("navel_001") and not reg.is_physical("navel_01")
         assert reg.get_robot("navel_001").importance == reg.get_robot("navel_01").importance
         assert reg.get_robot("chatbox_jetson_001").sim_twin == "chatbox_01"
+
+
+def test_boot_mirrors_scenarios_and_embodiment_into_the_db(monkeypatch):
+    """build_rbac's mirror swallows errors so a DB outage can't stop a boot —
+    which is also how a plain bug in it went unnoticed. Drive it for real."""
+    import app
+    from data import robot_repo, scenario_repo
+    scenarios, robots = [], {}
+    monkeypatch.setattr(robot_repo, "set_access_level", lambda *a: True)
+    monkeypatch.setattr(scenario_repo, "upsert_scenario", lambda sid, *a: scenarios.append(sid))
+    monkeypatch.setattr(robot_repo, "set_embodiment",
+                        lambda rid, emb, twin: robots.setdefault(rid, (emb, twin)) or True)
+    monkeypatch.setattr("data.rbac_audit_repo.write_events", lambda *a: None, raising=False)
+    app.build_rbac()
+    assert "lab_demo" in scenarios
+    assert robots["navel_001"] == ("physical", "navel_01")

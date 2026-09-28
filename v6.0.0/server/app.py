@@ -81,7 +81,7 @@ def build_rbac() -> tuple[ProfileRegistry, RBACFilter, GrantStore]:
         try:
             from data import robot_repo, scenario_repo
             # Scenarios first: robots.scenario_id and every log row point at them.
-            for sc in profiles.scenarios():
+            for sc in profiles.scenarios:
                 scenario_repo.upsert_scenario(sc.scenario_id, sc.description.strip()[:120],
                                               sc.source_path)
             mirrored = profiles.sync_embodiment_to_db(robot_repo.set_embodiment)
