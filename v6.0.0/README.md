@@ -278,7 +278,7 @@ python3 -m pytest tests/ -v -m integration
 | Method | Endpoint | Description |
 |---|---|---|
 | `GET` | `/` | Server status + connected robots |
-| `GET` | `/robots` | List all registered robots |
+| `GET` | `/robots` | List registered robots; retired ("deleted") ones only with `?include_retired=1` |
 | `POST` | `/robots/register` | Register a robot (sets role, tags, address) |
 | `PUT` | `/robots/<id>/role` | Update role + allowed emotion tags |
 | `POST` | `/robots/<id>/connect` | Server opens WebSocket to robot |
