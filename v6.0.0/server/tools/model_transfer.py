@@ -53,9 +53,7 @@ PRIOR_MODES = ("mock", "gazebo", "scripted_visitor")
 own data), never 'headless_sim' (no robots or speech) or 'sim_unknown' (client
 type unrecoverable)."""
 
-SIM_PRIOR_CAP = 3
-"""Most observations sim evidence may count for when the router reads a prior;
-recorded in each transfer's items. Applied at read time, not stored."""
+from decision.kg import SIM_PRIOR_CAP  # noqa: E402  applied when routing reads a prior
 
 TRANSFERS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "data", "transfers")

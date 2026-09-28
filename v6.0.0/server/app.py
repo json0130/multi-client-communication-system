@@ -210,7 +210,12 @@ def _kg_snapshot():
         from decision.kg import RobotTopicEdge
         topics = repo.all_topics()
         if topics:
-            edges = [RobotTopicEdge.from_row(r) for r in repo.graph()]
+            # Routing's view: a physical robot's sim-to-real prior stands in
+            # for its own evidence until it has LIVE_MIN_OBS observations.
+            edges = [RobotTopicEdge.from_row(r).for_routing() for r in repo.graph()]
+            on_prior = sum(1 for e in edges if e.evidence == "prior")
+            if on_prior:
+                print(f"[App] KG: {on_prior} edge(s) routed on a sim-to-real prior")
             links = [(l["topic_a"], l["topic_b"], float(l["weight"]))
                      for l in repo.all_links()]
     except Exception as e:
@@ -414,7 +419,8 @@ def lookup_style_fit(robot_id: str, style: str):
         except Exception as e:
             print(f"[App] style fit unavailable, framing from the directive alone: {e}")
             _style_cache.update(at=_time.time(), fits={})
-    return _style_cache["fits"].get((robot_id, style))
+    fit = _style_cache["fits"].get((robot_id, style))
+    return fit.for_generation() if fit is not None else None
 
 
 def lookup_subject(robot_id: str) -> str:
