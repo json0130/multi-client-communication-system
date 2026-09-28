@@ -107,3 +107,19 @@ def test_a_plans_basis_is_logged_with_it():
     assert Action.revise(ops, basis=basis).payload()["basis"] == basis
     assert "basis" not in Action.revise(ops).payload()
     assert Action.revise(ops, basis=basis) == Action.revise(ops)   # not part of identity
+
+
+def test_a_flagged_runs_qa_windows_are_left_out(monkeypatch):
+    """exclude_from_priors (019): the run keeps its mode, but its windows
+    teach the planner nothing."""
+    import app
+    window = {"step_id": "qa_invite_navel_01", "block_robot_id": "navel_01",
+              "seconds": 30.0, "closed_by": "policy"}
+    monkeypatch.setattr("data.demo_duration_repo.qa_windows", lambda: [
+        {**window, "run_id": f"r{i}"} for i in range(6)])
+    runs = {f"r{i}": {"mode": "mock", "format": "full_tour"} for i in range(6)}
+    monkeypatch.setattr("data.demo_run_repo.run_modes", lambda: runs)
+    assert app._qa_basis(False, ["navel_01"])[1] == {"navel_01": "sim"}
+    for r in runs.values():
+        r["exclude_from_priors"] = True
+    assert app._qa_basis(False, ["navel_01"]) == ({}, {"navel_01": "default"})

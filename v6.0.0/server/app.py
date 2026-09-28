@@ -379,9 +379,10 @@ def _qa_basis(live: bool, blocks=()) -> tuple:
         from data.demo_run_repo import run_modes
         runs = run_modes()
         wanted = ("live",) if live else SIM_MODES
-        rows = [w for w in qa_windows()
-                if (runs.get(w.get("run_id")) or {}).get("mode") in wanted
-                and (runs.get(w.get("run_id")) or {}).get("format") == "full_tour"]
+        def usable(run):
+            return (run.get("mode") in wanted and run.get("format") == "full_tour"
+                    and not run.get("exclude_from_priors"))
+        rows = [w for w in qa_windows() if usable(runs.get(w.get("run_id")) or {})]
         measured = qa_median_by_block(rows)
         sources = {b: ("live" if live else "sim") for b in measured}
         if live:

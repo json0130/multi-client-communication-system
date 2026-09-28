@@ -47,10 +47,11 @@ def upsert_run(row: dict) -> bool:
 
 
 def run_modes() -> dict:
-    """{run_id: {"mode", "format"}} for every run — how duration rows are split
-    into live evidence and simulated evidence."""
+    """{run_id: {"mode", "format", "exclude_from_priors", ...}} for every run —
+    how duration rows are split into live evidence and simulated evidence.
+    "*" so the 019 flag comes along when present, with no error before it is."""
     try:
-        rows = get_client().table(RUNS).select("id, mode, format").limit(10000).execute().data or []
+        rows = get_client().table(RUNS).select("*").limit(10000).execute().data or []
         return {r["id"]: r for r in rows}
     except Exception as e:
         print(f"[demo_run_repo] run_modes error: {e}")

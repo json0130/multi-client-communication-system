@@ -47,7 +47,8 @@ def source_snapshot(from_id: str, to_id: str) -> dict:
         "qa_rows": _all(db.table("demo_qa_durations").select(
             "run_id, step_id, block_robot_id, seconds, closed_by")
             .eq("block_robot_id", from_id)),
-        "runs": {r["id"]: r for r in _all(db.table("demo_runs").select("id, mode, format"))},
+        # "*": exclude_from_priors (019) when present, no error before it is.
+        "runs": {r["id"]: r for r in _all(db.table("demo_runs").select("*"))},
         "target_edges": _all(db.table("demo_robot_topic").select("*").eq("robot_id", to_id)),
         "target_transferred_facts": _all(db.table("demo_topic_facts").select("id")
             .eq("robot_id", to_id).not_.is_("transfer_id", "null")),

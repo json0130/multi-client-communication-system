@@ -103,7 +103,8 @@ def plan_transfer(pair: tuple, twin_map: dict, snap: dict, version: int,
 
     def prior_run(run_id):
         r = runs.get(run_id)
-        return r is not None and r["mode"] in PRIOR_MODES and r.get("format") == "full_tour"
+        return (r is not None and r["mode"] in PRIOR_MODES and r.get("format") == "full_tour"
+                and not r.get("exclude_from_priors"))
 
     facts = [{"robot_id": dst, "topic_id": f["topic_id"], "kind": f["kind"],
               "fact": f["fact"], "verified": f["verified"], "source": f["source"]}
@@ -231,7 +232,7 @@ def _print_plan(p: dict) -> None:
     print(f"  Excluded: {ex['movement_steps']} movement-step rows; {ex['not_its_step']} rows for "
           f"steps {p['to']} does not speak in the current script (old names, one-robot tests); "
           f"{ex['non_prior_runs']} step rows and {ex['qa_non_prior_runs']} Q&A windows from runs "
-          f"not in {list(PRIOR_MODES)} or not full_tour")
+          f"not in {list(PRIOR_MODES)}, not full_tour, or flagged exclude_from_priors")
 
 
 def main() -> int:

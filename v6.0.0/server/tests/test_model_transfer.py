@@ -145,3 +145,12 @@ def test_a_qa_prior_below_the_planners_own_bar_is_not_copied():
     p = _plan(qa_rows=rows)
     assert not any(d["kind"] == "qa" for d in p["duration_priors"])
     assert p["items"]["qa_prior"]["copied"] is False
+
+
+def test_a_run_flagged_exclude_from_priors_is_left_out():
+    runs = _snap()["runs"]
+    runs["r-gz"] = {**runs["r-gz"], "exclude_from_priors": True}
+    p = _plan(runs=runs)
+    step = next(d for d in p["duration_priors"] if d["kind"] == "step")
+    assert step["median_sec"] == 10.0 and step["n"] == 1          # the mock run alone
+    assert p["items"]["excluded"]["non_prior_runs"] == 5
