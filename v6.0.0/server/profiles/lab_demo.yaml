@@ -37,7 +37,7 @@ robots:
   #
   # Set by the lab, 2026-09-10, in the order a rushed visitor should keep
   # them: conversational AI first, human-aware navigation second,
-  # emotion-aware interaction last to be protected. Values are spaced 0.2
+  # co-speech motion (Navel) last to be protected. Values are spaced 0.2
   # apart so a single stated visitor interest (worth ~0.39 in
   # check_cold_start) can still reorder them — a lab priority is the standing
   # default, not an override of what the visitor in the room actually asked
@@ -61,7 +61,7 @@ robots:
     importance: 0.8
 
   - id: navel_01
-    role: "Emotion-aware interaction researcher"
+    role: "Co-speech motion researcher"
     access_level: local
     default_visibility: global
     importance: 0.4

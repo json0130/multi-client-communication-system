@@ -470,6 +470,19 @@ def lookup_subject(robot_id: str) -> str:
         return ""
 
 
+def lookup_facts(robot_id: str) -> list:
+    """The fact lines a robot's scripted project talk is grounded on — the
+    same rows and format Q&A answers use (see WebSocketGateway.grounding_for),
+    so the talk and the answers cannot disagree. [] on any failure."""
+    try:
+        from data.demo_facts_repo import facts_for_robot
+        from decision.grounding import format_facts
+        return format_facts(facts_for_robot(robot_id, limit=12))
+    except Exception as e:
+        print(f"[App] facts lookup failed for {robot_id}: {e}")
+        return []
+
+
 def build_flow_plan(obs) -> Optional[dict]:
     """
     PLAN_REVISE's real implementation — decision.planner fed real data.
@@ -650,6 +663,7 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         subject_lookup=lookup_subject,
         run_sink=record_run,
         run_mode=default_run_mode,
+        facts_lookup=lookup_facts,
     )
     # Unreviewed project facts are usable — that is how they get tested — but
     # they must never be demoed without someone knowing. A robot states them

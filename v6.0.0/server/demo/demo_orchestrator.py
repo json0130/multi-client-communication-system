@@ -188,6 +188,7 @@ class DemoOrchestrator:
         subject_lookup: Optional[Callable[[str], str]] = None,
         run_sink: Optional[Callable[[dict], None]] = None,
         run_mode: Optional[Callable[[str], str]] = None,
+        facts_lookup: Optional[Callable[[str], list]] = None,
     ):
         self._ws     = ws_gateway
         self._script: list[DemoStep] = []
@@ -232,6 +233,12 @@ class DemoOrchestrator:
         self._run_mode = run_mode
         # The active run's demo_runs row, until the run ends.
         self._run_row: Optional[dict] = None
+        # robot_id -> the fact lines it may state (decision.grounding format).
+        # Q&A answers were always grounded; the scripted project talk was not,
+        # so the part of the demo the lab controls most was generated from a
+        # three-sentence persona alone. Injected for the same reason as the
+        # lookups above.
+        self._facts_lookup = facts_lookup
         self._run_id: Optional[str] = None
         self._step_started_at: Optional[float] = None
         self._visitor_profile = None   # decision.visitor_profile.VisitorProfile | None
@@ -1710,7 +1717,8 @@ class DemoOrchestrator:
                            + resuming
                            + self._framing_for(step.robot_id, profile)
                            + (f' The guide handed over to you by saying: "{cue}". '
-                              "Respond to that naturally as you begin." if cue else ""))
+                              "Respond to that naturally as you begin." if cue else "")
+                           + self._project_facts(step))
             logger.info(f"[Demo] Calling generate_demo_step for '{step.step_id}' → {step.robot_id}")
             generated = self._ws.generate_demo_step(step.robot_id, instruction)
             # Compare against INSTRUCTION, not step.text: generate_demo_step's
@@ -1739,6 +1747,25 @@ class DemoOrchestrator:
             "require_ack": step.require_ack,
         })
         logger.info(f"[Demo] Sent '{step.step_id}' to '{step.robot_id}'")
+
+    def _project_facts(self, step: DemoStep) -> str:
+        """Grounding for a PROJECT step's instruction, or "" — best-effort.
+
+        PROJECT only: a greeting or a hand-off has no specifics to get wrong,
+        and the rest of the tour's wording stays exactly as it was.
+        """
+        if step.role != StepRole.PROJECT or self._facts_lookup is None:
+            return ""
+        try:
+            facts = self._facts_lookup(step.robot_id) or []
+        except Exception as e:
+            logger.warning(f"[Demo] facts lookup failed for {step.robot_id}: {e}")
+            return ""
+        if not facts:
+            return ""
+        listed = "\n".join(f"- {f}" for f in facts)
+        return ("\nFacts about your project. Use only the ones that fit this point, "
+                "and state no specifics that are not here:\n" + listed)
 
     def _open_qa_window(self, step: DemoStep):
         """Block in QA_WINDOW state until timeout or manual close."""

@@ -12,6 +12,9 @@ robot for it to lean on.
 
 from __future__ import annotations
 
+import json
+import os
+import re
 import time
 from types import SimpleNamespace
 
@@ -21,7 +24,7 @@ from core.rbac import AccessLevel, RobotIdentity
 from decision import DecisionRecorder, MemoryDecisionSink, is_handoff_cue
 from decision.models import Action
 from decision.policy import Mechanism, PolicyResult
-from demo.demo_orchestrator import DemoOrchestrator, DemoState, StepRole
+from demo.demo_orchestrator import DemoOrchestrator, DemoState, DemoStep, StepRole
 from demo.demo_script import build_script, build_solo_script
 from gateway.websocket_gateway import WebSocketGateway
 
@@ -236,3 +239,73 @@ class TestModeratorStillJudges:
     def test_a_guide_robot_in_the_full_tour_is_still_guarded(self):
         gw = _moderator_gateway(build_script("pepper_01", ["navel_01"]), "pepper_01")
         assert gw.check_qa_auto_close("pepper_01", "Happy to help.") is None
+
+
+# ── Project 56 knowledge ─────────────────────────────────────────────────────
+
+SERVER = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+V6 = os.path.dirname(SERVER)
+
+
+class TestTheTalkIsGrounded:
+
+    def _orch(self, lookup):
+        gw = RecordingGateway()
+        return gw, DemoOrchestrator(gw, facts_lookup=lookup)
+
+    def test_project_points_carry_the_facts(self):
+        gw, orch = self._orch(lambda rid: ["Method B plans one gesture per segment."])
+        project = next(s for s in build_solo_script(NAVEL) if s.role == StepRole.PROJECT)
+        orch._send_step(project)
+        assert "Method B plans one gesture per segment." in gw.instructions[-1]
+
+    def test_other_steps_are_worded_as_before(self):
+        gw, orch = self._orch(lambda rid: ["Method B plans one gesture per segment."])
+        orch._send_step(build_solo_script(NAVEL)[1])   # the greeting
+        assert "Method B" not in gw.instructions[-1]
+
+    def test_a_failed_lookup_never_stops_the_talk(self):
+        def broken(rid):
+            raise RuntimeError("database unreachable")
+        gw, orch = self._orch(broken)
+        project = DemoStep(step_id="p", robot_id=NAVEL, text="Explain.", generate=True,
+                           role=StepRole.PROJECT)
+        orch._send_step(project)
+        assert gw.sent[-1][1]["step_id"] == "p"
+
+
+class TestProject56Migration:
+    """The table's CHECK constraints reject a bad row only when the migration
+    is applied to the live database — too late to find a typo."""
+
+    SQL = open(os.path.join(SERVER, "data", "migrations", "016_navel_project56.sql")).read()
+    FACTS = re.findall(r"\('(topic:[a-z-]+)', '(\w+)',\s*\n\s*'((?:[^']|'')*)'\)", SQL)
+
+    def test_there_are_facts_for_every_new_topic(self):
+        topics = set(re.findall(r"\('(topic:[a-z-]+)',\s+'[a-z ]+',", self.SQL))
+        assert topics and topics <= {t for t, _, _ in self.FACTS}
+
+    def test_every_fact_passes_the_tables_checks(self):
+        allowed = {"method", "model", "dataset", "metric", "hardware",
+                   "limitation", "publication"}
+        for _topic, kind, fact in self.FACTS:
+            assert kind in allowed
+            assert 3 <= len(fact.replace("''", "'")) <= 600
+
+    def test_written_for_the_twin_only(self):
+        # navel_001 gets these through a recorded sim-to-real transfer
+        # (tools/model_transfer.py), never by being written twice.
+        assert self.SQL.count("(VALUES ('navel_01')) AS r(robot_id)") >= 2
+        assert "('navel_001')) AS r(robot_id)" not in self.SQL
+
+
+class TestOnePersona:
+
+    CONFIGS = ("navel_client/client_config.json",
+               "gazebo_client/configs/navel_01_sim.json",
+               "client/test_configs/navel_01.json")
+
+    def test_every_navel_config_describes_project_56_the_same_way(self):
+        roles = {json.load(open(os.path.join(V6, p)))["robot_role"] for p in self.CONFIGS}
+        assert len(roles) == 1
+        assert "Project 56" in roles.pop()

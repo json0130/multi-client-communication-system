@@ -99,45 +99,10 @@ DRAFT = [
      "Structured knowledge the conversational system can retrieve from, "
      "alongside the vector index.", False, ROLE),
 
-    # ══ Navel: emotion-aware interaction ═════════════════════════════════════
-    # The taxonomy and the model ARE in this repository — see the source
-    # notes. They differ from the generic "RetinaFace or MTCNN" answer, so
-    # the repository is used and the discrepancy is flagged to the researcher.
-    ("topic:facial-expression-analysis", "navel_01", "model",
-     "EfficientNet-B0 served as ONNX (the hsemotion backend), with a larger "
-     "B2 variant available; roughly 5 ms per frame on CPU.", True,
-     "verified: modules/face_webcam/emotion_detector.py"),
-    ("topic:facial-expression-analysis", "navel_01", "dataset",
-     "Trained on AffectNet and VGAF. An older in-house EfficientNet-B0 "
-     "trained on HQRAF is kept as a fallback backend.", True,
-     "verified: modules/face_webcam/emotion_detector.py"),
-    ("topic:facial-expression-analysis", "navel_01", "method",
-     "Seven expression classes — angry, disgust, fear, happy, neutral, sad, "
-     "surprise. The 8-class variant maps contempt onto disgust. Face "
-     "detection for the PyTorch backend is a Haar cascade.", True,
-     "verified: modules/face_webcam/emotion_detector.py"),
-    ("topic:facial-expression-analysis", "navel_01", "limitation",
-     "Affected by lighting, camera angle, occlusion, individual differences "
-     "and genuinely ambiguous expressions.", False, RESEARCHER),
-    ("topic:emotion-recognition", "navel_01", "method",
-     "Combines facial cues with conversational context to estimate how a "
-     "visitor is responding, and adapts communication style to match. "
-     "Scores are placed on Russell's (1980) valence-arousal circumplex.",
-     True, "verified: emotion_detector.py _VA_TABLE"),
-    ("topic:emotion-recognition", "navel_01", "limitation",
-     "Emotion recognition is inherently uncertain, and accuracy on real "
-     "visitors differs substantially from controlled datasets because of "
-     "lighting, pose, cultural difference and natural variation in how "
-     "people express themselves.", False, RESEARCHER),
-    ("topic:non-verbal-interaction", "navel_01", "method",
-     "Communication carried by something other than the words themselves.",
-     False, ROLE),
-    ("topic:social-signals", "navel_01", "method",
-     "Cues a person gives off during interaction, used to adapt the robot's "
-     "behaviour.", False, ROLE),
-    ("topic:human-robot-trust", "navel_01", "method",
-     "How a visitor's confidence in the robot develops over an interaction.",
-     False, ROLE),
+    # ══ Navel ══════════════════════════════════════════════════════════════
+    # Its drafted emotion-aware rows described the wrong project. Navel's facts
+    # (Project 56, co-speech motion) are seeded by migration
+    # data/migrations/013_navel_project56.sql, from the researcher's document.
 
     # ══ Unowned topics: background, explicitly nobody's result ═══════════════
     ("topic:speech-recognition", None, "limitation",
