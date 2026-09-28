@@ -235,13 +235,16 @@ class _FakeKGRouter:
 
 
 @pytest.fixture
-def client_routing_to_navel():
+def client_routing_to_navel(monkeypatch):
     """Same wiring as `client`, except the competence graph is confident
     ChatBox's mic-holder (Pepper, in this scenario) is not who should answer —
     Navel should. Regression for a real report: a visitor's technical
     follow-up about ChatBox's own research was answered BY Pepper, in
     Pepper's voice, because Pepper's mic picked up the question — the QA_ROUTE
     decision was computed and logged but nothing ever acted on it."""
+    # These tests are about WHO answers. The hand-off pause before the
+    # target's first sentence is a real sleep, ~5s per test; skip it.
+    monkeypatch.setattr("conversation.turn._speaking_seconds", lambda _t: 0.0)
     registry = FakeRegistry([
         FakeInstance(GUIDE, "Pepper", "Lab guide", AccessLevel.GLOBAL),
         FakeInstance(A, "ChatBox", "RAG research"),
