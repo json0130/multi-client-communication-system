@@ -1,4 +1,4 @@
--- 015_v2_backfill.sql — Lab Demo Schema v2, phase 3 ("backfill").
+-- 018_v2_backfill.sql — Lab Demo Schema v2, phase 3 ("backfill").
 --
 -- Fills the tables and columns 014_v2_add created, from data already logged.
 -- RE-RUNNABLE, and meant to be run again once phase-2 code is merged into the
@@ -13,7 +13,11 @@
 -- Decisions and corrections are LABELLED here, not archived: nothing trains on
 -- them yet, and analyses filter by demo_runs.mode and demo_correction_log.origin.
 --
--- Reversible: 015_v2_backfill_down.sql (clears what this fills).
+-- Modes are set from evidence, never guessed; nothing recorded before this
+-- was live (every robot id is a *_01 simulation twin). See step 3.
+--
+-- Requires 015 (format, mock / sim_unknown, embodiment) and 017.
+-- Reversible: 018_v2_backfill_down.sql (clears what this fills).
 
 BEGIN;
 
@@ -57,9 +61,12 @@ obs AS (      -- the run's last recorded observation
     WHERE observation->>'run_id' IS NOT NULL
     ORDER BY observation->>'run_id', decided_at DESC
 )
+-- New rows start as 'sim_unknown' (mode has no default): step 3 below labels
+-- them from evidence, and only ever rows still 'sim_unknown', so a mode the
+-- server recorded itself is never overwritten.
 INSERT INTO public.demo_runs AS r
-       (id, scenario_id, started_at, ended_at, time_budget_sec, visitor_style, visitor_interest)
-SELECT w.run_id, o.scenario_id, w.s, w.e, o.time_budget_sec, o.visitor_style, o.visitor_interest
+       (id, mode, scenario_id, started_at, ended_at, time_budget_sec, visitor_style, visitor_interest)
+SELECT w.run_id, 'sim_unknown', o.scenario_id, w.s, w.e, o.time_budget_sec, o.visitor_style, o.visitor_interest
 FROM win w LEFT JOIN obs o USING (run_id)
 ON CONFLICT (id) DO UPDATE SET
     started_at       = LEAST(r.started_at, EXCLUDED.started_at),
@@ -68,17 +75,6 @@ ON CONFLICT (id) DO UPDATE SET
     time_budget_sec  = COALESCE(r.time_budget_sec, EXCLUDED.time_budget_sec),
     visitor_style    = COALESCE(r.visitor_style, EXCLUDED.visitor_style),
     visitor_interest = COALESCE(r.visitor_interest, EXCLUDED.visitor_interest);
-
--- Modes known from outside the data. Everything else keeps the column default
--- ('live') or whatever phase-2 code recorded.
-UPDATE public.demo_runs SET mode = 'scripted_visitor'
- WHERE id IN ('run-1789100159', 'run-1789100793', 'run-1789101459')   -- 11 Sep, visitor_sim.py
-   AND mode = 'live';
-UPDATE public.demo_runs
-   SET mode  = 'gazebo',
-       notes = COALESCE(notes, 'ICRA video; visitor and Move On scripted by tools/video_scenarios.py')
- WHERE id IN ('run-1790139360', 'run-1790140549')                     -- 23 Sep
-   AND mode = 'live';
 
 -- ── 3. Sessions ──────────────────────────────────────────────────────────────
 -- Every session id any log mentions: '{client_id}:{epoch}', and 'sim-{name}'
@@ -123,6 +119,112 @@ ON CONFLICT (id) DO UPDATE SET
 
 UPDATE public.chat_logs SET session_id = 'legacy-user-' || user_id
  WHERE session_id IS NULL AND user_id IS NOT NULL;
+
+-- ── 3b. Mode and format, from evidence ───────────────────────────────────────
+-- Only runs still 'sim_unknown' (i.e. not labelled by the server). In order:
+--   scripted_visitor  the three 11 Sep runs driven by visitor_sim.py
+--   headless_sim      decisions of the run came from tools/demo_sim.py sessions
+--   gazebo            movement steps took real time (median >= 2 s): only
+--                     Gazebo moves a robot
+--   mock              movement steps ACKed instantly, or the run is from an
+--                     earlier day than the first run with movement steps (the
+--                     script had none before the Gazebo work; mock clients from
+--                     client/test_configs)
+--   gazebo            no movement rows, but it ran on a robot connection whose
+--                     runs with movement timing all moved in real time (evidence
+--                     is only ever a run's own timing, so re-running can't chain)
+--   live              every robot that spoke is physical (robots.embodiment,
+--                     mirrored from the profile at boot) — none so far
+-- Anything left stays 'sim_unknown' (and is excluded from duration priors).
+UPDATE public.demo_runs SET mode = 'scripted_visitor'
+ WHERE mode = 'sim_unknown'
+   AND id IN ('run-1789100159', 'run-1789100793', 'run-1789101459');
+
+UPDATE public.demo_runs r SET mode = 'headless_sim'
+ WHERE r.mode = 'sim_unknown'
+   AND EXISTS (SELECT 1 FROM public.demo_decision_log d
+               WHERE COALESCE(d.run_id, d.observation->>'run_id') = r.id
+                 AND d.session_id LIKE 'sim-%');
+
+WITH nav AS (
+    SELECT run_id,
+           percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS med
+    FROM public.demo_step_durations
+    WHERE step_id LIKE 'navigate\_%' OR step_id LIKE 'face\_%' OR step_id = 'approach_visitors'
+    GROUP BY run_id
+)
+UPDATE public.demo_runs r
+   SET mode = CASE WHEN nav.med >= 2 THEN 'gazebo' ELSE 'mock' END
+  FROM nav
+ WHERE r.mode = 'sim_unknown' AND nav.run_id = r.id;
+
+UPDATE public.demo_runs r SET mode = 'mock'
+ WHERE r.mode = 'sim_unknown'
+   AND NOT EXISTS (SELECT 1 FROM public.demo_step_durations d
+                   WHERE d.run_id = r.id
+                     AND (d.step_id LIKE 'navigate\_%' OR d.step_id LIKE 'face\_%'
+                          OR d.step_id = 'approach_visitors'))
+   AND (r.started_at AT TIME ZONE 'Pacific/Auckland')::date
+       < (SELECT (min(r2.started_at) AT TIME ZONE 'Pacific/Auckland')::date
+          FROM public.demo_runs r2
+                       WHERE EXISTS (SELECT 1 FROM public.demo_step_durations d2
+                                     WHERE d2.run_id = r2.id
+                                       AND (d2.step_id LIKE 'navigate\_%' OR d2.step_id LIKE 'face\_%'
+                                            OR d2.step_id = 'approach_visitors')));
+
+WITH nav AS (          -- each run's own movement timing: the only evidence used here
+    SELECT run_id, percentile_cont(0.5) WITHIN GROUP (ORDER BY seconds) AS med
+    FROM public.demo_step_durations
+    WHERE step_id LIKE 'navigate\_%' OR step_id LIKE 'face\_%' OR step_id = 'approach_visitors'
+    GROUP BY run_id
+),
+conn AS (               -- runs whose start falls inside a robot connection
+    SELECT r.id AS run_id, s.id AS session_id
+    FROM public.demo_runs r
+    JOIN public.sessions s
+      ON s.id NOT LIKE 'legacy-user-%'
+     AND r.started_at BETWEEN s.started_at - interval '5 minutes'
+                          AND s.ended_at   + interval '5 minutes'
+),
+per_conn AS (           -- per connection: did every run with timing evidence move?
+    SELECT c.session_id, bool_and(n.med >= 2) AS all_gazebo
+    FROM conn c JOIN nav n ON n.run_id = c.run_id
+    GROUP BY c.session_id
+)
+UPDATE public.demo_runs r SET mode = 'gazebo'
+ WHERE r.mode = 'sim_unknown'
+   AND NOT EXISTS (SELECT 1 FROM nav WHERE nav.run_id = r.id)
+   AND EXISTS     (SELECT 1 FROM conn c JOIN per_conn p USING (session_id)
+                   WHERE c.run_id = r.id AND p.all_gazebo)
+   AND NOT EXISTS (SELECT 1 FROM conn c JOIN per_conn p USING (session_id)
+                   WHERE c.run_id = r.id AND NOT p.all_gazebo);
+
+UPDATE public.demo_runs r SET mode = 'live'
+ WHERE r.mode = 'sim_unknown'
+   AND EXISTS (SELECT 1 FROM public.demo_step_durations d WHERE d.run_id = r.id)
+   AND NOT EXISTS (SELECT 1 FROM public.demo_step_durations d
+                   LEFT JOIN public.robots rb ON rb.client_id = d.robot_id
+                   WHERE d.run_id = r.id AND d.robot_id IS NOT NULL
+                     AND COALESCE(rb.embodiment, '') <> 'physical');
+
+UPDATE public.demo_runs
+   SET notes = COALESCE(notes, 'ICRA video; visitor and Move On scripted by tools/video_scenarios.py')
+ WHERE id IN ('run-1790139360', 'run-1790140549');
+
+-- Solo: one robot spoke, and every step it spoke outside the closing belongs
+-- to its own block. A full tour always opens with block-less guide steps.
+WITH one AS (
+    SELECT run_id, min(robot_id) AS robot
+    FROM public.demo_step_durations
+    WHERE robot_id IS NOT NULL
+    GROUP BY run_id HAVING count(DISTINCT robot_id) = 1
+)
+UPDATE public.demo_runs r SET format = 'solo'
+  FROM one
+ WHERE r.id = one.run_id AND r.format = 'full_tour'
+   AND NOT EXISTS (SELECT 1 FROM public.demo_step_durations d
+                   WHERE d.run_id = r.id AND d.role <> 'closing'
+                     AND d.block_robot_id IS DISTINCT FROM one.robot);
 
 -- ── 4. run_id on decisions ───────────────────────────────────────────────────
 UPDATE public.demo_decision_log
@@ -178,5 +280,10 @@ UPDATE public.demo_correction_log SET origin = 'scripted'       -- tools/video_s
 -- They keep origin NULL and are attributed to nobody in particular.
 UPDATE public.demo_correction_log SET supervisor_id = 'legacy_unattributed'
  WHERE origin IS NULL AND supervisor_id IS NULL;
+
+-- Next/Skip pressed while a solo robot waited for its human guide was recorded
+-- as a QA_ADVANCE correction; it corrects the hand-off, not a Q&A window.
+UPDATE public.demo_correction_log SET decision_point = 'solo_cue'
+ WHERE step_id = 'wait_for_handoff' AND decision_point = 'qa_advance';
 
 COMMIT;
