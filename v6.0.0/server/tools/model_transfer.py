@@ -9,6 +9,9 @@ as a numbered, recorded version (migration 017).
     python3 tools/model_transfer.py --pair navel_01:navel_001 \\
         --pair pepper_01:pepper_001 --pair chatbox_01:chatbox_jetson_001  # dry run
     python3 tools/model_transfer.py --pair navel_01:navel_001 --apply --notes "..."
+    # rename to a held-back twin's physical id without transferring it:
+    python3 tools/model_transfer.py --pair pepper_01:pepper_001 \
+        --twin chatbox_01:chatbox_jetson_001
 
 A dry run (the default) reads the live database and prints exactly what would be
 copied; nothing is written. --apply writes it, after the operator has approved
@@ -28,8 +31,8 @@ What is copied, per pair:
 Log rows (decisions, corrections, durations, chat) are never copied.
 
 Step ids that name a simulation twin are renamed to its physical twin using
-EVERY --pair given (introduce_navel_01, spoken by the guide, becomes
-introduce_navel_001).
+EVERY --pair and --twin given (introduce_navel_01, spoken by the guide, becomes
+introduce_navel_001). --twin only renames; nothing of that robot is copied.
 """
 
 from __future__ import annotations
@@ -235,7 +238,11 @@ def _print_plan(p: dict) -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("--pair", action="append", required=True, metavar="SIM:PHYSICAL")
+    ap.add_argument("--pair", action="append", required=True, metavar="SIM:PHYSICAL",
+                    help="transfer this twin")
+    ap.add_argument("--twin", action="append", default=[], metavar="SIM:PHYSICAL",
+                    help="name a twin for step-id renaming and the lineup only; nothing "
+                         "of it is transferred (e.g. a pair held back for later)")
     ap.add_argument("--apply", action="store_true",
                     help="write the transfer (default is a dry run)")
     ap.add_argument("--dry-run", action="store_true", help="the default; nothing is written")
@@ -244,12 +251,15 @@ def main() -> int:
     if args.apply and args.dry_run:
         ap.error("--apply and --dry-run are exclusive")
 
-    pairs = []
-    for p in args.pair:
-        if p.count(":") != 1 or not all(p.split(":")):
-            ap.error(f"--pair must be SIM:PHYSICAL, got {p!r}")
-        pairs.append(tuple(p.split(":")))
-    twin_map = dict(pairs)
+    def parse(values, flag):
+        out = []
+        for p in values:
+            if p.count(":") != 1 or not all(p.split(":")):
+                ap.error(f"{flag} must be SIM:PHYSICAL, got {p!r}")
+            out.append(tuple(p.split(":")))
+        return out
+    pairs = parse(args.pair, "--pair")
+    twin_map = {**dict(parse(args.twin, "--twin")), **dict(pairs)}
 
     from data import model_transfer_repo as repo
 
