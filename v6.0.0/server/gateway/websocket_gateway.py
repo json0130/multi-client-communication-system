@@ -346,7 +346,13 @@ class WebSocketGateway:
         # moment GENERATION finished, with the whole utterance still ahead of
         # it. This is the one place that models what is still being said.
         self._speech_lock = threading.Lock()
-        self._quiet_at = 0.0
+        # Per robot, so a robot that REPORTS it has gone quiet (tts_state)
+        # can clear its own estimate without clearing anyone else's.
+        self._quiet_at: dict = {}
+        # client_id -> True/False, for clients that report their TTS state.
+        # A report beats the word-count estimate; silent clients keep the
+        # estimate, so nothing changes for them.
+        self._tts_speaking: dict = {}
         # Whether this window has already invited further questions.
         self._asked_more_questions = False
 
@@ -354,6 +360,8 @@ class WebSocketGateway:
         # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
         self._auto_close_timer = None
         self._auto_close_lock = threading.Lock()
+        # (fn, silence, deadline, fire_at) of a quiet-aware pending action.
+        self._pending_quiet = None
 
         # Per-decision scratch space. Thread-local because every robot's
         # connection dispatches messages on its own reader thread, so two
@@ -817,7 +825,7 @@ class WebSocketGateway:
         if event == "tts_stop":
             # Speech was cut off mid-utterance; whatever was queued is gone.
             with self._speech_lock:
-                self._quiet_at = 0.0
+                self._quiet_at.clear()
             return
         if event == "chat_sentence":
             text = data.get("text", "")
@@ -832,7 +840,34 @@ class WebSocketGateway:
         if seconds <= 0:
             return
         with self._speech_lock:
-            self._quiet_at = max(self._quiet_at, time.time()) + seconds
+            self._quiet_at[client_id] = max(self._quiet_at.get(client_id, 0.0),
+                                            time.time()) + seconds
+
+    SPEAKING_FLOOR_SEC = 1.0
+    """What seconds_until_quiet reports for a robot that says it is still
+    speaking after its estimate has run out: enough to keep every wait
+    polling, and the robot's own idle report ends it."""
+
+    def note_tts_state(self, client_id: str, speaking: bool) -> None:
+        """A robot reported that its TTS started or finished.
+
+        Idle is the useful half: the estimate is a word count, and a robot
+        that finishes early should not leave the tour waiting out the rest
+        of it. A pending quiet-aware Q&A action is pulled forward to its
+        silence from now.
+        """
+        with self._speech_lock:
+            self._tts_speaking[client_id] = speaking
+            if not speaking:
+                self._quiet_at.pop(client_id, None)
+        if not speaking and self.seconds_until_quiet() == 0.0:
+            with self._auto_close_lock:
+                pending = self._pending_quiet
+            if pending is not None:
+                fn, silence, deadline, fire_at = pending
+                if time.time() + silence < fire_at:
+                    self._schedule_qa_action(silence, fn, silence=silence,
+                                             _deadline=deadline)
 
     def seconds_until_quiet(self) -> float:
         """How much longer the robots are expected to keep talking, in seconds.
@@ -840,19 +875,24 @@ class WebSocketGateway:
         0.0 when nothing is in flight, which is the common case and makes
         this safe to add to any delay unconditionally.
         """
+        now = time.time()
         with self._speech_lock:
-            remaining = self._quiet_at - time.time()
+            remaining = max([q - now for q in self._quiet_at.values()] or [0.0])
+            if any(self._tts_speaking.values()):
+                remaining = max(remaining, self.SPEAKING_FLOOR_SEC)
         return max(0.0, min(self.MAX_QUIET_WAIT_SEC, remaining))
 
     def cancel_qa_auto_close(self, why: str = "") -> None:
         """Stop a pending auto-close. Idempotent."""
         with self._auto_close_lock:
             timer, self._auto_close_timer = self._auto_close_timer, None
+            self._pending_quiet = None
         if timer is not None:
             timer.cancel()
             logger.info(f"[WS Gateway] Auto-close cancelled{(' — ' + why) if why else ''}.")
 
-    def _schedule_qa_auto_close(self, delay: float) -> None:
+    def _schedule_qa_auto_close(self, delay: float,
+                                silence: Optional[float] = None) -> None:
         """
         Close the Q&A window in `delay` seconds unless something cancels it.
 
@@ -877,9 +917,10 @@ class WebSocketGateway:
                         f"questions and {delay:.0f}s passed in silence.")
             orch.qa_end(source="policy")
 
-        self._schedule_qa_action(delay, fire)
+        self._schedule_qa_action(delay, fire, silence=silence)
 
-    def _schedule_qa_action(self, delay: float, fn) -> None:
+    def _schedule_qa_action(self, delay: float, fn, silence: Optional[float] = None,
+                            _deadline: Optional[float] = None) -> None:
         """Run `fn` in `delay` seconds unless the window changes first.
 
         One timer slot, shared by every deferred reaction to a Q&A turn, so
@@ -887,18 +928,36 @@ class WebSocketGateway:
         must call off a queued auto-close and a queued wrap-up alike. Two
         independent timers would have let a stale wrap-up fire on top of the
         answer to the question that made it stale.
+
+        With `silence`, the action means "after `silence` seconds of quiet":
+        `delay` is the estimate of when that is, and if a robot is still
+        speaking when it fires, it re-arms for the rest of the speech plus
+        the silence, up to MAX_QUIET_WAIT_SEC past the first estimate. An
+        idle report can pull it forward (note_tts_state).
         """
         self.cancel_qa_auto_close()
+        deadline = _deadline or time.time() + delay + self.MAX_QUIET_WAIT_SEC
 
         def run():
             with self._auto_close_lock:
+                if self._auto_close_timer is not timer:
+                    return          # superseded while this one was firing
                 self._auto_close_timer = None
+                self._pending_quiet = None
+            if silence is not None:
+                still = self.seconds_until_quiet()
+                if still > 0 and time.time() < deadline:
+                    self._schedule_qa_action(still + silence, fn, silence=silence,
+                                             _deadline=deadline)
+                    return
             fn()
 
         timer = threading.Timer(delay, run)
         timer.daemon = True
         with self._auto_close_lock:
             self._auto_close_timer = timer
+            self._pending_quiet = (None if silence is None
+                                   else (fn, silence, deadline, time.time() + delay))
         timer.start()
 
     def claim_more_questions_prompt(self) -> bool:
@@ -1087,7 +1146,8 @@ class WebSocketGateway:
             # pause mean what it says: three seconds of silence AFTER the
             # robot finishes, not three seconds from the middle of a sentence.
             self._schedule_qa_auto_close(
-                QA_AUTO_CLOSE_SEC + self.seconds_until_quiet())
+                QA_AUTO_CLOSE_SEC + self.seconds_until_quiet(),
+                silence=QA_AUTO_CLOSE_SEC)
             return "auto_close"
 
         if action.kind is ActionKind.GUIDE_INTERJECT:
@@ -1121,7 +1181,8 @@ class WebSocketGateway:
             # Plus a pause, so a visitor has time to ask a follow-up first;
             # speaking cancels it (check_qa_advance_from_user).
             self._schedule_qa_action(
-                self.seconds_until_quiet() + QA_WRAP_UP_SILENCE_SEC, _say_wrap_up)
+                self.seconds_until_quiet() + QA_WRAP_UP_SILENCE_SEC, _say_wrap_up,
+                silence=QA_WRAP_UP_SILENCE_SEC)
             return "wrap_up"
 
         return None
@@ -1640,6 +1701,11 @@ class WebSocketGateway:
                     print(f"[WS Gateway] ACK from {client_id}: step_id='{step_id}' "
                           "(no orchestrator running)")
 
+            elif msg_type == "tts_state":
+                # The robot's TTS started or finished — the one signal of
+                # "done speaking" the server gets for streamed sentences.
+                self.note_tts_state(client_id, bool(data.get("speaking")))
+
             elif msg_type == "tts_interrupted":
                 # A barge-in cut a demo step off mid-speech — the client reports
                 # back whatever it never got to say, so it can be resumed
@@ -1662,6 +1728,8 @@ class WebSocketGateway:
     def _on_robot_close(self, client_id: str):
         """Called when a robot's connection drops unexpectedly."""
         print(f"[WS Gateway] {client_id} connection dropped.")
+        with self._speech_lock:
+            self._tts_speaking.pop(client_id, None)   # a gone robot isn't talking
         self._registry.disconnect(client_id)
         with self._lock:
             self._connections.pop(client_id, None)

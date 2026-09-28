@@ -107,6 +107,7 @@ class NavelTTSOutputModule(OutputModule):
 
             if self.client:
                 self.client.is_speaking.set()
+            self.report_speaking(True)
 
             # Estimate how long the robot will speak (robot.say() is non-blocking)
             word_count = len(text.split())
@@ -127,6 +128,10 @@ class NavelTTSOutputModule(OutputModule):
                         callback()
                     except Exception as e:
                         logger.error(f"[NavelTTS] Callback error: {e}")
+                if self._text_queue.empty():
+                    # Still a word-count estimate (say() doesn't block), but
+                    # made here it covers queued speech the server can't see.
+                    self.report_speaking(False)
 
     def update_voice_config(self, voice_config: dict):
         """Apply a persona_update voice config (volume / pitch / speed / language)."""

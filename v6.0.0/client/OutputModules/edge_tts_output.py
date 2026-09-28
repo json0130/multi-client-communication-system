@@ -55,9 +55,15 @@ class EdgeTTSOutputModule(OutputModule):
         # `audio_cmd`) in that robot's client config.
         self._audio_cmd = self.config.get('audio_cmd') or self._default_audio_cmd()
 
+        # Items are (text, callback, jobs): `jobs` is [(sentence, Future)],
+        # synthesis started the moment the text arrived. Streamed answers come
+        # one sentence per item, so synthesising only when the worker reached
+        # an item left a gap of one full TTS round-trip between sentences.
         self.tts_queue  = queue.Queue()
         self.tts_thread = None
         self.stop_event = threading.Event()
+        self._pool = concurrent.futures.ThreadPoolExecutor(
+            max_workers=4, thread_name_prefix="tts-synth")
 
         self._interrupt_event = threading.Event()
         self._aplay_proc: Optional[subprocess.Popen] = None
@@ -97,6 +103,7 @@ class EdgeTTSOutputModule(OutputModule):
             self.tts_queue.put(None)
             if self.tts_thread:
                 self.tts_thread.join(timeout=2)
+            self._pool.shutdown(wait=False, cancel_futures=True)
 
     def _default_audio_cmd(self) -> list:
         """How to play a wav, preferring whatever follows the system's own
@@ -127,7 +134,7 @@ class EdgeTTSOutputModule(OutputModule):
             text = data.get('text', '') if isinstance(data, dict) else str(data)
             text = self._prepare_text(text)
             if text and len(text.strip()) > 2:
-                self.tts_queue.put((text, None))
+                self.tts_queue.put((text, None, self._synthesise(text)))
                 return True
             return False
         except Exception as e:
@@ -145,7 +152,7 @@ class EdgeTTSOutputModule(OutputModule):
             return False
         text = self._prepare_text(text)
         if text and len(text.strip()) > 2:
-            self.tts_queue.put((text, callback))
+            self.tts_queue.put((text, callback, self._synthesise(text)))
             return True
         # Nothing to speak — fire callback right away
         if callback:
@@ -169,8 +176,10 @@ class EdgeTTSOutputModule(OutputModule):
         # Don't kill aplay — let the current sentence finish naturally, matching Navel behaviour.
         while True:
             try:
-                self.tts_queue.get_nowait()
+                item = self.tts_queue.get_nowait()
                 self.tts_queue.task_done()
+                if item is not None:
+                    self._discard(item[2])
             except queue.Empty:
                 break
         return remainder
@@ -185,6 +194,8 @@ class EdgeTTSOutputModule(OutputModule):
                 self.tts_queue.task_done()
                 if isinstance(item, tuple) and item[1] is not None:
                     keep.append(item)
+                elif item is not None:
+                    self._discard(item[2])
             except queue.Empty:
                 break
         for item in keep:
@@ -235,10 +246,10 @@ class EdgeTTSOutputModule(OutputModule):
             except queue.Empty:
                 continue
 
-            # Items are always (text, callback) tuples
-            text, callback = item if isinstance(item, tuple) else (item, None)
+            text, callback, jobs = item
+            self.report_speaking(True)
             try:
-                self._speak_text(text, has_callback=callback is not None)
+                self._speak_text(jobs, has_callback=callback is not None)
             except Exception as e:
                 logger.error(f"[TTS] Playback error: {e}")
             finally:
@@ -249,13 +260,33 @@ class EdgeTTSOutputModule(OutputModule):
                         callback()
                     except Exception as e:
                         logger.error(f"[TTS] Callback error: {e}")
+                if self.tts_queue.empty():
+                    self.report_speaking(False)
 
-    def _speak_text(self, text: str, has_callback: bool = False):
-        self._interrupt_event.clear()
+    def _synthesise(self, text: str) -> list:
+        """Start synthesising every sentence of `text` now; [(sentence, Future)]."""
         with self._voice_lock:
             language = self._language
-
         sentences = [s.strip() for s in re.split(r'(?<=[.!?])\s+', text.strip()) if s.strip()]
+        return [(s, self._pool.submit(self._generate_audio, s, language)) for s in sentences]
+
+    def _discard(self, jobs: list):
+        """Drop synthesis that will never be played, deleting whatever it made."""
+        def cleanup(fut):
+            if not fut.cancelled():
+                for f in fut.result():
+                    if f and os.path.exists(f):
+                        try:
+                            os.unlink(f)
+                        except Exception:
+                            pass
+        for _sentence, fut in jobs:
+            if not fut.cancel():
+                fut.add_done_callback(cleanup)
+
+    def _speak_text(self, jobs: list, has_callback: bool = False):
+        self._interrupt_event.clear()
+        sentences = [s for s, _ in jobs]
         if not sentences:
             return
 
@@ -271,21 +302,19 @@ class EdgeTTSOutputModule(OutputModule):
             if hasattr(self.client, 'tts_started_event'):
                 self.client.tts_started_event.set()
 
-        audio_paths = []
+        played = 0
         try:
-            # Generate all sentence audio files in parallel — cuts gTTS overhead from N×2s to ~2s
-            max_workers = min(len(sentences), 4)
-            with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = [pool.submit(self._generate_audio, s, language) for s in sentences]
-            audio_paths = [f.result() for f in futures]
-
-            for i, (sentence, (mp3, wav)) in enumerate(zip(sentences, audio_paths)):
+            # Each sentence plays as soon as ITS audio is ready; synthesis of
+            # the rest (and of anything queued behind) carries on meanwhile.
+            # This used to wait for every sentence before playing the first.
+            for i, (sentence, fut) in enumerate(jobs):
                 if self._interrupt_event.is_set():
                     break
+                mp3, wav = fut.result()
                 with self._progress_lock:
                     self._current_idx = i
                 self._play_audio(sentence, mp3, wav)
-                audio_paths[i] = (None, None)  # consumed by _play_audio
+                played = i + 1
                 if not self._interrupt_event.is_set() and i < len(sentences) - 1:
                     if self.client and hasattr(self.client, 'is_speaking'):
                         self.client.is_speaking.clear()
@@ -300,18 +329,10 @@ class EdgeTTSOutputModule(OutputModule):
                 self._current_sentences = []
                 self._current_idx = -1
                 self._current_has_callback = False
-            for mp3, wav in audio_paths:
-                for f in [mp3, wav]:
-                    if f and os.path.exists(f):
-                        try:
-                            os.unlink(f)
-                        except Exception:
-                            pass
+            self._discard(jobs[played:])
 
     def _generate_audio(self, text: str, language: str) -> tuple:
         """Generate mp3+wav for one sentence. Returns (mp3, wav) paths or (None, None) on failure."""
-        if self._interrupt_event.is_set():
-            return None, None
         tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
         tmp_wav = tempfile.NamedTemporaryFile(suffix='.wav', delete=False).name
         try:

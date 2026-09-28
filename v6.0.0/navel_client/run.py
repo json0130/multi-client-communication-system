@@ -28,10 +28,18 @@ import time
 import logging
 from typing import Optional
 
-# Self-contained: import the local client.py + modules bundled in this folder
-# (this folder is deployed standalone to the Navel robot — no ../client dependency).
+# The shared robot client (v6.0.0/client) provides BasicClient, the server
+# protocol and the console output. It used to be copied into this folder, and
+# the copy fell behind: no nav ACK, no resumable interrupts, no tts_state, no
+# API token. Deploy it NEXT TO this folder on the robot (scripts/client beside
+# scripts/navel_client_Lab-Demo), or point ROBOT_CLIENT_DIR at it.
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, _HERE)
+_CLIENT = os.environ.get("ROBOT_CLIENT_DIR") or os.path.join(_HERE, "..", "client")
+if not os.path.isfile(os.path.join(_CLIENT, "client.py")):
+    sys.exit(f"Shared robot client not found at {os.path.abspath(_CLIENT)}. Copy "
+             f"v6.0.0/client there, or set ROBOT_CLIENT_DIR to where it is.")
+sys.path.insert(0, _CLIENT)
+sys.path.insert(0, _HERE)       # this folder first: its own voice input and TTS
 
 from client import BasicClient
 

@@ -21,7 +21,8 @@ env vars, HTTP API, profile format); this file only covers what isn't in there.
 | `server/decision/` | flow planner, grounding, KG, presence, visitor profile, style fit |
 | `server/demo/` | lab demo orchestrator + script |
 | `server/tools/` | `check_*.py` layer checkpoints, eval/harness/stats scripts |
-| `client/`, `*_client/` | per-robot clients; each runs a WebSocket server locally |
+| `client/` | the shared robot client: `BasicClient` (WebSocket server the server dials, protocol), voice input, TTS, console/Arduino output |
+| `*_client/` | per-robot entry script + config, plus only what is robot-specific (Navel SDK TTS/mic, Pepper NAOqi bridge, Gazebo bridge). They import `../client` (or `ROBOT_CLIENT_DIR`), so deploy `client/` beside them |
 | `gazebo/`, `gazebo_client/` | simulated lab world + bridge (current branch) |
 
 ## Commands
@@ -32,6 +33,7 @@ python3 app.py                                    # from v6.0.0/server
 ```
 
 - Run pytest **from `v6.0.0/server`** — `pytest.ini` scopes collection there on purpose.
+  The shared robot client has its own few tests: `cd v6.0.0/client && python3 -m pytest test_*.py`.
 - The suite is hermetic: no network, DB, Ollama or `.env`. A guard fixture fails any
   test that reaches a real Supabase client; opt out with `@pytest.mark.allow_db` only
   if there's no other way.

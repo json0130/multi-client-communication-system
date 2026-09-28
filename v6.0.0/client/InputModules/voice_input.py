@@ -33,7 +33,7 @@ class VoiceInputModule(InputModule):
         self.target_sample_rate = 16000 
         self.native_sample_rate = 48000 
         self.channels = 1
-        self.audio_format = pyaudio.paInt16
+        self.audio_format = pyaudio.paInt16 if PYAUDIO_AVAILABLE else None
         
         self.chunk_duration = 0.08 
         self.native_chunk_size = int(self.native_sample_rate * self.chunk_duration)

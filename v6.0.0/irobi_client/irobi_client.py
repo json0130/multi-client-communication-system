@@ -18,11 +18,10 @@ import re
 import logging
 
 # ── Path setup ────────────────────────────────────────────────────────────────
-# Insert _HERE first so local InputModules/ and OutputModules/ shadow the ones
-# in ../client. Then add ../client so BasicClient (client.py) is findable.
+# Everything comes from the shared robot client (v6.0.0/client); iRobi's own
+# copies of the modules were older versions of the same code.
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(_HERE, '..', 'client'))
-sys.path.insert(0, _HERE)   # takes priority — local modules shadow client/
 
 from client import BasicClient                              # noqa: E402
 from InputModules.voice_input import VoiceInputModule      # noqa: E402
