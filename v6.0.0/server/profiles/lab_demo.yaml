@@ -67,6 +67,7 @@ robots:
     importance: 0.4
 
   - id: silbot_01
+    embodiment: sim          # no physical Silbot in the lineup yet
     role: "Human-aware navigation researcher"
     access_level: local
     default_visibility: global
