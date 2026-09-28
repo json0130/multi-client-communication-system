@@ -459,13 +459,18 @@ class WebSocketGateway:
         """
         try:
             status = self._demo_orchestrator.get_status() if self._demo_orchestrator else {}
+            # The active run's supervisor, so every correction names who
+            # was supervising — even with the guide disconnected.
+            ctx = {"supervisor_id": status["supervisor_id"]} \
+                if status.get("supervisor_id") else {}
             steps = status.get("steps") or []
             guide_id = steps[0].get("robot_id") if steps else None
             instance = self._registry.get(guide_id) if guide_id else None
             if instance is None:
-                return {}
+                return ctx
             identity = instance.identity
             return {
+                **ctx,
                 "scenario_id": identity.scenario_id,
                 "session_id": identity.session_id,
             }

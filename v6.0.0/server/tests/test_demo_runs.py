@@ -258,3 +258,62 @@ class TestDefaultMode:
         assert app.default_run_mode(["pepper_001", "navel_001"]) == "live"
         assert app.default_run_mode(["pepper_001", "navel_01"]) == "mock"   # one twin: not live
         assert app.default_run_mode([]) == "mock"
+
+
+# ── Supervisor ────────────────────────────────────────────────────────────────
+
+class TestSupervisor:
+    def test_a_known_supervisor_is_passed_to_the_run(self, client, monkeypatch):
+        from data import supervisor_repo
+        monkeypatch.setattr(supervisor_repo, "supervisor_exists", lambda sid: sid == "jay")
+        assert client.post("/demo/start", json={"supervisor_id": "jay"}).status_code == 200
+        assert client.orch.calls[0][1]["supervisor_id"] == "jay"
+
+    def test_an_unknown_supervisor_is_refused(self, client, monkeypatch):
+        from data import supervisor_repo
+        monkeypatch.setattr(supervisor_repo, "supervisor_exists", lambda sid: False)
+        assert client.post("/demo/start", json={"supervisor_id": "who"}).status_code == 400
+        assert client.orch.calls == []
+
+    def test_an_unreadable_table_does_not_block_the_tour(self, client, monkeypatch):
+        from data import supervisor_repo
+        monkeypatch.setattr(supervisor_repo, "supervisor_exists", lambda sid: None)
+        assert client.post("/demo/start", json={"supervisor_id": "jay"}).status_code == 200
+
+    def test_none_named_is_none(self, client):
+        client.post("/demo/start", json={})
+        assert client.orch.calls[0][1]["supervisor_id"] is None
+
+    def test_the_list_route(self, client, monkeypatch):
+        from data import supervisor_repo
+        monkeypatch.setattr(supervisor_repo, "list_supervisors",
+                            lambda: [{"id": "jay", "name": "Jay"}])
+        assert client.get("/supervisors").get_json() == \
+            {"supervisors": [{"id": "jay", "name": "Jay"}]}
+
+    def test_the_repo_degrades_to_empty(self, monkeypatch):
+        from data import supervisor_repo
+        monkeypatch.setattr(supervisor_repo, "get_client", lambda: 1 / 0)
+        assert supervisor_repo.list_supervisors() == []
+        assert supervisor_repo.supervisor_exists("jay") is None
+
+    def test_every_correction_in_the_run_names_the_supervisor(self, runs):
+        from gateway.websocket_gateway import WebSocketGateway
+        o, _, sink = runs
+
+        class NoRobots:
+            def get(self, cid):
+                return None
+
+            def get_all(self, exclude_id=None):
+                return []
+
+        gw = WebSocketGateway(NoRobots(), recorder=o._recorder)
+        gw.set_demo_orchestrator(o)
+        o._session_context = gw.session_context
+        o.start(robot_ids=[GUIDE, A], supervisor_id="jay")
+        assert gw.session_context() == {"supervisor_id": "jay"}
+        o.manual_next(source="operator")
+        assert sink.corrections[0].supervisor_id == "jay"
+        o.stop()
+        assert gw.session_context() == {}

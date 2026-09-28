@@ -4,13 +4,15 @@ gateway/demo_gateway.py
 HTTP endpoints for controlling the CARES lab demo state machine.
 
 Endpoints:
-    POST /demo/start    — Load script and start from step 0 (optional time_budget_sec, mode)
+    POST /demo/start    — Load script and start from step 0 (optional time_budget_sec,
+                          mode, supervisor_id)
     POST /demo/stop     — Stop and reset to IDLE
     POST /demo/pause    — Pause at current step
     POST /demo/resume   — Resume from current step
     POST /demo/next     — Manually advance (skips ACK wait — use to recover from stuck step)
     POST /demo/revise   — Change the remaining script (skip / reorder / compress / …)
     GET  /demo/status   — Current state, step info, progress, run clock
+    GET  /supervisors   — Who can supervise a run (for the start dialog)
 
 Every control route passes source="operator". That is not cosmetic: it is what
 separates a human deciding the demo should move on from the system deciding it,
@@ -28,6 +30,8 @@ timestamp and step say what was wrong with the timing.
 """
 
 from flask import Blueprint, jsonify, request
+
+from data import supervisor_repo
 
 from decision.models import CORRECTION_ORIGINS, PlanOp
 from decision.visitor_profile import STYLE_FRAMING, VisitorProfile
@@ -85,6 +89,13 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
         if mode is not None and mode not in RUN_MODES:
             return jsonify({"error": f"mode must be one of: {', '.join(RUN_MODES)}"}), 400
 
+        # Who is supervising. Stored on the run; every correction in it
+        # carries it. Unknown -> 400. An unreadable table does not block a
+        # tour: the run row drops an id the database rejects.
+        supervisor_id = str(data.get("supervisor_id") or "").strip() or None
+        if supervisor_id and supervisor_repo.supervisor_exists(supervisor_id) is False:
+            return jsonify({"error": f"Unknown supervisor_id '{supervisor_id}'."}), 400
+
         topics = ()
         if interest:
             # Resolved ONCE here, not re-resolved every turn — see
@@ -110,12 +121,17 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
             time_budget_sec=budget,
             visitor_profile=profile,
             mode=mode,
+            supervisor_id=supervisor_id,
         )
         return jsonify({
             "message": "Demo started.",
             "visitor_profile": profile.as_dict() if profile else None,
             **orchestrator.get_status(),
         })
+
+    @bp.route("/supervisors", methods=["GET"])
+    def supervisors():
+        return jsonify({"supervisors": supervisor_repo.list_supervisors()})
 
     @bp.route("/demo/stop", methods=["POST"])
     def stop():
