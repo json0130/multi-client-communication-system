@@ -665,6 +665,8 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
         pass
 
     _orchestrator_ref["o"] = orchestrator
+    # chat_logs rows name the run they were said in; robot/ can't import demo/.
+    registry.active_run_id = orchestrator.active_run_id
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 

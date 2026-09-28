@@ -20,7 +20,7 @@ The gateway layer (HTTP + WebSocket) only ever calls:
 from __future__ import annotations
 import time
 import threading
-from typing import Optional
+from typing import Callable, Optional
 
 from data import robot_repo, session_repo, user_repo
 from core.rbac import GrantStore, RBACFilter, Visibility
@@ -51,6 +51,9 @@ class RobotRegistry:
         self._grants = grants if grants is not None else GrantStore()
         # Optional ProfileRegistry — supplies default_visibility per robot.
         self._profiles = profiles
+        # () -> the active demo run id or None; stamped on chat_logs rows.
+        # Set by app.py once the orchestrator exists.
+        self.active_run_id: Callable[[], Optional[str]] = lambda: None
 
     @property
     def rbac(self) -> RBACFilter:
@@ -102,6 +105,8 @@ class RobotRegistry:
                 access_level=robot.access_level,
                 scenario_id=robot.scenario_id,
                 default_visibility=default_visibility,
+                # Late-bound: app.py sets active_run_id after instances may exist.
+                active_run_id=lambda: self.active_run_id(),
             )
 
             ok = self._init_modules(instance, robot)

@@ -6,7 +6,7 @@ All database operations that touch the 'chat_logs' table.
 Supabase schema expected (see data/migrations/002_rbac.sql for the RBAC columns):
   chat_logs (
     id              serial PRIMARY KEY,
-    user_id         integer REFERENCES users(user_id),
+    user_id         integer,           -- users(user_id); FK dropped in 014_v2_add
     message         text,
     response        text,
     created_at      timestamptz DEFAULT now(),
@@ -15,7 +15,8 @@ Supabase schema expected (see data/migrations/002_rbac.sql for the RBAC columns)
     scenario_id     text,
     session_id      text,
     subject_user_id integer,
-    visibility      text NOT NULL DEFAULT 'local'
+    visibility      text NOT NULL DEFAULT 'local',
+    run_id          text               -- 014_v2_add; no FK
   )
 
 Reads that feed a prompt must go through get_recent_records(), which filters via
@@ -54,6 +55,7 @@ def insert(
     session_id: Optional[str] = None,
     visibility: str = "local",
     subject_user_id: Optional[int] = None,
+    run_id: Optional[str] = None,
 ) -> Optional[int]:
     """
     Persist a user message + bot response pair with its provenance.
@@ -70,6 +72,8 @@ def insert(
         "session_id": session_id,
         "visibility": visibility,
         "subject_user_id": subject_user_id if subject_user_id is not None else user_id,
+        # The demo run in progress when this was said, if any (014_v2_add).
+        "run_id": run_id,
     }
     try:
         resp = get_client().table("chat_logs").insert(payload).execute()

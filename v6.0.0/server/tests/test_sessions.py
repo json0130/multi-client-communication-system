@@ -99,3 +99,35 @@ class TestRepo:
     def test_end_stamps_ended_at(self, fake_supabase):
         session_repo.end_session("x:1")
         assert "ended_at" in fake_supabase.writes["sessions"][0]["_update"]
+
+
+# ── chat_logs name the active run ─────────────────────────────────────────────
+
+class TestChatLogRunId:
+    def test_the_active_run_is_stamped(self, calls, monkeypatch):
+        from data import chat_log_repo
+        rows = []
+        monkeypatch.setattr(chat_log_repo, "insert", lambda *a, **k: rows.append(k))
+        reg = RobotRegistry()
+        inst = reg.connect("navel_001")
+        reg.active_run_id = lambda: "run-9"     # wired after the instance exists
+        inst._persist("hi", "hello")
+        assert rows[-1]["run_id"] == "run-9"
+        assert rows[-1]["session_id"] == inst.identity.session_id
+
+    def test_no_run_and_a_failing_provider_are_both_none(self, calls, monkeypatch):
+        from data import chat_log_repo
+        rows = []
+        monkeypatch.setattr(chat_log_repo, "insert", lambda *a, **k: rows.append(k))
+        reg = RobotRegistry()
+        inst = reg.connect("navel_001")
+        inst._persist("hi", "hello")
+        reg.active_run_id = lambda: 1 / 0
+        inst._persist("hi", "hello")
+        assert [r["run_id"] for r in rows] == [None, None]
+
+    def test_the_repo_writes_it(self, fake_supabase):
+        from data import chat_log_repo
+        chat_log_repo.insert(1, "hi", "hello", session_id="s:1", run_id="run-9")
+        row = fake_supabase.writes["chat_logs"][0]
+        assert row["run_id"] == "run-9" and row["session_id"] == "s:1"

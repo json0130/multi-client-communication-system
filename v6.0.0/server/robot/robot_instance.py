@@ -28,7 +28,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Callable, Optional, Sequence, TYPE_CHECKING
 
 from data import robot_repo, user_repo, chat_log_repo
 from core.rbac import (
@@ -80,6 +80,7 @@ class RobotInstance:
         scenario_id: Optional[str] = None,
         session_id: Optional[str] = None,
         default_visibility: object = Visibility.LOCAL,
+        active_run_id: Optional[Callable[[], Optional[str]]] = None,
     ):
         self.client_id = client_id
         self.robot_name = robot_name
@@ -114,6 +115,9 @@ class RobotInstance:
         self._scenario_id = scenario_id
         self._session_id = session_id or f"{client_id}:{int(time.time())}"
         self._default_visibility = default_visibility
+        # () -> the demo run in progress, or None. A callable so robot/ never
+        # imports demo/; app.py wires it to the orchestrator.
+        self._active_run_id = active_run_id or (lambda: None)
 
         self.created_at = time.time()
         self.last_active = time.time()
@@ -559,6 +563,10 @@ class RobotInstance:
         """
         visibility = self._visibility_value()
         try:
+            try:
+                run_id = self._active_run_id()
+            except Exception:
+                run_id = None
             chat_log_repo.insert(
                 self.user_id, message, response,
                 source_robot_id=self.client_id,
@@ -566,6 +574,7 @@ class RobotInstance:
                 session_id=self._session_id,
                 visibility=visibility,
                 subject_user_id=self.user_id,
+                run_id=run_id,
             )
         except Exception as e:
             print(f"[RobotInstance] DB log error: {e}")
