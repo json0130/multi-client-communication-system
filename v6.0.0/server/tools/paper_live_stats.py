@@ -15,15 +15,30 @@ Kaplan-Meier median the planner actually consumes, and prints the naive figure
 beside it so the size of that bias is visible.
 
 Three exclusions, all reported rather than silent:
+  * every run that is not mode 'live', format 'full_tour' (demo_runs), counted
+    per mode/format — a window whose run has no demo_runs row is 'unknown'
   * the guide robot's own windows      (it hosts, it does not present)
   * windows with no block              (the open-floor round at the end)
-  * simulated runs                     (set SIM_RUN_IDS after using --runs)
 """
 import argparse, os, statistics, sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-GUIDE_IDS = {"pepper_01"}
-SIM_RUN_IDS: set = set()   # fill from --runs once you can see the tagging
+GUIDE_IDS = {"pepper_01", "pepper_001"}
+PAPER_KIND = ("live", "full_tour")
+
+
+def split_by_kind(rows, runs) -> tuple:
+    """(paper_rows, {(mode, format): n}) — the windows of live full-tour runs,
+    and how many windows every kind of run contributed. `runs` is
+    demo_run_repo.run_modes(): {run_id: {"mode", "format"}}."""
+    kept, counts = [], {}
+    for r in rows:
+        run = runs.get(r.get("run_id")) or {}
+        kind = (run.get("mode") or "unknown", run.get("format") or "unknown")
+        counts[kind] = counts.get(kind, 0) + 1
+        if kind == PAPER_KIND:
+            kept.append(r)
+    return kept, counts
 
 
 def main() -> int:
@@ -33,7 +48,9 @@ def main() -> int:
 
     from data.demo_duration_repo import (censored_median, qa_median_by_block,
                                          qa_windows, MIN_BLOCK_WINDOWS)
+    from data.demo_run_repo import run_modes
     rows = qa_windows()
+    runs = run_modes()
     if not rows:
         print("No rows. Check the connection and that migration 008 is applied.")
         return 1
@@ -45,8 +62,9 @@ def main() -> int:
             seen[str(r.get("run_id"))] += 1
         print(f"{len(seen)} distinct run ids\n")
         for rid, n in sorted(seen.items()):
-            print(f"  {rid:40} {n:>3} windows")
-        print("\nPut any simulated run ids into SIM_RUN_IDS at the top of this file.")
+            run = runs.get(rid) or {}
+            print(f"  {rid:40} {run.get('mode') or 'unknown':>16} "
+                  f"{run.get('format') or 'unknown':>9} {n:>3} windows")
         return 0
 
     def visitor_ended(r) -> bool:
@@ -58,17 +76,17 @@ def main() -> int:
         return (r.get("closed_by") or "") != "timeout"
 
     total = len(rows)
-    rows = [r for r in rows if str(r.get("run_id")) not in SIM_RUN_IDS]
-    sim_dropped = total - len(rows)
+    rows, by_kind = split_by_kind(rows, runs)
 
     project, guide, openfloor = [], [], []
     for r in rows:
         b = r.get("block_robot_id")
         (guide if b in GUIDE_IDS else openfloor if not b else project).append(r)
 
-    print(f"{total} windows in the table")
-    print(f"  {sim_dropped:>4} excluded as simulated"
-          f"{'  <-- SIM_RUN_IDS is empty; run --runs' if not SIM_RUN_IDS else ''}")
+    print(f"{total} windows in the table, by run mode / format:")
+    for (mode, fmt), n in sorted(by_kind.items()):
+        mark = "  <-- analysed" if (mode, fmt) == PAPER_KIND else "  excluded"
+        print(f"  {n:>4} {mode}/{fmt}{mark}")
     print(f"  {len(guide):>4} excluded as guide-robot windows")
     print(f"  {len(openfloor):>4} excluded as open-floor (no project block)")
     print(f"  {len(project):>4} project windows analysed\n")
