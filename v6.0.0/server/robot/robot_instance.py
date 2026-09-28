@@ -314,22 +314,30 @@ class RobotInstance:
         Fast binary classifier: should the demo resume, or does the visitor have more questions?
         Returns 'done' (resume demo) or 'continue' (more Q&A).
         Uses a single-turn generate() call — no conversation history needed.
-        Safe default is 'continue' so real questions are never skipped.
+        Safe default is 'continue' so real questions are never skipped: any
+        answer other than "done" stays in the Q&A.
         """
         if not self.llm or not self.llm.is_available():
             return "continue"
+        # The model answers "done" or "more", never "continue": the question it
+        # is shown asks "shall we CONTINUE the demonstration?", so "continue"
+        # as the stay-in-Q&A label read as "yes, continue the demo". A live run
+        # had "okay thanks" classified 'continue' and the window never closed;
+        # on qwen2.5:7b the old labels closed on 1 of 15 done-replies (3 runs
+        # each), these on 11 of 15, and every real question still stayed.
         system = (
             "You are an intent classifier for a robot demo guide. "
             "The guide robot just asked the visitor: "
             "'Do you have any other questions, or shall we continue the demonstration?' "
             "Classify the visitor's reply with ONLY one word:\n"
-            "  done     — visitor is satisfied and ready to continue the demo\n"
-            "  continue — visitor has more questions or is still engaged\n"
-            "Reply with exactly one word. No punctuation, no explanation."
+            "  done — no more questions: thanks, okay, that's all, sounds good, let's go on\n"
+            "  more — asks another question or wants to hear more about this topic\n"
+            "Reply with exactly one word, done or more. No punctuation, no explanation."
         )
         try:
             resp = self.llm.generate(system, user_message[:200])
-            first_word = resp.text.strip().lower().split()[0] if resp.text.strip() else "continue"
+            first_word = resp.text.strip().lower().split()[0] if resp.text.strip() else "more"
+            first_word = first_word.strip(".,!")
             decision = "done" if first_word == "done" else "continue"
             print(f"[QA Classifier] '{user_message[:60]}' → LLM first word: '{first_word}' → {decision}")
             return decision
