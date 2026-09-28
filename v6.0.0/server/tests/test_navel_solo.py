@@ -80,7 +80,7 @@ class RecordingGateway:
 
     def generate_demo_step(self, robot_id, instruction):
         self.instructions.append(instruction)
-        return "[WAVE] Hello everyone!"
+        return "[GREET] Hello everyone!"
 
 
 def _wait_until(pred, timeout=2.0):
@@ -329,3 +329,22 @@ class TestOnePersona:
         roles = {json.load(open(os.path.join(V6, p)))["robot_role"] for p in self.CONFIGS}
         assert len(roles) == 1
         assert "Project 56" in roles.pop()
+
+
+class TestNavelGestureTags:
+    """Navel performs a fixed set of 11 gestures (DEFAULT, POINT, EMPHASISE,
+    AGREE, LISTEN, UNCERTAIN, DENY, GREET, HAPPY, SURPRISE, SAD). A tag it
+    has no gesture for — the script used to ask for [WAVE] — is just skipped."""
+
+    def _tags(self, path):
+        return json.load(open(os.path.join(V6, path)))["allowed_tags"]
+
+    def test_every_navel_config_lists_the_same_gestures(self):
+        tags = {tuple(self._tags(p)) for p in TestOnePersona.CONFIGS}
+        assert len(tags) == 1 and len(tags.pop()) == 11
+
+    def test_the_solo_script_only_asks_for_gestures_navel_has(self):
+        allowed = set(self._tags("navel_client/client_config.json"))
+        asked = {tag for s in build_solo_script(NAVEL)
+                 for tag in re.findall(r"\[[A-Z]+\]", s.text)}
+        assert asked and asked <= allowed, asked - allowed

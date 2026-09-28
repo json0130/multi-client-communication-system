@@ -1132,7 +1132,7 @@ def build_solo_script(robot_id: str) -> list:
             text        = "The lab guide has just introduced you to a group of visitors and "
                           "handed over to you. Greet the visitors warmly, introduce yourself, "
                           "and say you would love to tell them about your project. "
-                          "2 sentences. Start with [WAVE].",
+                          "2 sentences. Start with [GREET].",
             generate    = True,
             timeout_sec = 50,
             block_robot_id = robot_id,
