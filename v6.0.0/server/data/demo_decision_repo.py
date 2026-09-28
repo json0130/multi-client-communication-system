@@ -45,8 +45,10 @@ def write_corrections(events: Sequence[CorrectionEvent]) -> None:
     Insert a batch of supervisor corrections.
 
     A correction whose decision_id is not present — the decision batch was
-    dropped, or none was logged — still inserts: the FK is nullable and
-    ON DELETE SET NULL. Losing the parent must not lose the label.
+    dropped, or none was logged — still inserts: log tables carry no foreign
+    keys (014_v2_add dropped this one, which rejected any correction naming a
+    lost decision, and its whole batch with it). Losing the parent must not
+    lose the label; the log_integrity view reports such ids instead.
     """
     if not events:
         return
