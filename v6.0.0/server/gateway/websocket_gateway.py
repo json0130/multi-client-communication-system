@@ -592,8 +592,14 @@ class WebSocketGateway:
             router = self._kg_router_factory()
             if router is None:
                 return None
+            # In a pair demo the guide (ChatBox) is also a specialist, and
+            # leaving it out would leave one candidate, which the router
+            # reads as "nothing to choose between".
+            paired = bool(self._demo_orchestrator
+                          and self._demo_orchestrator.colocated)
             peers = [p["client_id"] for p in obs.connected_peers
-                     if p.get("client_id") and p["client_id"] != obs.guide_robot_id]
+                     if p.get("client_id")
+                     and (paired or p["client_id"] != obs.guide_robot_id)]
             # Blocks still ahead of the play head — what a defer is allowed to
             # promise. See KGRouter._handle_absent.
             remaining_blocks = {s.block_robot_id for s in obs.remaining_steps

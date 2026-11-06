@@ -275,6 +275,8 @@ class DemoOrchestrator:
         # by the next generated step, so the robot answers THAT rather than
         # greeting as if nobody had spoken to it.
         self._cue_text: Optional[str] = None
+        self._colocated: list = []   # a pair demo's second robot, see _set_colocated
+        self._placed: list = []
 
     @property
     def visitor_profile(self):
@@ -359,13 +361,20 @@ class DemoOrchestrator:
         _reset_gazebo_positions()
 
         with self._lock:
-            if robot_ids and len(robot_ids) == 1:
+            from demo.demo_script import PAIR_LEADS
+            pair = bool(robot_ids and len(robot_ids) == 2
+                        and robot_ids[0] in PAIR_LEADS)
+            if robot_ids and (len(robot_ids) == 1 or pair):
                 # One robot selected = it presents alone after a human guide
                 # hands over. The old meaning (a guide with no projects) had
-                # no use once a human can be the guide.
+                # no use once a human can be the guide. Two robots led by ChatBox
+                # = it presents and passes the second's subject over to it.
                 from demo.demo_script import build_solo_script
-                self._script = build_solo_script(robot_ids[0])
-                logger.info(f"[Demo] Solo script built — {robot_ids[0]}")
+                partner = robot_ids[1] if pair else None
+                self._script = build_solo_script(robot_ids[0], partner_id=partner)
+                self._colocated = [robot_ids[0], partner] if partner else []
+                logger.info(f"[Demo] Solo script built — {robot_ids[0]}"
+                            f"{' with ' + partner if partner else ''}")
             elif robot_ids:
                 from demo.demo_script import build_script  # local import avoids circular dependency
                 guide    = robot_ids[0]
@@ -402,6 +411,7 @@ class DemoOrchestrator:
             self._pause_event.set()
             guide_id = self._script[0].robot_id
         self._end_run()     # a run left in ERROR was never ended
+        self._set_colocated(self._colocated)
         self._begin_run(guide_id, time_budget_sec, visitor_profile, mode, supervisor_id)
         if self._recorder is not None:
             self._recorder.clear()
@@ -1010,7 +1020,8 @@ class DemoOrchestrator:
             mode = "sim_unknown"
             if self._run_mode is not None:
                 try:
-                    mode = self._run_mode([guide_id] + [r for r in robots if r != guide_id]) \
+                    mode = self._run_mode([guide_id] + [r for r in sorted(set(robots) | set(self._colocated))
+                                                         if r != guide_id]) \
                         or "sim_unknown"
                 except Exception as e:
                     logger.warning(f"[Demo] run mode lookup failed, using 'sim_unknown': {e}")
@@ -1039,9 +1050,31 @@ class DemoOrchestrator:
             row = dict(self._run_row)
         self._emit_run(row)
 
+    @property
+    def colocated(self) -> list:
+        """The pair's robots (lead first), or [] outside a pair demo."""
+        return list(self._colocated)
+
+    def _set_colocated(self, robot_ids) -> None:
+        """Mark a pair's robots as standing with the group.
+
+        The lab profile says every robot but the presenter is at another
+        station, which would make a pair's second robot "away" and send its
+        questions back to the lead. Cleared by _end_run.
+        """
+        presence = getattr(self._ws, "presence", None)
+        if presence is None:
+            return
+        for rid in self._placed:
+            presence.set_in_conversation(rid, None, source="pair demo ended")
+        self._placed = list(robot_ids or [])
+        for rid in self._placed:
+            presence.set_in_conversation(rid, True, source="pair demo: beside the lead")
+
     def _end_run(self) -> None:
         """Close the active run, once. The whole row is resent rather than just
         ended_at, so the write is an upsert that cannot create a half row."""
+        self._set_colocated([])
         with self._lock:
             row, self._run_row = self._run_row, None
         if row is not None:

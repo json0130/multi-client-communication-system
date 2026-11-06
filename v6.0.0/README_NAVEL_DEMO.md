@@ -27,6 +27,33 @@ Robot-to-Robot Communication via Co-Speech Motion Generation**, on its own.
 **To run it:** on the dashboard, press **Start**, select **only Navel**, and
 press Start Demo. Selecting exactly one robot is what starts the solo script.
 
+## Pair mode: ChatBox leads, Navel is passed the subject
+
+Select **ChatBox first, then Navel** (ids `chatbox_01` + `navel_01`, or the
+physical `chatbox_jetson_001` + `navel_001`) and press Start Demo. The script
+is the solo script above with **ChatBox** as the presenter: wait for the
+guide's hand-off, ChatBox greets and introduces itself, then its project
+(problem, approach, impact), then Q&A. Navel has no steps of its own.
+
+When the guide asks about Navel's subject in the Q&A, or names Navel,
+ChatBox says a short hand-off line and **Navel answers in its own voice**.
+That is the lab tour's routing: the competence graph (`KGRouter`) picks the
+robot, and a named robot wins over topic matching. Questions about ChatBox's
+subject stay with ChatBox.
+
+- `build_solo_script(robot_id, partner_id=...)`; the partner is mentioned in
+  ChatBox's Q&A invite.
+- `DemoOrchestrator.start` treats two robots led by a `PAIR_LEADS` id as a
+  pair, and marks both as in the conversation (`_set_colocated`). Without
+  that, `separate_stations: true` makes Navel "away" and ChatBox answers for
+  it. `_end_run` clears it.
+- In a pair, `_kg_route` keeps the guide in the candidate list (it is also a
+  specialist), since the router needs two.
+- Tests: `tests/test_chatbox_navel_pair.py`.
+- Not yet live-tested. Navel answers the visitor's question; it does not run
+  its three-point project talk. Any other two-robot selection is still a full
+  tour with the first robot as guide.
+
 ---
 
 ## What this branch adds

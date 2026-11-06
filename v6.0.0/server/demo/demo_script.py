@@ -61,6 +61,10 @@ SILBOT  = "silbot_01"    # Project C robot
 # the lab-demo/Gazebo test id.
 NAVEL_ROBOT = "navel_001"
 
+# Two selected robots led by one of these is a pair (ChatBox, then whichever
+# robot its subject is passed to), not a full tour: see build_solo_script.
+PAIR_LEADS = {CHATBOX, "chatbox_jetson_001"}
+
 # ── Gazebo routes ────────────────────────────────────────────────────────────
 # A straight line between two points in lab_world usually crosses a wall —
 # confirmed live, repeatedly. These waypoint sequences are each an EDGE
@@ -1102,9 +1106,16 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
     return steps
 
 
-def build_solo_script(robot_id: str) -> list:
+def build_solo_script(robot_id: str, partner_id: str = None) -> list:
     """
     One robot presents on its own, with a HUMAN as the guide.
+
+    With `partner_id`, the robot leads a pair standing side by side (ChatBox
+    with Navel). The script is still only the lead's: the partner has no steps.
+    It speaks when the guide asks about its work, because the lead's Q&A
+    window routes that question through the competence graph (KGRouter) and the
+    lead hands over out loud — the same robot-to-robot hand-off the lab tour
+    uses. The two must be co-located; DemoOrchestrator.start sets that.
 
     The human introduces the lab and the robot out loud; the robot waits
     (the "cue" step — see DemoOrchestrator._wait_for_cue) until they hand
@@ -1144,7 +1155,10 @@ def build_solo_script(robot_id: str) -> list:
             robot_id    = robot_id,
             text        = "Invite the visitors, and the guide, to ask you anything about your "
                           "project. Let them know you are happy to keep answering until they "
-                          "are ready to finish. 2 sentences. Use [DEFAULT].",
+                          "are ready to finish. "
+                          + (f"Mention that {partner_id} is right beside you and can explain "
+                             "its own project if they ask. " if partner_id else "")
+                          + "2 sentences. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             qa_window   = True,
