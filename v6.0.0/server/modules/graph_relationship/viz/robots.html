@@ -1,0 +1,233 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Robots — monitor and assign</title>
+<style>
+  :root { --bg:#12131a; --panel:#1c1e29; --brd:#2c2f3f; --text:#e6e8f0; --muted:#8b90a8; --accent:#a678de;
+          --ok:#3ddc84; --bad:#e5534b; --slow:#4fc3f7; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; background:var(--bg); color:var(--text);
+               font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; font-size:14px; }
+  header { display:flex; align-items:baseline; gap:18px; padding:16px 24px; border-bottom:1px solid var(--brd); }
+  header h1 { margin:0; font-size:18px; }
+  header a { color:var(--slow); text-decoration:none; }
+  header .muted { margin-left:auto; }
+  .muted { color:var(--muted); font-size:12.5px; }
+  main { padding:20px 24px 60px; max-width:1300px; margin:0 auto; }
+  h2 { font-size:12px; letter-spacing:.8px; text-transform:uppercase; color:var(--muted); margin:26px 0 10px; }
+  .panel { background:var(--panel); border:1px solid var(--brd); border-radius:12px; padding:14px 16px; }
+  form.add { display:grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap:10px; align-items:end; }
+  label { display:flex; flex-direction:column; gap:4px; font-size:12px; color:var(--muted); }
+  input, select, button { font:inherit; color:var(--text); background:var(--bg); border:1px solid var(--brd);
+                          border-radius:7px; padding:7px 9px; }
+  input[type=color] { padding:2px; height:34px; }
+  input[type=range] { padding:0; accent-color:var(--accent); }
+  button { cursor:pointer; }
+  button:hover:not(:disabled) { border-color:var(--accent); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--accent); border-color:var(--accent); color:#16121f; font-weight:600; }
+  .err { color:var(--bad); min-height:1.3em; margin-top:8px; font-size:12.5px; }
+  .grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(400px, 1fr)); gap:16px; }
+  .card { border-top:4px solid var(--c, #888); }
+  .card .top { display:flex; align-items:center; gap:10px; }
+  .card .top b { font-size:16px; }
+  .badge { font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--brd); color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:50%; background:var(--bad); display:inline-block; }
+  .dot.on { background:var(--ok); }
+  .status { margin:6px 0 12px; font-size:12.5px; color:var(--muted); display:flex; gap:8px; align-items:center; }
+  .row { display:flex; gap:8px; align-items:center; margin:8px 0; flex-wrap:wrap; }
+  .row select { flex:1 1 140px; }
+  .now { font-size:13px; margin:6px 0; }
+  .now b { font-weight:600; }
+  .bars { display:flex; justify-content:center; margin:2px 0; }
+  .pent { width:190px; height:170px; overflow:visible; }
+  .pent .ring { fill:none; stroke:var(--brd); stroke-width:1; }
+  .pent .axis { stroke:var(--brd); stroke-width:1; }
+  .pent .lab { font-size:10.5px; fill:var(--muted); text-anchor:middle; dominant-baseline:middle; }
+  .pent .area { stroke-width:2; fill-opacity:.25; stroke-linejoin:round; }
+  .voice { border-top:1px solid var(--brd); margin-top:12px; padding-top:10px; }
+  .slider { display:grid; grid-template-columns: 62px 1fr 56px; gap:8px; align-items:center; font-size:12.5px; margin:5px 0; }
+  .slider output { text-align:right; color:var(--muted); font-variant-numeric:tabular-nums; }
+  .foot { display:flex; gap:10px; margin-top:12px; align-items:center; }
+  .foot a { color:var(--slow); text-decoration:none; font-size:13px; }
+  .foot .spacer { flex:1; }
+  .msg { font-size:12px; color:var(--muted); min-height:1.2em; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Robots</h1>
+  <a href="/">&larr; graph</a>
+  <span class="muted" id="hubinfo"></span>
+</header>
+<main>
+  <h2>Add a robot</h2>
+  <div class="panel">
+    <form class="add" id="add">
+      <label>Name<input id="a-name" placeholder="Stuart" autocomplete="off" required></label>
+      <label>Connection
+        <select id="a-kind">
+          <option value="connects-in">connects in &mdash; the robot dials this PC (like the ChatBox)</option>
+          <option value="dial-out">dial out &mdash; this PC dials the robot (like Navel)</option>
+        </select></label>
+      <label class="dial">Robot IP<input id="a-host" placeholder="192.168.0.11"></label>
+      <label class="dial">Port<input id="a-port" type="number" value="8765"></label>
+      <label class="dial">Voice spec as
+        <select id="a-tts"><option value="navel">Navel TTS tags</option><option value="none">plain text only</option></select></label>
+      <label>Colour<input id="a-color" type="color" value="#9ccc65"></label>
+      <button class="primary" type="submit">Add robot</button>
+    </form>
+    <div class="err" id="a-err"></div>
+    <div class="muted" id="a-help">The robot must connect to this PC's hub using its own name (<code>robot_name</code>); then it shows up here and gets its own tab, graph and chat.</div>
+  </div>
+
+  <h2>All robots</h2>
+  <div class="grid" id="grid"></div>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const TRAITS = ["O","C","E","A","N"];
+let data = null, built = "";
+
+async function api(path, body) {
+  const r = await fetch(path, body ? { method: "POST", headers: {"Content-Type": "application/json"},
+                                        body: JSON.stringify(body) } : { cache: "no-store" });
+  return r.json();
+}
+
+// ---- add form -------------------------------------------------------------
+function syncForm() {
+  const dial = $("a-kind").value === "dial-out";
+  document.querySelectorAll("#add .dial").forEach(el => el.style.display = dial ? "" : "none");
+  $("a-help").innerHTML = dial
+    ? "This PC will dial <code>ws://IP:port</code> and keep retrying. The viz must be running with <code>--robot-hub</code>."
+    : "The robot must connect to this PC's hub using its own name (<code>robot_name</code>) &mdash; its <code>server_url</code> is <code>http://&lt;this PC&gt;:" + (data?.hub_port ?? 5000) + "</code>.";
+}
+$("a-kind").addEventListener("change", syncForm);
+$("add").addEventListener("submit", async e => {
+  e.preventDefault();
+  $("a-err").textContent = "";
+  const r = await api("/registry/add", { name: $("a-name").value, kind: $("a-kind").value, host: $("a-host").value,
+    port: +$("a-port").value || 8765, tts: $("a-tts").value, color: $("a-color").value });
+  if (!r.ok) { $("a-err").textContent = r.error; return; }
+  $("a-name").value = ""; built = ""; load();
+});
+
+// ---- cards ----------------------------------------------------------------
+function card(r, roles) {
+  const el = document.createElement("div");
+  el.className = "panel card"; el.dataset.id = r.id; el.style.setProperty("--c", r.color);
+  el.innerHTML = `
+    <div class="top"><span class="dot"></span><b>${esc(r.name)}</b><span class="badge">${r.kind === "dial-out" ? "dialled by this PC" : "connects in"}</span>
+      <span class="muted" style="margin-left:auto">id ${esc(r.id)}</span></div>
+    <div class="status"><span class="detail"></span></div>
+    <div class="now"></div>
+    <div class="bars"></div>
+    <div class="row"><select class="role">${roles.map(x => `<option value="${esc(x.id)}">${esc(x.label)}</option>`).join("")}</select>
+      <button class="assign">Assign role</button></div>
+    <div class="muted rolehint">Assign keeps the current personality sliders (set them on the graph page, or use a profile card there).</div>
+    <div class="voice">
+      <div class="muted" style="margin-bottom:4px">Voice tweak <span class="effective"></span></div>
+      <div class="slider"><span>speed</span><input type="range" min="-30" max="30" step="1" data-k="rate"><output></output></div>
+      <div class="slider"><span>pitch</span><input type="range" min="-6" max="6" step="0.5" data-k="pitch"><output></output></div>
+      <div class="slider"><span>volume</span><input type="range" min="-6" max="6" step="0.5" data-k="volume"><output></output></div>
+      <div class="row"><button class="apply-voice">Apply voice</button><button class="test">Say something</button>
+        <input class="testtext" value="Hello, this is how I sound." style="flex:1 1 160px"></div>
+    </div>
+    <div class="msg"></div>
+    <div class="foot"><a href="/?robot=${esc(r.id)}">Open in graph &rarr;</a><span class="spacer"></span>
+      ${r.builtin ? "" : '<button class="remove">Remove</button>'}</div>`;
+  const msg = t => el.querySelector(".msg").textContent = t;
+  el.querySelector(".assign").onclick = async () => {
+    const cur = (data.robots.find(x => x.id === r.id) || {}).ocean || {};
+    const ocean = Object.fromEntries(TRAITS.map(k => [k, cur[k] || 0]));
+    const j = await api("/persona", { robot: r.id, role: el.querySelector(".role").value, ocean });
+    el.querySelector(".role").dataset.dirty = "";
+    msg(j.ok ? "assigned" + (j.robot ? (j.robot.sent ? " · sent to the robot" : " · robot not connected") : "") : "not assigned: " + j.error);
+    load();
+  };
+  el.querySelectorAll(".slider input").forEach(inp => {
+    inp.oninput = () => { inp.dataset.dirty = "1"; showSlider(inp); };
+  });
+  el.querySelector(".apply-voice").onclick = async () => {
+    const adj = {}; el.querySelectorAll(".slider input").forEach(i => adj[i.dataset.k] = +i.value);
+    const j = await api("/registry/voice", { id: r.id, ...adj });
+    el.querySelectorAll(".slider input").forEach(i => i.dataset.dirty = "");
+    msg(j.ok ? "voice saved" + (j.voice ? "" : " (assign a role first, then it applies)") : j.error); load();
+  };
+  el.querySelector(".test").onclick = async () => {
+    const j = await api("/registry/say", { id: r.id, text: el.querySelector(".testtext").value });
+    msg(j.ok ? "sent" : j.error);
+  };
+  const rm = el.querySelector(".remove");
+  if (rm) rm.onclick = async () => {
+    if (!confirm(`Remove ${r.name}? Its graph file is kept.`)) return;
+    const j = await api("/registry/remove", { id: r.id });
+    if (j.ok) { built = ""; load(); } else msg(j.error);
+  };
+  el.querySelector(".role").addEventListener("change", e => e.target.dataset.dirty = "1");
+  return el;
+}
+function showSlider(inp) {
+  const v = +inp.value, u = { rate: "%", pitch: " st", volume: " dB" }[inp.dataset.k];
+  inp.nextElementSibling.textContent = (v > 0 ? "+" : "") + v + u;
+}
+// OCEAN (-1..1) as a pentagon: centre = -1, middle ring = 0, outer ring = +1. No persona = the empty frame only.
+function pentagon(ocean, color) {
+  const C = 85, R = 55, pt = (i, f, d = 0) => {            // vertex i (O at the top, clockwise), f = fraction of R
+    const a = (-90 + 72 * i) * Math.PI / 180; return [C + (R * f + d) * Math.cos(a), C + (R * f + d) * Math.sin(a)];
+  };
+  const poly = f => TRAITS.map((_, i) => pt(i, f).map(n => n.toFixed(1)).join(",")).join(" ");
+  let svg = `<svg class="pent" viewBox="0 0 170 170">` +
+    [1, 0.5].map(f => `<polygon class="ring" points="${poly(f)}"/>`).join("") +
+    TRAITS.map((_, i) => `<line class="axis" x1="${C}" y1="${C}" x2="${pt(i, 1)[0].toFixed(1)}" y2="${pt(i, 1)[1].toFixed(1)}"/>`).join("");
+  if (ocean) {
+    const v = TRAITS.map(k => Math.max(-1, Math.min(1, +ocean[k] || 0)));
+    svg += `<polygon class="area" points="${v.map((x, i) => pt(i, (x + 1) / 2).map(n => n.toFixed(1)).join(",")).join(" ")}" ` +
+      `style="fill:${color};stroke:${color}"/>`;
+    svg += v.map((x, i) => `<circle cx="${pt(i, (x + 1) / 2)[0].toFixed(1)}" cy="${pt(i, (x + 1) / 2)[1].toFixed(1)}" r="2.5" style="fill:${color}"/>`).join("");
+  }
+  svg += TRAITS.map((k, i) => {
+    const [x, y] = pt(i, 1, 14), x0 = ocean ? +ocean[k] || 0 : null;
+    return `<text class="lab" x="${x.toFixed(1)}" y="${y.toFixed(1)}">${k}${x0 === null ? "" : ` ${x0 > 0 ? "+" : ""}${x0.toFixed(1)}`}</text>`;
+  }).join("");
+  return svg + "</svg>";
+}
+function fill(el, r) {
+  el.querySelector(".dot").className = "dot" + (r.connected ? " on" : "");
+  el.querySelector(".detail").textContent = r.detail;
+  const words = r.persona ? ` · ${r.persona}` : "";
+  el.querySelector(".now").innerHTML = r.role_label
+    ? `Playing <b>${esc(r.role_label)}</b>${esc(words)}` : '<span class="muted">no role assigned yet</span>';
+  el.querySelector(".bars").innerHTML = pentagon(r.role_label ? r.ocean : null, r.color);
+  const role = el.querySelector(".role");
+  if (r.role && !role.dataset.dirty && document.activeElement !== role) role.value = r.role;
+  const adj = r.voice_adjust || {};
+  el.querySelectorAll(".slider input").forEach(i => {
+    if (!i.dataset.dirty && document.activeElement !== i) i.value = adj[i.dataset.k] || 0;
+    showSlider(i);
+  });
+  const v = r.voice;
+  el.querySelector(".effective").textContent = v ? `→ speed ${v.rate}, pitch ${v.pitch}, tone ${v.tone}, volume ${v.volume}` : "";
+  el.querySelector(".test").disabled = !r.connected;
+  el.querySelector(".assign").disabled = !r.has_graph;
+}
+async function load() {
+  try { data = await api("/registry"); } catch (_) { return; }
+  $("hubinfo").textContent = data.hub ? `robot hub on port ${data.hub_port}` : "no robot hub (start with --robot-hub)";
+  const key = data.robots.map(r => r.id + r.color + r.kind).join("|");
+  if (key !== built) {                       // robots added / removed: rebuild the cards
+    built = key; $("grid").innerHTML = "";
+    data.robots.forEach(r => $("grid").appendChild(card(r, data.roles)));
+  }
+  data.robots.forEach(r => fill($("grid").querySelector(`[data-id="${r.id}"]`), r));
+  syncForm();
+}
+load(); setInterval(load, 2000);
+</script>
+</body>
+</html>

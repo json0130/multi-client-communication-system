@@ -128,7 +128,7 @@ class SimpleConcurrentClient(BasicClient):
         # Top-level keys win nothing they have not been given: each is copied
         # only if the robot actually set it, and only if edge_tts_config did
         # not already say something about it.
-        for key in ("tts_voice", "audio_device", "audio_cmd", "sim_speed"):
+        for key in ("tts_voice", "gtts_pitch", "audio_device", "audio_cmd", "sim_speed"):
             if self.config.get(key) is not None:
                 edge_cfg.setdefault(key, self.config[key])
         edge_cfg.setdefault("tts_voice", edge_cfg.get("voice", ""))

@@ -14,7 +14,6 @@ import tempfile
 import wave
 import threading
 from dataclasses import dataclass
-from typing import Optional
 
 from modules.base import BaseModule
 from core.config import cfg
@@ -42,6 +41,7 @@ class SpeechModule(BaseModule):
         self._compute_type = cfg.speech.whisper_compute_type
         self._max_length_sec = cfg.speech.max_audio_length_sec
         self._sample_rate = cfg.speech.sample_rate
+        self._language = None if cfg.speech.language in ("", "auto") else cfg.speech.language
 
     # ── BaseModule interface ───────────────────────────────────────────────────
 
@@ -132,7 +132,7 @@ class SpeechModule(BaseModule):
 
                 segments, info = self._model.transcribe(
                     tmp_path,
-                    language=None,          # auto-detect
+                    language=self._language,    # WHISPER_LANGUAGE; auto-detect picked Japanese for noise
                     beam_size=5,
                     best_of=5,
                     temperature=0.0,

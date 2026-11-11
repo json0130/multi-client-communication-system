@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>graph_relationship — live KG</title>
+<script src="https://cdn.jsdelivr.net/npm/d3@7/dist/d3.min.js"></script>
+<style>
+  :root {
+    --bg:        #12131a;
+    --panel:     #1c1e29;
+    --panel-brd: #2c2f3f;
+    --text:      #e6e8f0;
+    --muted:     #8b90a8;
+    /* timescale palette */
+    --fast:         #ff8c42;  /* orange  */
+    --slow:         #4fc3f7;  /* blue    */
+    --relationship: #a678de;  /* purple  */
+    --node:      #dfe3ef;
+    --node-brd:  #7f8496;
+    --side:      min(400px, 46vw);   /* dedicated persona + chat column */
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
+               font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+  #graph { width: calc(100vw - var(--side)); height: 100vh; display: block; cursor: grab; }
+  #graph:active { cursor: grabbing; }
+
+  .panel {
+    position: fixed; background: rgba(28,30,41,0.92); border: 1px solid var(--panel-brd);
+    border-radius: 10px; padding: 12px 14px; font-size: 13px; backdrop-filter: blur(4px);
+    box-shadow: 0 4px 18px rgba(0,0,0,0.35);
+  }
+  #hud   { top: 14px; left: 14px; min-width: 190px; }
+  #tabs { position: fixed; top: 12px; left: calc((100vw - var(--side)) / 2); transform: translateX(-50%);
+          display: flex; gap: 6px; z-index: 6; }
+  .lsw { display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px; }
+  #tabs[hidden] { display: none; }
+  #robots-link { position: fixed; top: 12px; right: calc(var(--side) + 14px); z-index: 6; padding: 6px 14px;
+                 font-size: 13px; border-radius: 8px; color: var(--text); text-decoration: none;
+                 background: rgba(28,30,41,0.92); border: 1px solid var(--panel-brd); }
+  #robots-link:hover { border-color: var(--slow); }
+  #tabs button { padding: 6px 16px; font-size: 13px; border-radius: 8px; cursor: pointer;
+                 background: rgba(28,30,41,0.92); color: var(--muted); border: 1px solid var(--panel-brd); }
+  #tabs button.on { color: var(--text); font-weight: 600; }
+  #tabs .tswatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px;
+                   vertical-align: -1px; }
+  #tabs .tdot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; margin-left: 9px;
+                background: #e5534b; }
+  #tabs .tdot.on { background: #3ddc84; }
+  .pc-logr { display: flex; flex-direction: column; gap: 6px; }
+  .pc-logr[hidden] { display: none; }
+  #actions { top: 168px; left: 14px; width: 190px; }
+  #actions h1 { margin: 0 0 8px; font-size: 14px; letter-spacing: .3px; }
+  #act-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  #act-btns button { padding: 5px 4px; font-size: 11.5px; border-radius: 6px; cursor: pointer;
+                     background: var(--bg); color: var(--text); border: 1px solid var(--panel-brd); }
+  #act-btns button:hover:not(:disabled) { border-color: var(--slow); }
+  #act-btns button:disabled { opacity: .4; cursor: not-allowed; }
+  #act-msg { margin-top: 6px; font-size: 11.5px; min-height: 1.2em; }
+  #controls { bottom: 14px; left: 14px; min-width: 216px; }
+  /* dedicated right column: role & persona on top, chat with the robot below; the graph
+     canvas ends at its left edge */
+  #side { position: fixed; top: 0; right: 0; bottom: 0; width: var(--side); display: flex;
+          flex-direction: column; background: var(--panel); border-left: 1px solid var(--panel-brd);
+          box-shadow: -4px 0 18px rgba(0,0,0,0.35); font-size: 13px; }
+  #side > section { padding: 12px 14px; min-height: 0; }
+  /* drag handles: left edge = column width, bar between the sections = their heights */
+  #side-grip { position: absolute; left: -4px; top: 0; bottom: 0; width: 8px; cursor: col-resize;
+               z-index: 5; touch-action: none; }
+  #split-grip { flex: 0 0 8px; margin: -4px 0; position: relative; z-index: 3; cursor: row-resize;
+                touch-action: none; }
+  #side-grip:hover, #side-grip.drag, #split-grip:hover, #split-grip.drag { background: var(--relationship); opacity: .55; }
+  #side h2 { margin: 0 0 6px; font-size: 13px; font-weight: 600; }
+  #persona { flex: 0 0 66%; overflow-y: auto; padding-top: 0; border-bottom: 1px solid var(--panel-brd); }
+  #p-top { position: sticky; top: 0; z-index: 2; margin: 0 -14px; padding: 12px 14px 8px;
+           background: var(--panel); border-bottom: 1px solid var(--panel-brd); }
+  #p-top #p-now { margin-top: 4px; }
+  /* apply lives inside the open profile and stays at the bottom of the panel while you scroll it */
+  #p-actions { position: sticky; bottom: 0; z-index: 1; background: var(--bg); margin-top: 8px;
+               padding: 6px 0 2px; border-top: 1px solid var(--panel-brd); }
+  #p-actions button { margin-top: 0; }
+  #persona select, #persona button { width: 100%; margin-top: 4px; background: var(--bg);
+             color: var(--text); border: 1px solid var(--panel-brd); border-radius: 6px;
+             padding: 5px 6px; font: inherit; font-size: 12px; }
+  #persona button { background: var(--relationship); color: #12131a; font-weight: 600;
+             cursor: pointer; margin-top: 10px; }
+  #persona .ctrl-row label { flex-basis: 132px; white-space: nowrap; }
+  #persona .ctrl-row input[type="range"] { accent-color: var(--relationship); }
+  #p-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .pcard { border: 1px solid var(--panel-brd); border-radius: 8px; padding: 6px 7px;
+           background: var(--bg); position: relative; }
+  .pcard .hd { cursor: pointer; }
+  .pcard:hover { border-color: var(--muted); }
+  .pcard.sel { border-color: var(--relationship); box-shadow: 0 0 0 1px var(--relationship);
+               grid-column: 1 / -1; }                       /* the open card spans the row */
+  .pcard .nm { font-weight: 600; font-size: 12px; }
+  .pcard .sub { color: var(--muted); font-size: 10.5px; line-height: 1.3; }
+  .pcard .rl { display: inline-block; margin-top: 3px; font-size: 10px; padding: 0 5px;
+               border-radius: 4px; background: #2f2540; color: #d7c4f5; }
+  .pcard .on { position: absolute; top: 5px; right: 6px; font-size: 9.5px; color: #3ddc84; }
+  .pcard .body { display: none; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--panel-brd); }
+  .pcard.sel .body { display: block; }
+  #p-radar svg { display: block; margin: 0 auto; width: 100%; max-width: 250px; }
+  #p-radar .cap { text-align: center; font-size: 10px; color: var(--muted); }
+  #p-role-info { font-size: 11px; color: var(--muted); margin-top: 6px; line-height: 1.45; }
+  #p-role-info b { color: var(--text); font-weight: 600; }
+  /* ── persona chat (bottom of the side column) ── */
+  #pchat { flex: 1 1 0; min-height: 150px; display: flex; flex-direction: column; }
+  #pc-as { font-size: 11px; color: var(--muted); margin: 6px 0 4px; min-height: 15px; }
+  #pc-as b { color: var(--text); font-weight: 600; }
+  #pc-log { flex: 1 1 auto; min-height: 90px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px;
+            padding: 8px; background: var(--bg); border: 1px solid var(--panel-brd);
+            border-radius: 8px; }
+  .pc-msg { max-width: 88%; padding: 6px 9px; border-radius: 9px; font-size: 12.5px;
+            line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
+  .pc-you { align-self: flex-end; background: #2a2d3d; }
+  .pc-bot { align-self: flex-start; background: #2f2540; border: 1px solid var(--relationship); }
+  .pc-bot .pc-meta { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); }
+  .pc-sys { align-self: center; color: var(--muted); font-size: 11px; text-align: center; }
+  .pc-err { align-self: stretch; color: #ff9b8a; font-size: 11.5px; }
+  #pc-form { display: flex; gap: 6px; margin-top: 8px; }
+  #pc-input { flex: 1; min-width: 0; background: var(--bg); color: var(--text);
+              border: 1px solid var(--panel-brd); border-radius: 6px; padding: 6px 8px;
+              font: inherit; font-size: 12.5px; }
+  #pc-form button { background: var(--relationship); color: #12131a; font-weight: 600;
+                    border: 0; border-radius: 6px; padding: 0 12px; cursor: pointer; font: inherit; }
+  #pc-form button.alt { background: transparent; color: var(--muted);
+                        border: 1px solid var(--panel-brd); font-weight: 400; }
+  #pc-form button:disabled, #pc-input:disabled { opacity: .5; cursor: default; }
+  #p-brief, #p-now, #p-msg { font-size: 11.5px; color: var(--muted); margin-top: 6px;
+             line-height: 1.45; }
+
+  /* force sliders (Obsidian-style) */
+  .ctrl-row { display: flex; align-items: center; gap: 8px; line-height: 2.1; }
+  .ctrl-row label { flex: 0 0 80px; color: var(--muted); font-size: 12px; }
+  .ctrl-row input[type="range"] { flex: 1 1 auto; min-width: 0; accent-color: var(--fast); cursor: pointer; }
+  .ctrl-row .val { flex: 0 0 34px; text-align: right; font-size: 12px;
+                   font-variant-numeric: tabular-nums; color: var(--text); }
+  #ctrl-reset { margin-top: 8px; width: 100%; background: transparent; color: var(--muted);
+                border: 1px solid var(--panel-brd); border-radius: 6px; padding: 5px 0;
+                font-size: 12px; cursor: pointer; }
+  #ctrl-reset:hover { color: var(--text); border-color: var(--muted); }
+
+  #hud h1 { margin: 0 0 8px; font-size: 14px; letter-spacing: .3px; }
+  .stat { display: flex; justify-content: space-between; gap: 18px; line-height: 1.7; }
+  .stat b { font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+  #rb-dot { display:inline-block; width:8px; height:8px; border-radius:50%; margin-right:6px;
+            background:#e5534b; }
+  #rb-dot.on { background:#3ddc84; }
+  #rb-dot.off { background:var(--node-brd); }
+  #pulse { display:inline-block; width:8px; height:8px; border-radius:50%;
+           background:#3ddc84; margin-left:6px; vertical-align:middle; opacity:.25;
+           transition: opacity .15s; }
+  #pulse.on { opacity: 1; }
+
+  .legend-section { margin-top: 10px; }
+  .legend-section:first-child { margin-top: 0; }
+  .legend-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
+                  letter-spacing: .5px; margin-bottom: 6px; }
+  .legend-row { display: flex; align-items: center; gap: 8px; line-height: 1.9; }
+  .swatch-line { width: 22px; height: 0; border-top: 3px solid; border-radius: 2px; }
+  .swatch-dot  { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  svg.shape { overflow: visible; }
+
+  /* node + link visuals */
+  .link { stroke-opacity: 0.55; }
+  .link.dim { stroke-opacity: 0.06; }
+  .node-shape { fill: var(--own-fill, var(--node)); stroke: var(--own, var(--node-brd)); stroke-width: 1.5px; }
+  .node.offfocus { opacity: 0.12 !important; }
+  .link.offfocus { stroke-opacity: 0.04 !important; }
+  .node-label { transition: opacity .2s; }
+  .node-shape.conversation { fill: var(--fast); stroke: #ffd8b0; stroke-width: 2px; }
+  .node.dim .node-shape { opacity: 0.15; }
+  /* culture focus: the ACTIVE culture/person stays lit; everything else dims */
+  .link.inactive { stroke-opacity: 0.05; }
+  .node.inactive .node-shape { opacity: 0.10; }
+  .node.inactive .node-label { opacity: 0.18; }
+  .node.selected .node-shape { stroke: #ffd24a; stroke-width: 3px; }
+  .node-label { fill: var(--text); font-size: 11px; pointer-events: none;
+                paint-order: stroke; stroke: var(--bg); stroke-width: 3px; stroke-linejoin: round; }
+  .node.dim .node-label { opacity: 0.15; }
+  .edge-weight { fill: var(--muted); font-size: 10px; pointer-events: none;
+                 paint-order: stroke; stroke: var(--bg); stroke-width: 3px; }
+  .node g, .node .node-shape { cursor: pointer; }
+
+  /* conversation panel */
+  #convo { top: 14px; right: calc(var(--side) + 14px); width: 340px; max-height: calc(100vh - 28px);
+           display: none; flex-direction: column; padding: 0; overflow: hidden; }
+  #convo-head { display: flex; align-items: center; justify-content: space-between;
+                padding: 12px 14px; border-bottom: 1px solid var(--panel-brd); }
+  #convo-title { font-size: 14px; font-weight: 600; }
+  #convo-title small { color: var(--muted); font-weight: 400; margin-left: 6px; }
+  #convo-close { cursor: pointer; color: var(--muted); font-size: 18px; line-height: 1;
+                 padding: 0 4px; }
+  #convo-close:hover { color: var(--text); }
+  #convo-body { padding: 10px 12px 14px; overflow-y: auto; }
+  .turn { margin-bottom: 12px; }
+  .turn .meta { color: var(--muted); font-size: 10px; text-transform: uppercase;
+                letter-spacing: .4px; margin-bottom: 4px; }
+  .bubble { border-radius: 10px; padding: 7px 10px; font-size: 12.5px; line-height: 1.4;
+            margin-bottom: 5px; white-space: pre-wrap; word-break: break-word; }
+  .bubble.child { background: #2a2d3d; }
+  .bubble.reply { background: #2f2540; border: 1px solid var(--relationship); }
+  .bubble .who { display: block; font-size: 10px; color: var(--muted); margin-bottom: 2px; }
+  .convo-empty { color: var(--muted); font-size: 12.5px; padding: 4px 0; }
+  .sec-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
+               letter-spacing: .5px; margin: 12px 0 6px; }
+  .conn { display: flex; align-items: center; justify-content: space-between;
+          gap: 8px; font-size: 12px; line-height: 1.9; }
+  .conn .lbl { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .conn .del, .btn-danger { cursor: pointer; }
+  .conn .del { color: var(--muted); padding: 0 6px; border-radius: 4px; }
+  .conn .del:hover { color: #fff; background: #b3402f; }
+  .btn-danger { display: block; width: 100%; margin-top: 12px; padding: 8px;
+                background: #3a2020; color: #ff9b8a; border: 1px solid #b3402f;
+                border-radius: 8px; font-size: 12.5px; }
+  .btn-danger:hover { background: #b3402f; color: #fff; }
+</style>
+</head>
+<body>
+<canvas style="display:none"></canvas>
+<svg id="graph"></svg>
+
+<a id="robots-link" href="/robots.html" title="add robots, monitor and assign roles for all of them">Robots &#9881;</a>
+<div id="tabs" hidden></div>
+
+<div id="hud" class="panel">
+  <h1>graph_relationship<span id="pulse"></span></h1>
+  <div class="stat"><span class="muted">nodes</span><b id="n-count">0</b></div>
+  <div class="stat"><span class="muted">edges</span><b id="e-count">0</b></div>
+  <div class="stat"><span class="muted">updated</span><b id="ts" class="muted">—</b></div>
+  <div class="stat" id="hud-legend" style="gap:10px;margin-top:2px;font-size:11.5px;flex-wrap:wrap"></div>
+  <div class="stat"><span class="muted">robot</span><b id="rb-stat"><span id="rb-dot" class="off"></span><span id="rb-txt">—</span></b></div>
+</div>
+
+<div id="actions" class="panel">
+  <h1>Robot actions</h1>
+  <div id="act-btns"></div>
+  <div id="act-msg" class="muted">connect a robot to use these</div>
+</div>
+
+<aside id="side">
+<div id="side-grip" title="drag to resize"></div>
+<section id="persona">
+  <div id="p-top">
+    <h2>Role &amp; persona</h2>
+    <div id="p-now"></div>
+  </div>
+  <select id="p-robot" hidden></select>
+  <div class="legend-title" style="margin-top:10px">Profiles <span class="muted"
+    style="text-transform:none;letter-spacing:0">— click one to open it, then apply</span></div>
+  <div id="p-cards"></div>
+  <div id="p-holder" hidden><div id="p-editor">      <!-- moved into the open profile card -->
+    <div class="legend-title">Role</div>
+    <select id="p-role"></select>
+    <div id="p-brief"></div>
+    <div id="p-role-info"></div>
+    <div id="p-radar" style="margin-top:8px"></div>
+    <div class="legend-title" style="margin-top:10px">Personality (OCEAN, −1 … +1)</div>
+    <div id="p-traits"></div>
+    <div id="p-actions"><button id="p-apply">apply</button><div id="p-msg"></div></div>
+  </div></div>
+</section>
+<div id="split-grip" title="drag to resize"></div>
+
+<section id="pchat">
+  <h2>Chat with the robot <span class="muted" style="font-weight:400">— role &amp; persona only</span></h2>
+  <div id="pc-as"></div>
+  <div id="pc-log"></div>
+  <form id="pc-form" autocomplete="off">
+    <input id="pc-input" type="text" maxlength="600" placeholder="say something to the robot…">
+    <button type="submit" id="pc-send">send</button>
+    <button type="button" id="pc-clear" class="alt" title="clear this conversation">clear</button>
+  </form>
+</section>
+</aside>
+
+<div id="controls" class="panel">
+  <div class="legend-title">Forces</div>
+  <div class="ctrl-row"><label>Repel</label>
+    <input id="f-charge" type="range" min="20" max="1200" step="10" value="700">
+    <span class="val" id="v-charge">700</span></div>
+  <div class="ctrl-row"><label>Link length</label>
+    <input id="f-dist" type="range" min="20" max="360" step="5" value="130">
+    <span class="val" id="v-dist">130</span></div>
+  <div class="ctrl-row"><label>Link force</label>
+    <input id="f-lstr" type="range" min="0" max="1" step="0.05" value="0.35">
+    <span class="val" id="v-lstr">0.35</span></div>
+  <div class="ctrl-row"><label>Center</label>
+    <input id="f-center" type="range" min="0" max="0.4" step="0.02" value="0.04">
+    <span class="val" id="v-center">0.04</span></div>
+  <button id="ctrl-reset">reset</button>
+</div>
+
+<div id="convo" class="panel">
+  <div id="convo-head">
+    <span id="convo-title"></span>
+    <span id="convo-close" title="close">&times;</span>
+  </div>
+  <div id="convo-body"></div>
+</div>
+
+<script>
+const COLOR = { FAST: "#ff8c42", SLOW: "#4fc3f7", RELATIONSHIP: "#a678de" };
+
+// ---- topic category -> fill colour (Feature-2d) --------------------------
+const CATEGORY_COLOR = {
+  music:    "#ff8fab",  science:  "#59c1e8",  animals: "#f4a259",
+  food:     "#f6c445",  activity: "#9b8cff",  place:   "#7fd98b",
+  person:   "#ff7a6b",  media:    "#c792ea",  sport:   "#4db6ac",
+  other:    "#9aa0b5",
+};
+const categoryColor = (c) => CATEGORY_COLOR[c] || CATEGORY_COLOR.other;
+// Role subnodes (roles.py RolePart) — how the robot talks in that role.
+const ROLE_PART_COLOR = { goal: "#ffd24a", manner: "#c792ea", do: "#7fd98b",
+                          avoid: "#ff7a6b", phrase: "#59c1e8", knowledge: "#dfe3ef" };
+(function renderCategoryLegend() {
+  const el = document.getElementById("legend-categories");
+  if (!el) return;
+  el.innerHTML = Object.entries(CATEGORY_COLOR).map(([cat, col]) =>
+    `<div class="legend-row"><span class="swatch-dot" style="background:${col}"></span>${cat}</div>`
+  ).join("");
+})();
+
+// ---- per-person edge colours ---------------------------------------------
+// Each person gets a distinct base hue; the edge's timescale shades it
+// (FAST = lighter, SLOW = darker, RELATIONSHIP = base). Robot (chatbox) edges
+// are always a single blue. Blue is reserved for the robot, so it is excluded
+// from the person palette.
+const ROBOT_EDGE = "#ffffff";  // chatbox edges — white
+const CULTURE_EDGE = "#4fc3f7"; // culture-knowledge edges (knows_culture / culture_prior) — blue
+const CULTURE_EDGE_TYPES = new Set(["knows_culture", "culture_prior"]);
+const PERSON_PALETTE = ["#ff8c42","#e6689c","#9ccc65","#b39ddb","#ffd24a",
+                        "#26a69a","#f4694c","#c08457"];
+const _personPalette = d3.scaleOrdinal(PERSON_PALETTE);   // stable per person id
+const personColor = id => id === "jay" ? PERSON_WHITE : _personPalette(id);
+// One colour per robot (its node, what it owns, its edges); people are white. Roles/topics stay neutral.
+const ROBOT_COLOR = { chatbox: "#ff8c42", navel: "#4fc3f7" };   // orange / blue
+const PERSON_WHITE = "#ffffff";
+// A role a robot has (has_role) and what hangs off it is that robot's PROFILE: drawn in the robot's colour,
+// a little lighter. A profile node both robots have stays neutral (it is shared).
+const lighter = c => d3.color(c).brighter(0.45).formatHex();
+let attached = new Map();          // node id -> robot id owning that profile subgraph
+function computeAttached() {
+  const adj = new Map(), owners = new Map();
+  links.forEach(l => {
+    (adj.get(l.source.id) || adj.set(l.source.id, []).get(l.source.id)).push(l.target);
+    (adj.get(l.target.id) || adj.set(l.target.id, []).get(l.target.id)).push(l.source);
+  });
+  links.filter(l => l.type === "has_role" && l.source.type === "Robot" && ROBOT_COLOR[l.source.id]).forEach(l => {
+    const seen = new Set([l.target.id]), stack = [l.target];
+    while (stack.length) { const n = stack.pop();
+      (owners.get(n.id) || owners.set(n.id, new Set()).get(n.id)).add(l.source.id);
+      for (const m of adj.get(n.id) || [])
+        if (!seen.has(m.id) && m.type !== "Robot" && m.type !== "Person") { seen.add(m.id); stack.push(m); } }
+  });
+  attached = new Map([...owners].filter(([, o]) => o.size === 1).map(([id, o]) => [id, [...o][0]]));
+}
+const profileColor = id => attached.has(id) ? lighter(ROBOT_COLOR[attached.get(id)]) : null;
+const ownerColor = id => { const o = nodeOwner(id); return !o ? null : o.kind === "robot" ? (ROBOT_COLOR[o.id] || null) : personColor(o.id); };
+const personIds = new Set();
+const robotIds  = new Set();
+
+function nodeOwner(nodeId) {
+  if (personIds.has(nodeId)) return { kind: "person", id: nodeId };
+  if (robotIds.has(nodeId))  return { kind: "robot",  id: nodeId };
+  const prefix = nodeId.split(":")[0];                      // chatbox:persona:..., navel:capability, ...
+  if (ROBOT_COLOR[prefix]) return { kind: "robot", id: prefix };
+  let m = /^interest:([^:]+):/.exec(nodeId);
+  if (m) return { kind: "person", id: m[1] };
+  m = /^(?:conversation|interaction):([^:]+):/.exec(nodeId);
+  if (m) return { kind: "person", id: m[1] };
+  if (/^[^:]+:capability$/.test(nodeId)) return { kind: "robot", id: nodeId.split(":")[0] };
+  return null;
+}
+function shadeByTimescale(base, ts) {
+  const c = d3.color(base);
+  if (!c) return base;
+  if (ts === "FAST") return c.brighter(0.9).formatHex();   // lighter
+  if (ts === "SLOW") return c.darker(0.9).formatHex();     // darker
+  return c.formatHex();                                    // RELATIONSHIP = base
+}
+function edgeColor(d) {
+  // Culture-knowledge edges get their own colour so ChatBox's own (white) edges
+  // stay visually distinct from the Korean prior-knowledge subgraph.
+  if (CULTURE_EDGE_TYPES.has(d.type)) return shadeByTimescale(CULTURE_EDGE, d.timescale);
+  const s = d.source.id || d.source, t = d.target.id || d.target;
+  const owner = nodeOwner(s) || nodeOwner(t);   // source decides; target is fallback
+  if (!owner && attached.has(s) && attached.has(t)) return shadeByTimescale(profileColor(s), d.timescale);
+  const base = !owner ? ROBOT_EDGE : owner.kind === "person" ? personColor(owner.id) : (ROBOT_COLOR[owner.id] || ROBOT_EDGE);
+  return shadeByTimescale(base, d.timescale);
+}
+function renderLegendPeople(nodes) {
+  const el = document.getElementById("legend-people");
+  if (!el) return;
+  const people = nodes.filter(n => n.type === "Person")
+                      .sort((a, b) => a.id.localeCompare(b.id));
+  el.innerHTML = people.map(p =>
+    `<div class="legend-row"><span class="swatch-line" style="border-color:${personColor(p.id)}"></span>${p.id}</div>`
+  ).join("");
+}
+const R = 9;  // base node radius
+
+// ---- shape geometry helpers ----------------------------------------------
+function polyD(sides, r, rot = -Math.PI/2) {
+  const pts = [];
+  for (let i = 0; i < sides; i++) {
+    const a = rot + i * 2*Math.PI/sides;
+    pts.push(`${(r*Math.cos(a)).toFixed(2)},${(r*Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + pts.join(" L") + " Z";
+}
+function starD(points, ro, ri, rot = -Math.PI/2) {
+  const pts = [];
+  for (let i = 0; i < points*2; i++) {
+    const r = (i % 2) ? ri : ro;
+    const a = rot + i * Math.PI/points;
+    pts.push(`${(r*Math.cos(a)).toFixed(2)},${(r*Math.sin(a)).toFixed(2)}`);
+  }
+  return "M" + pts.join(" L") + " Z";
+}
+function plusD(r, t) {
+  return `M${-t},${-r} L${t},${-r} L${t},${-t} L${r},${-t} L${r},${t} L${t},${t} `
+       + `L${t},${r} L${-t},${r} L${-t},${t} L${-r},${t} L${-r},${-t} L${-t},${-t} Z`;
+}
+
+// ---- node type -> shape (same generator used by graph AND legend) ---------
+function shapePath(type) {
+  switch (type) {
+    case "Robot":       return {tag:"rect",  attrs:{x:-R, y:-R, width:2*R, height:2*R, rx:2}};
+    case "Topic":       return {tag:"path",  attrs:{d:`M0,${-R*1.3} L${R*1.3},0 L0,${R*1.3} L${-R*1.3},0 Z`}};
+    case "Session":     return {tag:"path",  attrs:{d:`M0,${-R*1.3} L${R*1.2},${R} L${-R*1.2},${R} Z`}};  // triangle
+    case "Interaction": return {tag:"path",  attrs:{d: polyD(8, R*1.5)}};           // octagon (hub)
+    case "Persona":     return {tag:"path",  attrs:{d: polyD(6, R*1.2)}};           // hexagon
+    case "Role":        return {tag:"path",  attrs:{d: polyD(5, R*1.25)}};          // pentagon
+    case "Capability":  return {tag:"path",  attrs:{d: plusD(R*1.25, R*0.42)}};     // plus
+    case "Interest":    return {tag:"path",  attrs:{d: starD(5, R*1.45, R*0.6)}};   // star
+    case "Conversation":return {tag:"path",  attrs:{d: starD(4, R*1.7, R*0.75)}};   // 4-point burst (live)
+    case "Culture":     return {tag:"path",  attrs:{d: polyD(7, R*1.35)}};          // heptagon
+    case "CultureTopic":return {tag:"path",  attrs:{d: starD(6, R*1.2, R*0.5)}};    // 6-point sparkle (robot knowledge)
+    case "RoleTopic":   return {tag:"path",  attrs:{d: starD(3, R*1.4, R*0.55)}};   // 3-point star (role knowledge)
+    default:            return {tag:"circle",attrs:{r:R}};  // Person
+  }
+}
+document.querySelectorAll("#legend .shape").forEach((svg, i) => {
+  const type = ["Person","Robot","Topic","Interaction","Session","Persona","Role","Capability","Interest","Conversation","Culture","CultureTopic","RoleTopic"][i];
+  const s = shapePath(type);
+  const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+  for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+  el.setAttribute("transform", "translate(9,9) scale(0.7)");
+  el.setAttribute("fill", "#dfe3ef"); el.setAttribute("stroke", "#7f8496"); el.setAttribute("stroke-width", 1.5);
+  svg.appendChild(el);
+});
+
+// ---- svg + zoom ----------------------------------------------------------
+const svg = d3.select("#graph");
+const sideW = () => document.getElementById("side").offsetWidth;
+let width = window.innerWidth - sideW(), height = window.innerHeight;
+svg.attr("width", width).attr("height", height);
+
+const root = svg.append("g");
+const gLinks  = root.append("g");
+const gLabels = root.append("g");  // edge-weight labels
+const gNodes  = root.append("g");
+
+const zoomer = d3.zoom().scaleExtent([0.15, 4]).on("zoom", (e) => root.attr("transform", e.transform));
+svg.call(zoomer);
+
+// ---- persistent data + simulation ---------------------------------------
+const nodeById = new Map();   // id -> node datum (keeps x/y across ticks)
+let links = [];
+
+// Per-node collision radius so nodes never overlap (hubs + labelled nodes get
+// more room). iterations(2) makes the non-overlap constraint hold firmly.
+function collideRadius(d) {
+  if (d.type === "Robot" || d.type === "Interaction") return 54;
+  if (d.type === "Conversation") return 48;
+  if (d.type === "Person") return 44;
+  return 38;
+}
+
+const sim = d3.forceSimulation([])
+  // Spread-out defaults: strong repulsion + long links + gentle centre-gravity so
+  // the graph untangles itself and stays on-screen without manual dragging.
+  .force("link", d3.forceLink([]).id(d => d.id).distance(130).strength(0.35))
+  .force("charge", d3.forceManyBody().strength(-700).distanceMax(600))
+  .force("center", d3.forceCenter(width/2, height/2))
+  .force("collide", d3.forceCollide().radius(collideRadius).iterations(2))
+  // Center-gravity (per-node pull to middle) — keeps components from drifting off.
+  .force("x", d3.forceX(width/2).strength(0.04))
+  .force("y", d3.forceY(height/2).strength(0.04))
+  .alphaDecay(0.045)
+  .on("tick", ticked);
+
+// ---- first layout: spread seed, pre-run the forces, fit to view ------------
+// Starting every node in a 80 px clump makes the first seconds a tangle, so seed the
+// nodes on a sunflower spiral (grouped by type), run the simulation to rest off-screen,
+// then show the settled result zoomed to fit.
+function settleLayout() {
+  const nodes = [...nodeById.values()].sort((a, b) => a.type.localeCompare(b.type));
+  const golden = Math.PI * (3 - Math.sqrt(5));
+  nodes.forEach((n, i) => {
+    const r = 62 * Math.sqrt(i + 0.5), a = i * golden;
+    n.x = width / 2 + r * Math.cos(a); n.y = height / 2 + r * Math.sin(a);
+    n.vx = n.vy = 0; n.fx = n.fy = null;
+  });
+  sim.nodes(nodes); sim.force("link").links(links);
+  sim.alpha(1);
+  for (let i = 0; i < 320; i++) sim.tick();      // tick() draws nothing
+  ticked(); fitView();
+  sim.alpha(0.02).restart();                     // stay alive for dragging
+}
+function fitView(pad = 90) {
+  const ns = [...nodeById.values()];
+  if (!ns.length) return;
+  const x0 = d3.min(ns, d => d.x), x1 = d3.max(ns, d => d.x);
+  const y0 = d3.min(ns, d => d.y), y1 = d3.max(ns, d => d.y);
+  const k = Math.min(1.2, width / (x1 - x0 + 2 * pad), height / (y1 - y0 + 2 * pad));
+  svg.call(zoomer.transform, d3.zoomIdentity
+    .translate(width / 2 - k * (x0 + x1) / 2, height / 2 - k * (y0 + y1) / 2).scale(k));
+}
+
+// ---- force sliders (Obsidian-style) --------------------------------------
+const FORCE_DEFAULTS = { "f-charge": 700, "f-dist": 130, "f-lstr": 0.35, "f-center": 0.04 };
+function bindForceSlider(id, valId, fmt, apply) {
+  const el = document.getElementById(id), out = document.getElementById(valId);
+  const run = () => { const v = +el.value; out.textContent = fmt(v); apply(v);
+                      sim.alpha(0.4).restart(); };
+  el.addEventListener("input", run);
+  return run;
+}
+const applyCharge = bindForceSlider("f-charge", "v-charge", v => v,
+  v => sim.force("charge").strength(-v));
+const applyDist   = bindForceSlider("f-dist", "v-dist", v => v,
+  v => sim.force("link").distance(v));
+const applyLstr   = bindForceSlider("f-lstr", "v-lstr", v => v.toFixed(2),
+  v => sim.force("link").strength(v));
+const applyCenter = bindForceSlider("f-center", "v-center", v => v.toFixed(2),
+  v => { sim.force("x").strength(v); sim.force("y").strength(v); });
+document.getElementById("ctrl-reset").addEventListener("click", () => {
+  for (const [id, def] of Object.entries(FORCE_DEFAULTS)) {
+    const el = document.getElementById(id);
+    el.value = def; el.dispatchEvent(new Event("input"));
+  }
+  settleLayout();                    // reset = defaults + a fresh, spread-out layout
+});
+
+const weightScale = d3.scaleSqrt().domain([0, 1]).range([1, 7]).clamp(true);
+
+// ---- diff + apply new graph ----------------------------------------------
+let activeState = {};   // {person, culture} — the loop's current focus (viz highlight)
+function update(graph) {
+  activeState = graph.active || {};
+  const firstLoad = nodeById.size === 0;
+  // nodes: keep existing (position preserved), add new near centre, drop removed
+  const incoming = new Set(graph.nodes.map(n => n.id));
+  for (const n of graph.nodes) {
+    if (nodeById.has(n.id)) {
+      const cur = nodeById.get(n.id);
+      cur.type = n.type; cur.label = n.label;   // refresh mutable fields
+      cur.turns = n.turns;                       // session transcript (if any)
+      cur.notes = n.notes;                       // topic conversation summaries (if any)
+      cur.category = n.category;                 // topic category (Feature-2d)
+      cur.topicLabel = n.topicLabel;
+      cur.facts = n.facts;                       // culture-topic facts (if any)
+    } else {
+      nodeById.set(n.id, {
+        id: n.id, type: n.type, label: n.label, turns: n.turns, notes: n.notes,
+        category: n.category, topicLabel: n.topicLabel, facts: n.facts,
+        x: width/2 + (Math.random()-0.5)*80,
+        y: height/2 + (Math.random()-0.5)*80,
+      });
+    }
+  }
+  for (const id of [...nodeById.keys()]) if (!incoming.has(id)) nodeById.delete(id);
+
+  const nodes = [...nodeById.values()];
+  // Refresh the person/robot id sets so edge colouring knows who owns what.
+  personIds.clear(); robotIds.clear();
+  for (const n of nodes) {
+    if (n.type === "Person") personIds.add(n.id);
+    else if (n.type === "Robot") robotIds.add(n.id);
+  }
+  renderLegendPeople(nodes);
+  // rebuild links against live node objects (dangling already filtered server-side)
+  links = graph.edges
+    .filter(e => nodeById.has(e.source) && nodeById.has(e.target))
+    .map(e => ({
+      source: nodeById.get(e.source), target: nodeById.get(e.target),
+      type: e.type, timescale: e.timescale, weight: e.weight, elabel: e.elabel,
+      affinity10: e.affinity10, confidence: e.confidence, cross: e.cross,
+    }));
+
+  computeAttached();
+  const maxW = d3.max(links, d => Math.abs(d.weight)) || 1;
+  weightScale.domain([0, maxW]);
+
+  sim.nodes(nodes);
+  sim.force("link").links(links);
+  if (!firstLoad) sim.alpha(0.35).restart();
+
+  render(nodes);
+  if (firstLoad) { settleLayout(); fitFocus(); }     // after render, so there are elements to position
+}
+
+function render(nodes) {
+  // links
+  const link = gLinks.selectAll("line").data(links, d => d.source.id + "→" + d.target.id + d.type);
+  link.exit().transition().duration(400).attr("stroke-opacity", 0).remove();
+  const linkEnter = link.enter().append("line")
+    .attr("class", "link").attr("stroke-opacity", 0);
+  linkEnter.append("title");
+  linkEnter.merge(link)
+    .attr("stroke", d => edgeColor(d))
+    .attr("stroke-width", d => weightScale(Math.abs(d.weight)))
+    // Step-2 cross-namespace bridges (person topic ↔ culture ck) get a dash so the
+    // bridge is visible; all other edges stay solid.
+    .attr("stroke-dasharray", d => d.cross ? "5,4" : null)
+    .transition().duration(400).attr("stroke-opacity", 0.55);
+  gLinks.selectAll("line").select("title").text(d => {
+    // person interest→topic 'about' edges carry an affinity (0–10) + confidence.
+    if (d.type === "about" && d.affinity10 != null)
+      return `about · affinity ${d.affinity10}/10 · confidence ${d.confidence}`;
+    if (d.cross) return `culture bridge · ${d.type} = ${d.weight}`;
+    return `${d.type} = ${d.weight}`;
+  });
+
+  // edge weight labels
+  const wl = gLabels.selectAll("text").data(links, d => d.source.id + "→" + d.target.id + d.type);
+  wl.exit().remove();
+  wl.enter().append("text").attr("class", "edge-weight").attr("text-anchor", "middle")
+    .merge(wl).text(d => d.elabel != null ? d.elabel : d.weight);
+
+  // nodes
+  const node = gNodes.selectAll("g.node").data(nodes, d => d.id);
+  node.exit().transition().duration(400).style("opacity", 0).remove();
+
+  const enter = node.enter().append("g").attr("class", "node").style("opacity", 0)
+    .call(d3.drag().clickDistance(5)   // small movement still counts as a click
+      .on("start", (e,d) => { if (!e.active) sim.alphaTarget(0.3).restart(); d.fx=d.x; d.fy=d.y; })
+      .on("drag",  (e,d) => { d.fx=e.x; d.fy=e.y; })
+      .on("end",   (e,d) => { if (!e.active) sim.alphaTarget(0); d.fx=null; d.fy=null; }))
+    .on("mouseenter", (e,d) => highlight(d.id))
+    .on("mouseleave", clearHighlight)
+    .on("click", (e,d) => { e.stopPropagation(); openConvo(d); });
+
+  enter.each(function(d) {
+    const s = shapePath(d.type);
+    const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+    for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+    el.setAttribute("class", "node-shape" + (d.type === "Conversation" ? " conversation" : ""));
+    this.appendChild(el);
+  });
+  enter.append("text").attr("class", "node-label").attr("x", R + 5).attr("y", 4);
+
+  enter.transition().duration(400).style("opacity", 1);
+
+  // refresh shape (type may change) + label on all nodes
+  const all = enter.merge(node);
+  all.select(".node-label").text(d => d.label);
+  all.each(function(d) {
+    const g = d3.select(this), existing = g.select(".node-shape");
+    const s = shapePath(d.type);
+    if (existing.node() && existing.node().tagName.toLowerCase() !== s.tag) {
+      existing.remove();
+      const el = document.createElementNS("http://www.w3.org/2000/svg", s.tag);
+      for (const [k,v] of Object.entries(s.attrs)) el.setAttribute(k, v);
+      el.setAttribute("class", "node-shape" + (d.type === "Conversation" ? " conversation" : ""));
+      this.insertBefore(el, this.firstChild);
+    }
+    // owner colour: a robot's node is filled in its colour, what it owns gets a ring in it, people are white
+    const shape = g.select(".node-shape"), oc = ownerColor(d.id);
+    shape.style("--own-fill", d.type === "Robot" || d.type === "Person" ? oc : null)
+         .style("--own", oc && d.type !== "Topic" && d.type !== "RoleTopic" ? oc : null);
+    shape.attr("stroke-width", oc && d.type !== "Robot" && d.type !== "Person" ? 2.5 : null);
+    const pc = profileColor(d.id);
+    if (pc) shape.style("--own-fill", pc).style("--own", pc);        // an attached profile: its robot's colour, lighter
+    // Feature-2d: tint Topic nodes by their category (updates live on category change).
+    if (d.type === "Topic") {
+      g.select(".node-shape").style("fill", categoryColor(d.category));
+    } else if (d.type === "RoleTopic") {
+      g.select(".node-shape").style("fill", pc || ROLE_PART_COLOR[d.kind] || ROLE_PART_COLOR.knowledge);
+    }
+  });
+
+  document.getElementById("n-count").textContent = nodes.length;
+  document.getElementById("e-count").textContent = links.length;
+  applyCultureFocus();   // dim the non-active culture + other people
+  applyRobotFocus();
+}
+
+// ---- focus on the selected robot (tab) -------------------------------------
+// ONE graph holds every robot. Selecting a robot fades ONLY the other robot(s) and what belongs to them
+// (their topics, and for the ChatBox the people it talks to). Profile nodes (roles, their topics, personas)
+// are never faded, whoever they are attached to; a profile or topic both robots reach stays lit too.
+const PROFILE_TYPES = new Set(["Role", "RoleTopic", "Persona"]);
+function adjacency() {
+  const adj = new Map();
+  links.forEach(l => {
+    (adj.get(l.source.id) || adj.set(l.source.id, []).get(l.source.id)).push(l.target);
+    (adj.get(l.target.id) || adj.set(l.target.id, []).get(l.target.id)).push(l.source);
+  });
+  return adj;
+}
+function walk(adj, start, stop) {                       // everything reachable from `start` without entering `stop`
+  const seen = new Set([start]), stack = [start];
+  while (stack.length) for (const n of adj.get(stack.pop()) || [])
+    if (!seen.has(n.id) && !stop(n)) { seen.add(n.id); stack.push(n.id); }
+  return seen;
+}
+function robotFocusSet(robotId) {                       // the selected robot and what it reaches (the view fits onto this)
+  return walk(adjacency(), robotId, n => n.type === "Robot" && n.id !== robotId);
+}
+function robotFadeSet(robotId) {
+  const adj = adjacency(), mine = robotFocusSet(robotId), faded = new Set();
+  for (const r of robotIds) if (r !== robotId)
+    for (const id of walk(adj, r, n => (n.type === "Robot" && n.id !== r) || PROFILE_TYPES.has(n.type)))
+      if (!mine.has(id) || id === r) faded.add(id);
+  return faded;
+}
+function applyRobotFocus() {
+  const faded = nodeById.has(curRobot) ? robotFadeSet(curRobot) : new Set();
+  gNodes.selectAll("g.node").classed("offfocus", d => faded.has(d.id));
+  gLinks.selectAll("line").classed("offfocus", d => faded.has(d.source.id) || faded.has(d.target.id));
+}
+function fitFocus(pad = 110) {                         // glide the view onto the selected robot's subgraph
+  if (!nodeById.has(curRobot)) return;
+  const lit = robotFocusSet(curRobot), ns = [...nodeById.values()].filter(n => lit.has(n.id));
+  const x0 = d3.min(ns, d => d.x), x1 = d3.max(ns, d => d.x), y0 = d3.min(ns, d => d.y), y1 = d3.max(ns, d => d.y);
+  const k = Math.min(1.2, width / (x1 - x0 + 2 * pad), height / (y1 - y0 + 2 * pad));
+  svg.transition().duration(700).call(zoomer.transform, d3.zoomIdentity
+    .translate(width / 2 - k * (x0 + x1) / 2, height / 2 - k * (y0 + y1) / 2).scale(k));
+}
+
+function ticked() {
+  gLinks.selectAll("line")
+    .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
+    .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+  gLabels.selectAll("text")
+    .attr("x", d => (d.source.x + d.target.x)/2)
+    .attr("y", d => (d.source.y + d.target.y)/2 - 3);
+  gNodes.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
+}
+
+// ---- focus on the recognised person + their active culture -----------------
+// The loop reports (from face recognition) the CURRENT person + their resolved
+// active culture. We light: the robot, the current person's OWN subgraph
+// (interests → topics → their bridges), and the ACTIVE culture cluster; everything
+// else dims. So switching who's in front detaches the previous person's bridges,
+// while a second person of the SAME culture keeps the culture nodes lit and only
+// dims the previous person's own bridges. Display-only — no graph mutation.
+function computeLit() {
+  const lit = new Set();
+  const culture = activeState.culture;                 // "culture:korean" | null
+  const slug = culture ? culture.slice("culture:".length) : null;
+  const person = activeState.person || null;
+  const adj = new Map();
+  const add = (a, b) => { if (!adj.has(a)) adj.set(a, []); adj.get(a).push(b); };
+  links.forEach(l => { add(l.source.id, l.target.id); add(l.target.id, l.source.id); });
+
+  // Anchors: the robot + its OWN identity (persona / role / capabilities) always,
+  // AND the topics its capabilities know (space, jazz, math…) so they never dim.
+  // Roles/personas only when ATTACHED (adjacent to a robot): the rest of the
+  // role library stays dim, like an inactive culture.
+  const _robotSelf = new Set(["Robot", "Capability"]);
+  const _attachable = new Set(["Persona", "Role"]);
+  nodeById.forEach((n, id) => {
+    if (_attachable.has(n.type) &&
+        (adj.get(id) || []).some(o => (nodeById.get(o) || {}).type === "Robot")) {
+      lit.add(id);
+      for (const t of (adj.get(id) || []))              // role --role_knows--> topic
+        if ((nodeById.get(t) || {}).type === "RoleTopic") lit.add(t);
+      return;
+    }
+    if (!_robotSelf.has(n.type)) return;
+    lit.add(id);
+    if (n.type === "Capability") {
+      for (const t of (adj.get(id) || [])) {          // capability --about--> topic
+        const tn = nodeById.get(t);
+        if (tn && tn.type === "Topic") lit.add(t);
+      }
+    }
+  });
+  // Active culture node + its ck topics.
+  if (culture) lit.add(culture);
+  if (slug) nodeById.forEach((n, id) => {
+    if (id.startsWith("ck:" + slug + ":")) lit.add(id); });
+
+  // The current person's OWN subgraph only — namespaced by interest id
+  // (interest:<person>:…) so shared topics can NEVER leak the highlight to another
+  // person. When ChatBox sees someone else, jay's node/interests/exclusive bridges
+  // all dim; a topic both share stays lit (it's the current person's too).
+  if (person && nodeById.has(person)) {
+    lit.add(person);
+    for (const nb of (adj.get(person) || [])) {
+      const nn = nodeById.get(nb);
+      if (!nn) continue;
+      if (nn.type === "Interest" && nb.startsWith("interest:" + person + ":")) {
+        lit.add(nb);                                 // this person's own interest
+        for (const t of (adj.get(nb) || [])) {       // → its topics (about edges)
+          const tn = nodeById.get(t);
+          if (tn && tn.type === "Topic") lit.add(t);
+        }
+      } else if (nn.type === "Conversation" || nn.type === "Interaction") {
+        lit.add(nb);                                 // their live status / relationship
+      }
+    }
+  }
+  return lit;
+}
+function applyCultureFocus() {
+  const a = activeState || {};
+  // Only dim when the loop is LIVE and there's actually someone in front of the
+  // camera. If the webcam loop isn't running (stale/absent state) OR no face is
+  // detected, show the FULL graph — no dimming.
+  if (!a.live || (!a.person && !a.present)) {
+    gNodes.selectAll("g.node").classed("inactive", false);
+    gLinks.selectAll("line").classed("inactive", false);
+    return;
+  }
+  // Live + someone present: light the robot(+its capabilities) + the recognised
+  // person's own subgraph + their active culture; dim the rest. An UNKNOWN face
+  // (present but no recognised person) leaves only ChatBox + its capabilities lit.
+  const lit = computeLit();
+  gNodes.selectAll("g.node").classed("inactive", d => !lit.has(d.id));
+  gLinks.selectAll("line").classed("inactive",
+    d => !(lit.has(d.source.id) && lit.has(d.target.id)));
+}
+
+// ---- hover highlight ------------------------------------------------------
+function highlight(id) {
+  const connected = new Set([id]);
+  links.forEach(l => { if (l.source.id===id) connected.add(l.target.id);
+                       if (l.target.id===id) connected.add(l.source.id); });
+  gNodes.selectAll("g.node").classed("dim", d => !connected.has(d.id));
+  gLinks.selectAll("line").classed("dim", d => !(d.source.id===id || d.target.id===id));
+}
+function clearHighlight() {
+  gNodes.selectAll("g.node").classed("dim", false);
+  gLinks.selectAll("line").classed("dim", false);
+}
+
+// ---- conversation panel ---------------------------------------------------
+let curRobot = "chatbox";          // the tab: every graph / persona / chat / voice call is for this robot
+const RQ = () => "robot=" + encodeURIComponent(curRobot);
+let selectedId = null;     // session (Event) node whose transcript is shown
+const convoEl   = document.getElementById("convo");
+const titleEl   = document.getElementById("convo-title");
+const bodyEl    = document.getElementById("convo-body");
+
+function openConvo(d) {
+  // Any node opens the panel: transcript/summaries (if any) + connections + delete.
+  selectedId = d.id;
+  gNodes.selectAll("g.node").classed("selected", n => n.id === d.id);
+  renderConvo();
+}
+function closeConvo() {
+  selectedId = null;
+  convoEl.style.display = "none";
+  gNodes.selectAll("g.node").classed("selected", false);
+}
+document.getElementById("convo-close").addEventListener("click", closeConvo);
+svg.on("click", closeConvo);   // click empty canvas to dismiss
+
+function esc(s) { return String(s ?? "").replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c])); }
+
+function renderConvo() {
+  if (selectedId === null) return;
+  const node = nodeById.get(selectedId);
+  if (!node) { closeConvo(); return; }
+
+  let html = "";
+  if (node.turns) {                 // session node → transcript
+    const turns = node.turns;
+    html += `<div class="sec-title">transcript · ${turns.length} turn${turns.length===1?"":"s"}</div>`;
+    html += turns.length === 0
+      ? `<div class="convo-empty">No conversation recorded for this session.</div>`
+      : turns.map(t => {
+          const when = t.ts ? new Date(t.ts).toLocaleTimeString() : "";
+          const child = t.child ? `<div class="bubble child"><span class="who">child</span>${esc(t.child)}</div>` : "";
+          const reply = t.reply ? `<div class="bubble reply"><span class="who">${esc(t.robot || "robot")}</span>${esc(t.reply)}</div>` : "";
+          return `<div class="turn"><div class="meta">turn ${t.turn ?? "?"} · ${esc(t.emotion||"")} · ${when}</div>${child}${reply}</div>`;
+        }).join("");
+  } else if (node.notes) {          // topic node → conversation summaries
+    const notes = node.notes;
+    html += `<div class="sec-title">summaries · ${notes.length}</div>`;
+    html += notes.length === 0
+      ? `<div class="convo-empty">No conversation summaries about this topic yet.</div>`
+      : notes.map(n => {
+          const when = n.ts ? new Date(n.ts).toLocaleString() : "";
+          return `<div class="turn"><div class="meta">${esc(n.person||"")} · ${when}</div>`
+               + `<div class="bubble child">${esc(n.text||"")}</div></div>`;
+        }).join("");
+    // Conversation history for this topic — fetched from the transcript DB (RAG).
+    html += `<div class="sec-title">conversation history</div>`;
+    html += `<div id="topic-history" class="convo-empty">loading…</div>`;
+  }
+
+  // Culture-topic facts / role-part lines — what ChatBox knows or how it talks.
+  if (node.facts && node.facts.length) {
+    const what = node.type === "RoleTopic" && node.kind !== "knowledge" ? node.kind : "facts";
+    html += `<div class="sec-title">${esc(what)} · ${node.facts.length}</div>`;
+    html += node.facts.map(f => `<div class="bubble child">${esc(f)}</div>`).join("");
+  }
+
+  // Connections — each deletable
+  const es = links.filter(l => l.source.id === node.id || l.target.id === node.id);
+  html += `<div class="sec-title">connections · ${es.length}</div>`;
+  html += es.length === 0
+    ? `<div class="convo-empty">No connections.</div>`
+    : es.map((l, i) => {
+        const out = l.source.id === node.id;
+        const other = out ? l.target : l.source;
+        const lab = l.elabel != null ? `${l.type} (${l.elabel})` : l.type;
+        return `<div class="conn"><span class="lbl">${out?"→":"←"} ${esc(lab)} <b>${esc(other.label)}</b></span>`
+             + `<span class="del" data-i="${i}" title="delete this edge">×</span></div>`;
+      }).join("");
+
+  html += `<button class="btn-danger" id="del-node">🗑 delete node + its ${es.length} edge${es.length===1?"":"s"}</button>`;
+
+  titleEl.innerHTML = `${esc(node.label)}<small>${esc(node.type||"")}</small>`;
+  bodyEl.innerHTML = html;
+  const delBtn = bodyEl.querySelector("#del-node");
+  if (delBtn) delBtn.onclick = () => deleteNode(node);
+  bodyEl.querySelectorAll(".conn .del").forEach(el => {
+    el.onclick = () => deleteEdge(es[+el.dataset.i]);
+  });
+  convoEl.style.display = "flex";
+
+  // Async: pull this topic's conversation history from the transcript DB (RAG).
+  if (node.type === "Topic") loadTopicHistory(node);
+}
+
+async function loadTopicHistory(node) {
+  const el = () => document.getElementById("topic-history");
+  const topic = node.topicLabel || node.label || "";
+  try {
+    const r = await fetch("/history?topic=" + encodeURIComponent(topic) + "&" + RQ(), { cache: "no-store" });
+    const j = await r.json();
+    if (selectedId !== node.id) return;           // panel changed while loading
+    const box = el(); if (!box) return;
+    const turns = j.turns || [];
+    if (turns.length === 0) {
+      box.className = "convo-empty";
+      box.textContent = "No conversation history for this topic yet.";
+      return;
+    }
+    box.className = "";
+    box.innerHTML = turns.map(t => {
+      const when = t.ts ? new Date(t.ts).toLocaleString() : "";
+      const who = t.person_id ? esc(t.person_id) : "child";
+      const child = t.child ? `<div class="bubble child"><span class="who">${who}</span>${esc(t.child)}</div>` : "";
+      const reply = t.reply ? `<div class="bubble reply"><span class="who">robot</span>${esc(t.reply)}</div>` : "";
+      return `<div class="turn"><div class="meta">${esc(t.emotion||"")} · ${when}</div>${child}${reply}</div>`;
+    }).join("");
+  } catch (e) {
+    const box = el(); if (box) { box.className = "convo-empty"; box.textContent = "History unavailable."; }
+  }
+}
+
+// ---- delete (writes back to kg_state.json via the server) -----------------
+async function postDelete(body) {
+  try {
+    const r = await fetch("/delete", { method: "POST",
+      headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, robot: curRobot }) });
+    const j = await r.json();
+    if (!j.ok) { alert("Delete failed: " + (j.error || "unknown")); return false; }
+    return true;
+  } catch (e) { alert("Delete failed: " + e); return false; }
+}
+async function deleteNode(node) {
+  const es = links.filter(l => l.source.id === node.id || l.target.id === node.id);
+  if (!confirm(`Delete node "${node.label}" and its ${es.length} edge(s)?`)) return;
+  if (await postDelete({ kind: "node", id: node.id })) { closeConvo(); poll(); }
+}
+async function deleteEdge(l) {
+  if (!confirm(`Delete edge: ${l.source.id} —${l.type}→ ${l.target.id}?`)) return;
+  if (await postDelete({ kind: "edge", source: l.source.id, target: l.target.id, edge_type: l.type })) {
+    await poll();       // refresh graph + links
+    renderConvo();      // re-render panel with the edge gone
+  }
+}
+
+// ---- role & persona assignment --------------------------------------------
+// Writes persona_assignment.json via the server; the webcam loop picks it up on
+// its next tick and attaches the role subgraph + persona. "now" is read back from
+// the graph, so it only changes once the loop has really applied it.
+const TRAITS = [["O","openness"],["C","conscientiousness"],["E","extraversion"],
+                ["A","agreeableness"],["N","neuroticism"]];
+const pEl = id => document.getElementById(id);
+let pChoices = null, pDirty = false;
+const fmt2 = v => (v >= 0 ? "+" : "") + Number(v).toFixed(1);
+pEl("p-traits").innerHTML = TRAITS.map(([k, n]) =>
+  `<div class="ctrl-row"><label>${k} · ${n}</label>
+     <input id="p-${k}" type="range" min="-1" max="1" step="0.1" value="0">
+     <span class="val" id="pv-${k}">+0.0</span></div>`).join("");
+TRAITS.forEach(([k]) => pEl("p-" + k).addEventListener("input", e => {
+  pEl("pv-" + k).textContent = fmt2(e.target.value); pDirty = true; drawRadar(); }));
+pEl("p-role").addEventListener("change", () => { pDirty = true; showBrief(); });
+pEl("p-robot").addEventListener("change", () => { pDirty = false; fillPersona(); });
+// Profile cards: a role + an OCEAN vector, styled after well-known animated
+// characters. ROUGH GUESSES at each character's Big Five — tweak freely. A card only
+// sets role + sliders; the robot keeps its own name and never claims to BE them.
+const PROFILE_CARDS = [
+  { name: "Baymax",      from: "Big Hero 6", role: "role:companion",
+    tag: "calm, gentle carer",           ocean: { O: 0.0, C: 0.8, E: -0.3, A: 0.9, N: -0.8 } },
+  { name: "WALL-E",      from: "WALL-E", role: "role:companion",
+    tag: "shy, curious, caring",         ocean: { O: 0.8, C: 0.5, E: -0.6, A: 0.8, N: 0.3 } },
+  { name: "Ms. Frizzle", from: "Magic School Bus", role: "role:tutor",
+    tag: "adventurous, upbeat teacher",  ocean: { O: 0.9, C: 0.2, E: 0.9, A: 0.7, N: -0.6 } },
+  { name: "Owl",         from: "Winnie the Pooh", role: "role:tutor",
+    tag: "wordy know-it-all",            ocean: { O: 0.4, C: 0.7, E: 0.6, A: -0.3, N: 0.0 } },
+  { name: "Olaf",        from: "Frozen", role: "role:storyteller",
+    tag: "bubbly, full of wonder",       ocean: { O: 0.8, C: -0.6, E: 0.9, A: 0.9, N: -0.5 } },
+  { name: "Dory",        from: "Finding Nemo", role: "role:storyteller",
+    tag: "cheerful and scatterbrained",  ocean: { O: 0.7, C: -0.9, E: 0.9, A: 0.9, N: 0.0 } },
+  { name: "Pooh",        from: "Winnie the Pooh", role: "role:reading-buddy",
+    tag: "slow, kind, a bit dreamy",     ocean: { O: 0.3, C: -0.6, E: -0.1, A: 0.9, N: -0.3 } },
+  { name: "Roz",         from: "Monsters, Inc.", role: "role:receptionist",
+    tag: "strict, by-the-book",          ocean: { O: -0.7, C: 0.9, E: -0.5, A: -0.6, N: 0.0 } },
+];
+let pSelCard = PROFILE_CARDS.length, pPending = null;   // Custom (the robot's own values) starts open
+const sameOcean = (a, b) => a && b && TRAITS.every(([k]) => Math.abs((a[k] || 0) - (b[k] || 0)) < 0.05);
+// OCEAN pentagon: centre = -1, dashed ring = 0 (average), outer ring = +1
+function radar(oc) {
+  const cx = 110, cy = 100, R = 64;
+  const pt = (i, f) => { const a = -Math.PI / 2 + i * 2 * Math.PI / 5;
+                         return [cx + Math.cos(a) * R * f, cy + Math.sin(a) * R * f]; };
+  const ring = f => TRAITS.map((_, i) => pt(i, f).map(n => n.toFixed(1)).join(",")).join(" ");
+  const dots = TRAITS.map(([k], i) => pt(i, ((oc[k] || 0) + 1) / 2));
+  return `<svg viewBox="0 0 220 205">
+    ${[0.25, 0.5, 0.75, 1].map(f => `<polygon points="${ring(f)}" fill="none"
+        ${f === 0.5 ? 'stroke="var(--muted)" stroke-dasharray="3 3"' : 'stroke="var(--panel-brd)"'}/>`).join("")}
+    ${TRAITS.map((_, i) => { const [x, y] = pt(i, 1);
+        return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--panel-brd)"/>`; }).join("")}
+    <polygon points="${dots.map(d => d.map(n => n.toFixed(1)).join(",")).join(" ")}"
+        fill="var(--relationship)" fill-opacity="0.28" stroke="var(--relationship)" stroke-width="2"/>
+    ${dots.map(([x, y]) => `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3" fill="var(--relationship)"/>`).join("")}
+    ${TRAITS.map(([k, n], i) => { const [x, y] = pt(i, 1.3);
+        return `<text x="${x.toFixed(1)}" y="${(y + 3).toFixed(1)}" text-anchor="middle" font-size="10"
+          fill="var(--text)"><title>${n}</title>${k} ${fmt2(oc[k] || 0)}</text>`; }).join("")}
+  </svg><div class="cap">dashed ring = average (0) · centre −1 · outer ring +1</div>`;
+}
+function drawRadar() {
+  const oc = {};
+  TRAITS.forEach(([k]) => oc[k] = +pEl("p-" + k).value);
+  pEl("p-radar").innerHTML = radar(oc);
+}
+function renderCards() {
+  const cur = (pChoices?.current || {})[pEl("p-robot").value] || {};
+  const roleLabel = id => ((pChoices?.roles || []).find(r => r.id === id) || {}).label || id;
+  const cards = PROFILE_CARDS.concat([{ name: "Custom", tag: "choose the role and traits yourself" }]);
+  const html = cards.map((c, i) => {
+    const active = c.role && cur.role === c.role && sameOcean(cur.ocean, c.ocean);
+    return `<div class="pcard${pSelCard === i ? " sel" : ""}" data-i="${i}" title="${esc(c.from || "")}">
+      ${active ? '<span class="on">● active</span>' : ""}
+      <div class="hd"><div class="nm">${esc(c.name)}</div><div class="sub">${esc(c.tag)}</div>
+      ${c.role ? `<span class="rl">${esc(roleLabel(c.role))}</span>` : ""}</div>
+      <div class="body"></div></div>`;
+  }).join("");
+  if (html === pEl("p-cards").dataset.html) return;   // unchanged: keep hover/clicks
+  pEl("p-holder").appendChild(pEl("p-editor"));       // park the editor before the cards are rebuilt
+  pEl("p-cards").dataset.html = html;
+  pEl("p-cards").innerHTML = html;
+  pEl("p-cards").querySelectorAll(".hd").forEach(el =>
+    el.onclick = () => loadCard(+el.parentElement.dataset.i));
+  const open = pEl("p-cards").querySelector(".pcard.sel .body");
+  if (open) { open.appendChild(pEl("p-editor")); drawRadar(); }
+}
+function loadCard(i) {             // open a profile: card → form (apply still sends it); click again to close
+  if (pSelCard === i) { pSelCard = null; renderCards(); return; }
+  const c = PROFILE_CARDS[i];
+  pSelCard = i;
+  if (c) {
+    pDirty = true;
+    pEl("p-role").value = c.role;
+    TRAITS.forEach(([k]) => { pEl("p-" + k).value = c.ocean[k];
+                              pEl("pv-" + k).textContent = fmt2(c.ocean[k]); });
+    showBrief();
+    pEl("p-msg").textContent = `${c.name} loaded — press apply to send it to the robot`;
+  }
+  renderCards();
+}
+function showBrief() {
+  const r = (pChoices?.roles || []).find(r => r.id === pEl("p-role").value);
+  pEl("p-brief").textContent = r ? r.brief : "";
+  const pt = (r && r.parts) || {};
+  const row = (k, lbl) => pt[k] && pt[k].length ? `<div><b>${lbl}</b> ${esc(pt[k].join(" · "))}</div>` : "";
+  pEl("p-role-info").innerHTML = row("goal", "goal") + row("manner", "talks") +
+    row("avoid", "avoids") + row("knowledge", "knows");
+}
+function fillPersona() {           // form ← what the robot plays right now
+  const cur = pChoices.current[pEl("p-robot").value] || {};
+  pEl("p-now").innerHTML = cur.role_label
+    ? `now: <b>${esc(cur.role_label)}</b> · ${esc(cur.persona || "")}` : "";
+  // Delivery check: "applied" only once the LOOP has written the change into the
+  // graph — the server only stores the request, so this proves the robot got it.
+  if (pPending) {
+    if (cur.role === pPending.role && sameOcean(cur.ocean, pPending.ocean)) {
+      pEl("p-msg").innerHTML = `<span style="color:#3ddc84">✓ applied — ${esc(pEl("p-robot").value)} now talks as a ${esc(cur.role_label)} (${esc(cur.persona || "")})</span>`;
+      pPending = null;
+    } else if (Date.now() - pPending.t0 > 6000) {
+      pEl("p-msg").innerHTML = `<span style="color:#d9b45a">saved — the chat already uses it, but the graph still shows the old role (the KG file couldn't be updated).</span>`;
+      pPending = null;
+    }
+  }
+  renderCards();
+  if (pDirty) return;              // never overwrite edits in progress
+  // A spec role (chatbox:role:companion) isn't in the library list: show the
+  // library role with the same name instead of a blank select.
+  const lib = (pChoices.roles || []).find(r => r.id === cur.role || r.label === cur.role_label);
+  if (lib) pEl("p-role").value = lib.id;
+  const oc = cur.ocean || {};
+  TRAITS.forEach(([k]) => { pEl("p-" + k).value = oc[k] || 0;
+                            pEl("pv-" + k).textContent = fmt2(oc[k] || 0); });
+  showBrief();
+  drawRadar();
+}
+async function loadPersona() {
+  try {
+    pChoices = await (await fetch("/persona?" + RQ(), { cache: "no-store" })).json();
+  } catch (_) { return; }
+  const keep = pEl("p-robot").value, keepRole = pEl("p-role").value;
+  pEl("p-robot").innerHTML = pChoices.robots.map(r => `<option>${esc(r)}</option>`).join("");
+  pEl("p-role").innerHTML = pChoices.roles.map(r =>
+    `<option value="${esc(r.id)}">${esc(r.label)}</option>`).join("");
+  if (keep) pEl("p-robot").value = keep;
+  if (keepRole) pEl("p-role").value = keepRole;
+  fillPersona();
+  chatSync();
+}
+pEl("p-apply").addEventListener("click", async () => {
+  const ocean = {};
+  TRAITS.forEach(([k]) => ocean[k] = +pEl("p-" + k).value);
+  const r = await (await fetch("/persona", { method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ robot: curRobot, role: pEl("p-role").value, ocean })
+  })).json();
+  pDirty = false;
+  if (r.ok) pPending = { role: r.role, ocean: r.ocean, t0: Date.now() };
+  pEl("p-msg").textContent = r.ok ? (r.graph ? "applied — graph updated, the chat uses it now"
+                                             : "saved — the chat uses it now; the graph file couldn't be updated") +
+      (r.robot ? (r.robot.sent ? ` · sent to ${r.robot.robots} connected robot${r.robot.robots > 1 ? "s" : ""}`
+                               : " · no robot connected") : "") +
+      (r.voice ? ` · voice: speed ${r.voice.rate}, pitch ${r.voice.pitch}, tone ${r.voice.tone}, volume ${r.voice.volume}` : "")
+                                  : "not applied: " + r.error;
+});
+// ---- persona chat -----------------------------------------------------------
+// Talks to POST /chat, which builds the prompt from the LAST APPLIED setup (the
+// assignment file), so it needs no webcam loop. The conversation restarts whenever a
+// new setup is applied, so the old persona's replies can't leak into the new one.
+const pcEl = id => document.getElementById(id);
+// One independent conversation per robot (tab): its own bubbles, history, epoch and announcements.
+const chatHists = {}, chatEpochs = {}, chatStates = {};
+let chatBusy = false, chatOn = false;
+const histOf = r => (chatHists[r] ||= []);
+function logFor(robot) {
+  const box = pcEl("pc-log");
+  let l = box.querySelector(`.pc-logr[data-r="${robot}"]`);
+  if (!l) {
+    l = document.createElement("div"); l.className = "pc-logr"; l.dataset.r = robot;
+    l.hidden = robot !== curRobot; box.appendChild(l);
+  }
+  return l;
+}
+function chatAdd(cls, html, robot = curRobot) {
+  const d = document.createElement("div");
+  d.className = "pc-msg " + cls; d.innerHTML = html; logFor(robot).appendChild(d);
+  pcEl("pc-log").scrollTop = pcEl("pc-log").scrollHeight; return d;
+}
+function oceanText(o) { return TRAITS.map(([k]) => k + fmt2(o[k] || 0)).join(" "); }
+function chatSync() {            // called from loadPersona() each second
+  if (!pChoices) return;
+  const robot = curRobot;
+  const a = (pChoices.assigned || {})[robot] || null, epoch = a ? a.ts : null;
+  const role = a ? ((pChoices.roles || []).find(r => r.id === a.role) || {}).label || a.role
+                 : ((pChoices.current || {})[robot] || {}).role_label || "";
+  if (chatEpochs[robot] !== undefined && epoch !== chatEpochs[robot]) {
+    chatHists[robot] = [];
+    chatAdd("pc-sys", `— ${esc(robot)} now plays <b>${esc(role)}</b>` +
+            (a ? ` (${esc(oceanText(a.ocean))})` : "") + ` · conversation restarted —`);
+  }
+  chatEpochs[robot] = epoch;
+  if (!pcEl("pc-as").dataset.fromReply)
+    pcEl("pc-as").innerHTML = role ? `as <b>${esc(role)}</b>` + (a ? ` · ${esc(oceanText(a.ocean))}` : "") : "";
+}
+async function chatConfig() {
+  const robot = curRobot;          // the tab may change while this awaits
+  let state, c = {};
+  try { c = await (await fetch("/chat?" + RQ(), { cache: "no-store" })).json(); state = c.available ? "on" : "off"; }
+  catch (_) { state = "missing"; }          // old viz process: no /chat route at all
+  chatOn = state === "on";
+  pcEl("pc-input").disabled = pcEl("pc-send").disabled = !chatOn;
+  pcEl("pc-input").placeholder = chatOn ? "say something to the robot…" : "chat unavailable — see the note above";
+  if (state === chatStates[robot]) return;
+  chatStates[robot] = state;
+  if (state === "on")
+    chatAdd("pc-sys", `connected: ${esc(c.backend)} — pick a role/persona, apply, then talk`, robot);
+  else if (state === "off")
+    chatAdd("pc-err", esc(c.hint || "Chat is off."));
+  else
+    chatAdd("pc-err", "This viz server has no chat endpoint — it was started before the chat was " +
+            "added. Stop it (Ctrl+C) and run it again: <code>python3 -m modules.graph_relationship.viz.server</code>");
+}
+function timingText(j, stt) {
+  const t = j.timing || {}, parts = [];
+  if (stt != null) parts.push(`heard ${stt}s`);
+  if (t.reply_s != null) parts.push(`reply ${t.reply_s}s`);
+  if (t.first_step_s != null) parts.push(`first words +${t.first_step_s}s`);
+  else if (t.tags_s != null) parts.push(`gestures ${t.tags_s}s`);
+  return parts.length ? ` · ${parts.join(" · ")}` : "";
+}
+function showReply(el, j, stt, robot = curRobot) {
+  el.className = "pc-msg pc-bot";
+  el.innerHTML = esc(j.reply) + `<span class="pc-meta">${esc(j.role)} · ${esc(j.persona)}` +
+    (j.tag ? ` · [${esc(j.tag)}]` : "") +
+    (j.robot ? (j.robot.sent ? ` · spoken on ${j.robot.robots} robot${j.robot.robots > 1 ? "s" : ""} ✓`
+                : " · no robot connected") : "") + timingText(j, stt) + `</span>`;
+  if (robot !== curRobot) return;          // another tab's reply: leave this tab's header alone
+  pcEl("pc-as").dataset.fromReply = "1";
+  pcEl("pc-as").innerHTML = `as <b>${esc(j.role)}</b> · ${esc(j.persona)}`;
+}
+// What you say to the robot's microphone: the hub transcribes it and the viz answers it, so it shows
+// here like a typed message (a you bubble, then the reply). Idempotent: poll the whole log.
+const voiceSeen = new Map();     // id -> {bot: reply bubble, done}
+let voiceFirst = true;
+async function pollVoice() {
+  let j;
+  try { j = await (await fetch("/voice", { cache: "no-store" })).json(); } catch (_) { return; }
+  for (const it of j.items || []) {
+    let v = voiceSeen.get(it.id);
+    if (!v) {
+      if (voiceFirst) { voiceSeen.set(it.id, { done: true }); continue; }   // history from before this page load
+      v = { done: false, you: it.text ? chatAdd("pc-you", esc(it.text), it.robot) : null, bot: null };
+      voiceSeen.set(it.id, v);
+    }
+    if (v.done) continue;
+    if (it.text && !v.you) v.you = chatAdd("pc-you", esc(it.text), it.robot);
+    if (it.text && !v.bot && !it.error) v.bot = chatAdd("pc-bot", "…", it.robot);
+    if (!it.done) continue;
+    v.done = true;
+    if (it.error) {
+      if (v.bot) { v.bot.className = "pc-msg pc-err"; v.bot.textContent = "No reply: " + it.error; }
+      else chatAdd("pc-err", "couldn't make that out: " + esc(it.error), it.robot);
+    } else if (it.out) {
+      histOf(it.robot).push([it.text, it.out.reply]);
+      showReply(v.bot, it.out, it.stt_s, it.robot);
+    }
+  }
+  voiceFirst = false;
+}
+setInterval(pollVoice, 1000);
+pollVoice();
+pcEl("pc-form").addEventListener("submit", async e => {
+  e.preventDefault();
+  const input = pcEl("pc-input"), msg = input.value.trim();
+  if (!msg || chatBusy || !chatOn) return;
+  const robot = curRobot;          // a reply belongs to the tab it was typed in, even if you switch meanwhile
+  input.value = ""; chatBusy = true; pcEl("pc-send").disabled = true;
+  chatAdd("pc-you", esc(msg), robot);
+  const wait = chatAdd("pc-bot", "…", robot);
+  try {
+    const r = await fetch("/chat", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ robot, message: msg, history: histOf(robot) }) });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || r.status);
+    histOf(robot).push([msg, j.reply]);
+    showReply(wait, j, undefined, robot);
+  } catch (err) {
+    wait.className = "pc-msg pc-err"; wait.textContent = "No reply: " + err.message;
+  } finally {
+    chatBusy = false; pcEl("pc-send").disabled = !chatOn; pcEl("pc-log").scrollTop = 1e9; input.focus();
+  }
+});
+pcEl("pc-clear").addEventListener("click", () => {
+  chatHists[curRobot] = []; logFor(curRobot).innerHTML = ""; delete pcEl("pc-as").dataset.fromReply;
+  chatStates[curRobot] = null; chatConfig();
+});
+chatConfig();
+setInterval(chatConfig, 5000);
+
+loadPersona();
+setInterval(loadPersona, 1000);
+
+// ---- robot connection status ------------------------------------------------
+let robotUp = false;
+let actionsOf = "";                                 // whose buttons are drawn
+function renderActions(all) {                       // all: robot id -> {tag: when to use it}
+  const box = pEl("act-btns"), actions = (all || {})[curRobot];
+  pEl("actions").hidden = !actions;                 // a robot with no action list has no panel
+  if (!actions || actionsOf === curRobot) return;
+  actionsOf = curRobot; box.innerHTML = "";
+  for (const [tag, tip] of Object.entries(actions)) {
+    const b = document.createElement("button");
+    b.textContent = tag.replace("_", " ").toLowerCase(); b.title = tip; b.dataset.tag = tag;
+    b.addEventListener("click", async () => {
+      const m = pEl("act-msg"); m.textContent = `sending ${tag}…`;
+      try {
+        const r = await fetch("/action", {method: "POST", headers: {"Content-Type": "application/json"},
+                                          body: JSON.stringify({tag, robot: curRobot})});
+        const j = await r.json();
+        m.textContent = j.ok ? `sent ${tag} ✓` : (j.error || r.status);
+      } catch (e) { m.textContent = "failed: " + e.message; }
+    });
+    box.appendChild(b);
+  }
+}
+let tabsKey = "", robotsKey = "";
+const robotName = {};                               // id -> display name
+function syncRobots(j) {                            // colours / names come from the registry (robots.json)
+  const key = JSON.stringify([j.colors, j.names]);
+  if (key === robotsKey || !j.colors) return;
+  robotsKey = key;
+  for (const k of Object.keys(ROBOT_COLOR)) delete ROBOT_COLOR[k];
+  Object.assign(ROBOT_COLOR, j.colors); Object.assign(robotName, j.names || {});
+  pEl("hud-legend").innerHTML = Object.keys(j.colors).map(r =>
+    `<span><i class="lsw" style="background:${j.colors[r]}"></i>${esc(robotName[r] || r)}</span>`).join("") +
+    `<span><i class="lsw" style="background:#fff"></i>Jay</span>`;
+  lastSig = ""; tabsKey = "";                       // repaint the graph and tabs in the new colours
+}
+function renderTabs(workspaces, robots) {
+  const box = pEl("tabs");
+  box.hidden = workspaces.length < 2;               // a single robot needs no tabs
+  const up = r => robots.some(x => x.robot_name.toLowerCase() === r);
+  const key = workspaces.map(r => r + up(r) + (r === curRobot)).join();
+  if (key === tabsKey) return;
+  tabsKey = key;
+  box.innerHTML = workspaces.map(r => {
+    const c = ROBOT_COLOR[r] || "#ffffff";
+    return `<button data-r="${esc(r)}" class="${r === curRobot ? "on" : ""}" style="${r === curRobot ?
+      `border-color:${c};box-shadow:0 0 0 1px ${c}` : ""}">` +
+      `<span class="tswatch" style="background:${c}"></span>${esc(robotName[r] || r)}` +
+      `<span class="tdot ${up(r) ? "on" : ""}" title="${up(r) ? "connected" : "not connected"}"></span></button>`;
+  }).join("");
+  box.querySelectorAll("button").forEach(b => b.addEventListener("click", () => switchRobot(b.dataset.r)));
+}
+function switchRobot(r) {
+  if (r === curRobot) return;
+  curRobot = r;
+  try { localStorage.setItem("robot-tab", r); } catch (_) {}
+  document.querySelectorAll("#pc-log .pc-logr").forEach(l => l.hidden = l.dataset.r !== r);
+  logFor(r);                                          // make sure this robot has a log
+  pEl("p-robot").innerHTML = `<option>${esc(r)}</option>`;
+  pDirty = false; delete pEl("pc-as").dataset.fromReply; pEl("pc-as").innerHTML = "";
+  pEl("p-msg").textContent = "";
+  closeConvo(); tabsKey = "";
+  applyRobotFocus(); fitFocus();
+  pEl("act-msg").textContent = "";
+  loadPersona(); chatConfig(); robotStatus();
+}
+async function robotStatus() {
+  let dot = "off", txt = "hub off";
+  robotUp = false;
+  try {
+    const j = await (await fetch("/robots")).json();
+    renderActions(j.actions);
+    pEl("robots-link").hidden = j.manage === false;       // robots are added on the server's own Robots tab
+    syncRobots(j);
+    renderTabs(j.workspaces || [curRobot], j.robots);
+    const mine = j.robots.filter(x => x.robot_name.toLowerCase() === curRobot);
+    robotUp = j.hub && mine.length > 0;
+    if (j.hub && mine.length) {
+      dot = "on"; txt = mine.map(r => esc(r.robot_name)).join(", ");
+    } else if (j.hub && j.links && j.links[curRobot]) {      // a robot we dial: say where and why not
+      const l = j.links[curRobot]; dot = ""; txt = `dialling ${esc(l.url.replace("ws://", ""))}` + (l.error ? ` · ${esc(l.error)}` : "");
+    } else if (j.hub) { dot = ""; txt = `waiting · :${j.port}`; }
+  } catch (e) { dot = ""; txt = "viz offline"; }
+  pEl("rb-dot").className = dot; pEl("rb-txt").innerHTML = txt;
+  document.querySelectorAll("#act-btns button").forEach(b => b.disabled = !robotUp);
+  if (!robotUp) pEl("act-msg").textContent = "connect a robot to use these";
+  else if (!pEl("act-msg").textContent || pEl("act-msg").textContent.startsWith("connect")) pEl("act-msg").textContent = "click to play on the robot";
+}
+robotStatus();
+setInterval(robotStatus, 2000);
+(async () => {                                        // reopen on the tab you left
+  try {
+    const saved = new URLSearchParams(location.search).get("robot") || localStorage.getItem("robot-tab");
+    if (saved && saved !== "chatbox" && ((await (await fetch("/robots")).json()).workspaces || []).includes(saved))
+      switchRobot(saved);
+  } catch (_) {}
+})();
+
+// ---- polling loop ---------------------------------------------------------
+const pulse = document.getElementById("pulse");
+let lastSig = "";
+async function poll() {
+  try {
+    const r = await fetch("/graph.json", { cache: "no-store" });
+    const g = await r.json();
+    const sig = JSON.stringify(g);
+    if (sig !== lastSig) {          // only re-diff when something actually changed
+      lastSig = sig;
+      update(g);
+      document.getElementById("ts").textContent = new Date().toLocaleTimeString();
+      pulse.classList.add("on"); setTimeout(() => pulse.classList.remove("on"), 250);
+      if (selectedId !== null) renderConvo();   // refresh open session live
+    }
+  } catch (_) { /* server not ready / transient — try again next tick */ }
+}
+poll();
+setInterval(poll, 1000);
+
+// ---- drag to resize the persona/chat column ---------------------------------
+// Left edge: column width (the graph canvas follows). Bar between the sections: how
+// much height each gets. Sizes are remembered per browser.
+(function sideResize() {
+  const side = document.getElementById("side"), persona = document.getElementById("persona");
+  const store = { get(k) { try { return localStorage.getItem(k); } catch (_) { return null; } },
+                  set(k, v) { try { localStorage.setItem(k, v); } catch (_) {} } };
+  const setW = w => { const px = Math.max(300, Math.min(window.innerWidth * 0.7, w));
+    document.documentElement.style.setProperty("--side", px + "px");
+    window.dispatchEvent(new Event("resize")); return px; };
+  const setH = h => { const px = Math.max(150, Math.min(side.clientHeight - 170, h));
+    persona.style.flex = `0 0 ${px}px`; return px; };
+  const w0 = +store.get("side-w"), h0 = +store.get("persona-h");
+  if (w0) setW(w0);
+  if (h0) setH(h0);
+  function drag(grip, move, save) {
+    grip.addEventListener("pointerdown", e => {
+      grip.setPointerCapture(e.pointerId); grip.classList.add("drag");
+      document.body.style.userSelect = "none"; e.preventDefault();
+    });
+    grip.addEventListener("pointermove", e => { if (grip.hasPointerCapture(e.pointerId)) move(e); });
+    const end = e => { if (!grip.classList.contains("drag")) return;
+      grip.classList.remove("drag"); document.body.style.userSelect = ""; save(); };
+    grip.addEventListener("pointerup", end); grip.addEventListener("pointercancel", end);
+  }
+  let w = 0, h = 0;
+  drag(document.getElementById("side-grip"), e => { w = setW(window.innerWidth - e.clientX); },
+       () => w && store.set("side-w", w));
+  drag(document.getElementById("split-grip"), e => { h = setH(e.clientY - side.getBoundingClientRect().top); },
+       () => h && store.set("persona-h", h));
+})();
+
+window.addEventListener("resize", () => {
+  width = window.innerWidth - sideW(); height = window.innerHeight;
+  svg.attr("width", width).attr("height", height);
+  sim.force("center", d3.forceCenter(width/2, height/2));
+  sim.force("x").x(width/2);
+  sim.force("y").y(height/2);
+  sim.alpha(0.1).restart();
+});
+</script>
+</body>
+</html>

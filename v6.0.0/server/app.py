@@ -39,7 +39,6 @@ from core.rbac import BatchingAuditSink, GrantStore, RBACFilter
 from decision import BatchingDecisionSink, DecisionRecorder
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
-from gateway.delegation_handler import DelegationHandler
 from gateway.http_gateway import create_http_gateway
 from gateway.persona_gateway import create_persona_gateway
 from gateway.demo_gateway import create_demo_gateway
@@ -685,6 +684,12 @@ def create_app() -> tuple[Flask, WebSocketGateway, RobotRegistry]:
     orchestrator.load_script(DEMO_STEPS)
     ws_gateway.set_demo_orchestrator(orchestrator)
 
+    # Method B: a gesture tag per Navel sentence, planned here. On by default (Navel only); METHOD_B_OLLAMA_MODEL=off disables.
+    from conversation.method_b import build_method_b
+    ws_gateway.method_b = build_method_b(
+        cfg.method_b, f"http://{cfg.llm.ollama_host}:{cfg.llm.ollama_port}")
+    print(f"[MethodB] {'on, in the server' if ws_gateway.method_b else 'off (METHOD_B_OLLAMA_MODEL=off)'}")
+
     demo_blueprint = create_demo_gateway(orchestrator, ws_gateway)
     app.register_blueprint(demo_blueprint)
 
@@ -707,14 +712,42 @@ def main():
     registry.start_cleanup_task()
 
     # ── Graceful shutdown on Ctrl+C / SIGTERM ────────────────────────────────
+    stopping = []
+
     def _shutdown(sig, frame):
-        print("\n[App] Shutting down...")
-        registry.stop_cleanup_task()
-        ws_gateway.shutdown()
-        sys.exit(0)
+        if stopping:                       # a second Ctrl+C: stop waiting for the tidy-up
+            os._exit(1)
+        stopping.append(1)
+        print("\n[App] Shutting down... (Ctrl+C again to force)")
+        try:
+            registry.stop_cleanup_task()
+            ws_gateway.shutdown()
+        except Exception as e:
+            print(f"[App] Shutdown error: {e}")
+        sys.stdout.flush()
+        os._exit(0)                        # worker threads and open sockets must not keep the process alive
 
     signal.signal(signal.SIGINT, _shutdown)
     signal.signal(signal.SIGTERM, _shutdown)
+
+    # ── Robots that dial in (client_config connect_to_server) ─────────────────
+    if cfg.server.inbound_port:
+        ws_gateway.start_inbound_server(cfg.server.host, cfg.server.inbound_port, cfg.server.api_token)
+
+    # ── Roles page: assign role + persona, persona chat, graph (own port) ─────
+    if cfg.roles.port:
+        from gateway.roles_gateway import start_roles_service
+        on_persona = None
+        if cfg.roles.sync_db:
+            from data import robot_repo
+
+            def on_persona(client_id, persona_name, role_brief):
+                robot_repo.update_robot(client_id, robot_role=role_brief)
+        start_roles_service(
+            ws_gateway, cfg.roles.data_dir, cfg.roles.port, cfg.server.host,
+            ai_server=cfg.roles.ai_server, ollama_model=cfg.llm.ollama_model,
+            ollama_url=f"http://{cfg.llm.ollama_host}:{cfg.llm.ollama_port}", on_persona=on_persona,
+            server_registry=registry)
 
     # ── Start Flask ───────────────────────────────────────────────────────────
     print("=" * 55)
@@ -753,6 +786,7 @@ def main():
     print("  Waiting for requests... (Ctrl+C to stop)")
     print("=" * 55)
 
+    app.wsgi_app = ws_gateway.socketio_app(app.wsgi_app)       # + the ChatBox Socket.IO client on the same port
     app.run(
         host=cfg.server.host,
         port=cfg.server.port,

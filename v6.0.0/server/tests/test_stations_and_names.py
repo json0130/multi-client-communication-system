@@ -232,7 +232,7 @@ class TestTheStandInPrompt:
         inst.robot_name, inst._robot_role, inst._allowed_tags = "Pepper", "Guide", ["DEFAULT"]
         inst._history, inst._max_history = [], 10
         inst.last_active = 0
-        inst._refresh_role_from_db = lambda: None
+        inst._refresh_role_from_db = lambda **_: None
         inst._get_rag_context = lambda m: []
         inst._get_active_peers = lambda: []
         inst._persist = lambda *a: None

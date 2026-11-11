@@ -55,13 +55,13 @@ robots:
   # Manager, which is what gives Pepper its unified view. It does not widen what
   # these robots can read — that is governed by access_level alone.
   - id: chatbox_01
-    role: "Conversational AI researcher"
+    role: "Companion and home-assistant robot researcher"
     access_level: local
     default_visibility: global
     importance: 0.8
 
   - id: navel_01
-    role: "Co-speech motion researcher"
+    role: "Contextual co-speech motion researcher"
     access_level: local
     default_visibility: global
     importance: 0.4

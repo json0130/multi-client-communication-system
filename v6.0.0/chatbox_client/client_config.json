@@ -2,6 +2,8 @@
     "client_id":   "chatbox_jetson_001",
     "robot_name":  "ChatBox",
     "server_url":  "http://100.119.121.68:5000",
+    "connect_to_server": true,
+    "server_ws_port": 8790,
     "ws_port":     8765,
     "ip_address":  "100.68.31.49",
 
@@ -11,7 +13,6 @@
 
     "allowed_tags": [
         "[GREETING]",
-        "[WAVE]",
         "[CONFUSED]",
         "[HAPPY]",
         "[DEFAULT]",

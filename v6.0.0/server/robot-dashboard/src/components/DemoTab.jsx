@@ -493,11 +493,17 @@ function StatePill({ state }) {
   )
 }
 
+// The colours the Roles page draws these robots in (gateway/roles_gateway.py DEFAULT_ROBOTS).
+const ROBOT_COLORS = { chatbox: '#ffa46b', navel: '#7dd0f9' }      // the graph's orange and blue, a shade lighter
+const robotColor = (name) => ROBOT_COLORS[Object.keys(ROBOT_COLORS).find(k => String(name || '').toLowerCase().includes(k))]
+
 function ChatMessage({ msg }) {
   const isUser   = msg.role === 'user'
   const isSystem = msg.role === 'system'
+  const color    = !isUser && !isSystem ? robotColor(msg.robot) : undefined
   return (
-    <div className={`chat-msg ${isUser ? 'chat-msg-user' : ''} ${isSystem ? 'chat-msg-system' : ''}`}>
+    <div className={`chat-msg ${isUser ? 'chat-msg-user' : ''} ${isSystem ? 'chat-msg-system' : ''} ${color ? 'chat-msg-robot' : ''}`}
+         style={color ? { '--rc': color } : undefined}>
       {!isUser && (
         <div className="chat-msg-header">
           <span className="chat-msg-name">{isSystem ? '— system —' : msg.robot}</span>
@@ -508,7 +514,7 @@ function ChatMessage({ msg }) {
       {isUser && (
         <div className="chat-msg-header" style={{ justifyContent: 'flex-end' }}>
           <span className="chat-msg-time muted">{msg.time}</span>
-          <span className="chat-msg-name" style={{ color: 'var(--muted)' }}>You</span>
+          <span className="chat-msg-name" style={{ color: 'var(--muted)' }}>{msg.who || 'You'}</span>
         </div>
       )}
     </div>
@@ -591,6 +597,14 @@ export default function DemoTab() {
     setMessages(prev => [...prev, { id: Date.now() + Math.random(), ...msg }])
   }, [])
 
+  // The feed is this run's conversation: whatever was said before Start is dropped when the run begins.
+  const activeNow = ['running', 'waiting_ack', 'qa_window', 'awaiting_cue', 'paused'].includes(status?.state)
+  const wasActive = useRef(false)
+  useEffect(() => {
+    if (activeNow && !wasActive.current) setMessages([])
+    wasActive.current = activeNow
+  }, [activeNow])
+
   useEffect(() => {
     if (!status) return
 
@@ -637,8 +651,11 @@ export default function DemoTab() {
         if (stop) return
         for (const u of res.utterances || []) {
           lastUtterance.current = Math.max(lastUtterance.current, u.seq)
-          addMsg({ role: 'robot', robot: u.robot_name, text: u.text,
-                   time: ts(new Date(u.at * 1000)), qa: true })
+          if (!wasActive.current) continue        // before Start: moved past, not shown
+          const visitor = u.robot_name === 'Visitor'
+          addMsg(visitor
+            ? { role: 'user', who: 'Visitor', text: u.text, time: ts(new Date(u.at * 1000)) }
+            : { role: 'robot', robot: u.robot_name, text: u.text, time: ts(new Date(u.at * 1000)), qa: true })
         }
         if (typeof res.seq === 'number') {
           lastUtterance.current = Math.max(lastUtterance.current, res.seq)
@@ -743,65 +760,11 @@ export default function DemoTab() {
   return (
     <div className="demox-root">
 
-      {/* ═══════════════════ TOP BAR ═══════════════════════════════════════ */}
-      <div className="demox-topbar">
-        <div className="demox-state-row">
-          <StatePill state={status?.state} />
-          {status?.total > 0 && (
-            <span className="demo-progress">
-              Step {status.step_idx + 1}/{status.total}
-              {status.robot_id && <span className="demo-robot"> · {status.robot_id}</span>}
-            </span>
-          )}
-          {isRunning && <RunClock status={status} />}
-        </div>
-
-        {/* Compact controls */}
-        <div className="demox-controls">
-          <button className="btn btn-primary btn-sm" disabled={ctrlLoad || isRunning}  onClick={() => setShowSelector(true)}>Start</button>
-          <button className="btn btn-danger  btn-sm" disabled={ctrlLoad || isIdle}     onClick={() => run(stopDemo)}>Stop</button>
-          {status?.state === 'paused'
-            ? <button className="btn btn-sm" disabled={ctrlLoad}              onClick={() => run(resumeDemo)}>Resume</button>
-            : <button className="btn btn-sm" disabled={ctrlLoad || isIdle}    onClick={() => run(pauseDemo)}>Pause</button>
-          }
-          <button className="btn btn-sm"     disabled={ctrlLoad || isIdle}    onClick={() => run(nextDemoStep)} title="Skip current step">Skip</button>
-          {inQa
-            ? <button className="btn btn-sm btn-danger" disabled={ctrlLoad}   onClick={() => run(endQaMode)}>End Q&amp;A</button>
-            : <button className="btn btn-sm btn-qa"     disabled={ctrlLoad || isIdle} onClick={() => run(r => startQaMode('', r))}>Q&amp;A</button>
-          }
-          {/* Optional label for the next override. One click, then it clears. */}
-          <select
-            className="form-select"
-            value={reason}
-            disabled={ctrlLoad || isIdle}
-            onChange={e => setReason(e.target.value)}
-            title="Why are you overriding? Optional — recorded as a training label."
-            style={{ width: 'auto', maxWidth: 170, fontSize: '0.75rem', padding: '4px 6px' }}
-          >
-            <option value="">why? (optional)</option>
-            {OVERRIDE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-          </select>
-          {/* TTS toggle */}
-          <button
-            className={`btn btn-sm ${ttsEnabled ? 'btn-tts-on' : ''}`}
-            title={ttsEnabled
-              ? 'Mute browser TTS — the robots are already speaking'
-              : 'Speak here too (for working without robots attached)'}
-            onClick={() => {
-              if (ttsEnabled) window.speechSynthesis?.cancel()
-              setTtsEnabled(v => !v)
-            }}
-          >
-            {ttsEnabled ? '🔊' : '🔇'}
-          </button>
-        </div>
-      </div>
-
       {/* ═══════════════════ MOVE-ON BANNER (qa_window only) ══════════════ */}
       {inQa && (
         <div className="demox-moveon-banner">
           <div className="demox-moveon-left">
-            <span className="demox-moveon-label">⏸ Pepper is waiting for visitors</span>
+            <span className="demox-moveon-label">Q&amp;A</span>
             {status?.text && (
               <span className="demox-moveon-quote">
                 &ldquo;{status.text.replace(/\[.*?\]/g, '').trim()}&rdquo;
@@ -824,6 +787,21 @@ export default function DemoTab() {
         {/* ── Left: Step timeline ──────────────────────────────────────── */}
         <div className="demox-timeline-pane">
           <div className="demo-section-title">Script</div>
+          <div className="demox-status">
+            <div className="demox-state-row">
+              <StatePill state={status?.state} />
+              {status?.total > 0 && (
+                <span className="demo-progress">
+                  Step {status.step_idx + 1}/{status.total}
+                  {status.robot_id && <span className="demo-robot"> · {status.robot_id}</span>}
+                </span>
+              )}
+              {isRunning && <RunClock status={status} />}
+            </div>
+            {isRunning && status?.text && (
+              <div className="demox-steptext">{status.text.replace(/\[.*?\]/g, '').trim()}</div>
+            )}
+          </div>
 
           {/* Mid-demo revision. The pre-start modal can reorder robots; this is
               the equivalent once the tour is under way, for when visitors say
@@ -907,15 +885,23 @@ export default function DemoTab() {
               className="form-select"
               value={targetId}
               onChange={e => setTargetId(e.target.value)}
-              style={{ flex: 1 }}
+              style={{ flex: '0 1 130px', minWidth: 0 }}
             >
-              {robots.length === 0 && <option value="">No robots connected</option>}
+              {robots.length === 0 && <option value="">No robots</option>}
               {robots.map(r => (
-                <option key={r.client_id} value={r.client_id}>
-                  {r.robot_name} ({r.client_id})
+                <option key={r.client_id} value={r.client_id} title={r.client_id}>
+                  {r.robot_name}
                 </option>
               ))}
             </select>
+            <div className="demox-controls">
+              <button className="btn btn-primary btn-sm" disabled={ctrlLoad || isRunning}  onClick={() => setShowSelector(true)}>Start</button>
+              <button className="btn btn-danger  btn-sm" disabled={ctrlLoad || isIdle}     onClick={() => run(stopDemo)}>Stop</button>
+              {status?.state === 'paused'
+                ? <button className="btn btn-sm" disabled={ctrlLoad}              onClick={() => run(resumeDemo)}>Resume</button>
+                : <button className="btn btn-sm" disabled={ctrlLoad || isIdle}    onClick={() => run(pauseDemo)}>Pause</button>
+              }
+            </div>
           </div>
 
           {/* Feed */}

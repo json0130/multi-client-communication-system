@@ -148,6 +148,21 @@ class OutputModule(BaseModule):
 # and a tts_stop could run before a sentence it was meant to cancel. Their
 # handlers only queue work, so this lane never blocks for long. demo_step is
 # NOT here: it holds its thread until the step has been spoken.
+class _QuietWebProbes(logging.Filter):
+    """A browser tab, bookmark or health check that opens a robot's WebSocket port as a web page is refused
+    with 426, as it should be, and the websockets library logs that as an ERROR with a traceback. Drop that
+    one pair of records; every real handshake problem still logs."""
+
+    def filter(self, record):
+        if "connection rejected (426" in record.getMessage():
+            return False
+        exc = record.exc_info[0] if record.exc_info else None
+        return not (record.getMessage().startswith("opening handshake failed")
+                    and getattr(exc, "__name__", "") == "InvalidUpgrade")
+
+
+logging.getLogger("websockets.server").addFilter(_QuietWebProbes())
+
 ORDERED_EVENTS = {"chat_sentence", "tts_stop", "chat_response", "speech_response"}
 
 class ServerConnection:
@@ -192,7 +207,12 @@ class ServerConnection:
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
     def start_server(self):
-        """Start the WebSocket server in a background daemon thread."""
+        """Start the WebSocket server in a background daemon thread, or, with `connect_to_server` in the
+        config, dial the central server instead (for a robot it cannot reach: behind NAT, on Tailscale)."""
+        if self.client_config.get("connect_to_server"):
+            threading.Thread(target=self._run_dial_loop, daemon=True, name="ws-dial").start()
+            logger.info(f"[WS Client] Connecting out to {self._server_ws_url()} (keeps retrying)")
+            return
         t = threading.Thread(target=self._run_loop, daemon=True, name="ws-server")
         t.start()
         logger.info(f"[WS Server] Listening on 0.0.0.0:{self.ws_port}")
@@ -201,6 +221,30 @@ class ServerConnection:
     def _run_loop(self):
         asyncio.set_event_loop(self._loop)
         self._loop.run_until_complete(self._serve())
+
+    DIAL_RETRY_SEC = 3
+
+    def _server_ws_url(self) -> str:
+        host = urlparse(self.server_url).hostname or "localhost"
+        return f"ws://{host}:{self.client_config.get('server_ws_port', 8790)}"
+
+    def _run_dial_loop(self):
+        asyncio.set_event_loop(self._loop)
+        self._loop.run_until_complete(self._dial_forever())
+
+    async def _dial_forever(self):
+        """Connect to the server, say who we are, and serve it like a dialled-in connection; redial when
+        it drops. The rest of the client does not know which side opened the socket."""
+        url = self._server_ws_url()
+        while True:
+            try:
+                async with websockets.connect(url, ping_interval=20, ping_timeout=10) as ws:
+                    await ws.send(json.dumps({"type": "hello", "client_id": self.client_id,
+                                              "token": os.environ.get("API_TOKEN", "")}))
+                    await self._handle_connection(ws)
+            except Exception as e:
+                logger.warning(f"[WS Client] Cannot reach the server at {url} ({e}); retrying in {self.DIAL_RETRY_SEC}s")
+            await asyncio.sleep(self.DIAL_RETRY_SEC)
 
     async def _serve(self):
         async with websockets.serve(
@@ -384,6 +428,8 @@ class ServerConnection:
             "ip_address": ip,
             "ws_port": self.ws_port,
         }
+        if self.client_config.get("connect_to_server"):
+            payload["connect_mode"] = "inbound"     # the server must not try to dial this robot
         try:
             resp = requests.post(url, json=payload, headers=api_headers(), timeout=10)
             if resp.status_code == 200:

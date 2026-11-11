@@ -41,3 +41,6 @@ sessions.db
 kg_state*.json
 kg_culture*.json
 *.bak
+
+# Role / persona runtime data (Roles page): graphs, assignments, registry
+v6.0.0/server/roles_data/

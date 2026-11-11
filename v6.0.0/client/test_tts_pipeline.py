@@ -84,3 +84,14 @@ def test_a_demo_step_callback_still_fires_after_playback():
     m.speak_with_callback("Welcome to the lab.", callback=done.set)
     assert done.wait(2)
     m.stop()
+
+
+def test_the_gtts_fallback_pitch_shift_keeps_the_tempo():
+    """With Edge refused every robot fell back to one gTTS voice; a per-robot pitch tells them apart."""
+    m = EdgeTTSOutputModule(config={"gtts_pitch": 3})
+    assert m._gtts_pitch == 3
+    assert m._audio_filter(0) == "atempo=1.25"
+    shifted = m._audio_filter(3)
+    rate = round(24000 * 2 ** (3 / 12))
+    assert shifted.startswith(f"asetrate={rate},aresample=24000,atempo=")
+    assert abs(float(shifted.rsplit("=", 1)[1]) * 2 ** (3 / 12) - 1.25) < 0.001      # speed x pitch ratio is unchanged

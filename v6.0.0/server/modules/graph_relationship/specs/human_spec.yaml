@@ -1,0 +1,10 @@
+# Authored / prior attributes for a KNOWN returning human.
+# Humans are mostly learned later — only include what is authored up front.
+# Seeded by graph_relationship.seed into the Human (Person) subgraph.
+id: jay
+name: Jay
+persona: "curious, talkative"
+role: "student"
+interests:                 # person -> Interest -> (about) -> shared TopicNode
+  - label: music
+    topics: [jazz]

@@ -32,6 +32,9 @@ pillow>=8.0.0
 
 # ── Robot transport ───────────────────────────────────────────────────────────
 websocket-client>=1.0.0
+websockets>=11.0          # robots that dial in to the server
+python-socketio>=5.10           # the ChatBox client connects with Socket.IO (client_init)
+simple-websocket>=1.0           # WebSocket transport for python-socketio (polling works without)
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
 pytest>=8.0.0

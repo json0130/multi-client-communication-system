@@ -116,6 +116,8 @@ def create_demo_gateway(orchestrator, ws_gateway=None) -> Blueprint:
         profile = VisitorProfile(interest_text=interest, style=style, topics=topics) \
             if (interest or style != "general") else None
 
+        if ws_gateway is not None:
+            ws_gateway.demo_started()
         orchestrator.start(
             robot_ids=robot_ids if robot_ids else None,
             time_budget_sec=budget,

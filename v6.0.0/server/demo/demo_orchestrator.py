@@ -669,6 +669,11 @@ class DemoOrchestrator:
             }
         logger.info(f"[Demo] Queued resume for '{step_id}' ({len(remaining_text)} chars).")
 
+    QA_BUDGET_ENABLED = False
+    """Whether a Q&A step's time budget closes its window. Off on this branch: a window stays open
+    until the visitor ends it ("no thanks", "move on") or the operator does. Budgets, the shortened
+    window for an already-engaged robot and the planner's allocation are still computed, just not enforced."""
+
     RESUME_LEAD_IN = "Let me carry on where I left off. "
 
     def _with_resume_lead_in(self, remaining_text: str) -> str:
@@ -1385,14 +1390,18 @@ class DemoOrchestrator:
             # acknowledged, so without this the loop cannot tell speech from
             # silence — see _wait_for_quiet.
             self._wait_for_quiet()
-            self._send_step(step)
+            if self._send_step(step) is False:
+                continue            # interrupted before it was said: the top of the loop waits out the Q&A
 
             if step.require_ack:
                 with self._lock:
-                    self._state = DemoState.WAITING_ACK
-                self._ack_event.clear()
+                    # A qa_interrupt() between the send and here must not be overwritten.
+                    interrupted = self._state == DemoState.QA_WINDOW
+                    if not interrupted:
+                        self._state = DemoState.WAITING_ACK
+                        self._ack_event.clear()
 
-                got_ack = self._ack_event.wait(timeout=step.timeout_sec)
+                got_ack = False if interrupted else self._ack_event.wait(timeout=step.timeout_sec)
                 if got_ack:
                     self._record_step_duration(step)
 
@@ -1771,6 +1780,12 @@ class DemoOrchestrator:
                 text = step.text   # the fallback speaks the PLAIN instruction,
                                    # never the framing directive verbatim
         with self._lock:
+            if self._state == DemoState.QA_WINDOW:
+                # The visitor spoke up while this was being generated. Saying it now would talk over the
+                # question being answered, and WAITING_ACK below would wipe the Q&A state: the interruption
+                # was ignored. Hold it; the loop redoes the step once the Q&A closes.
+                logger.info(f"[Demo] '{step.step_id}' held: the visitor interrupted while it was generated.")
+                return False
             self._current_step_text = text
             self._step_started_at = time.time()
         self._ws.send_to_robot(step.robot_id, {
@@ -1811,7 +1826,7 @@ class DemoOrchestrator:
             self._state = DemoState.QA_WINDOW
         self._qa_end_event.clear()
 
-        timeout = step.qa_timeout if step.qa_timeout > 0 else None
+        timeout = step.qa_timeout if step.qa_timeout > 0 and self.QA_BUDGET_ENABLED else None
         logger.info(f"[Demo] Q&A window open "
                     f"({'auto-closes in ' + str(timeout) + 's' if timeout else 'manual close only'}).")
 

@@ -90,3 +90,13 @@ def test_a_spoken_move_on_closes_the_window_without_generating(gw):
 def test_silence_is_only_echoed(gw):
     sent = gw.say("   ")
     assert [d["event"] for _, d in sent] == ["speech_response"]
+
+
+def test_a_spoken_turn_reaches_the_roles_page_voice_feed(gw):
+    # The Roles page polls /voice: a "you" bubble for what was heard, then the reply.
+    # send_to_robot is stubbed above, so drive the recording the way the real one does.
+    gw.send_to_robot = lambda cid, d: (gw._record_utterance(cid, d), gw.sent.append((cid, d)))
+    gw.say("how does the retrieval work")
+    (row,) = gw.voice_items()
+    assert row["text"] == "how does the retrieval work" and row["robot"] == "chatbox"
+    assert row["done"] and not row["error"] and "forty two" in row["out"]["reply"]

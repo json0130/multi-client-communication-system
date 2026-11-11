@@ -32,5 +32,6 @@
     "A": 0.95,
     "N": 0.2
   },
-  "tts_voice": "en-AU-NatashaNeural"
+  "tts_voice": "en-AU-NatashaNeural",
+  "gtts_pitch": 3
 }

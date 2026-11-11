@@ -327,7 +327,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "You are opening the CARES lab demonstration for a group of visitors. "
                       "Welcome them warmly, introduce yourself as Pepper the lab guide, and let them know "
-                      "you are excited to show them around today. Keep it to 2 sentences. Start with [GREETING].",
+                      "you are excited to show them around today. Keep it to 1 short sentence, under 20 words. Start with [GREETING].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = None,
@@ -339,7 +339,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Briefly explain what CARES stands for (Centre for Automation and Robotic Engineering Science) "
                       "and what the lab researches — intelligent robots that can communicate, collaborate, and assist "
-                      "people in real-world environments. Keep it to 2-3 sentences. Start with [WAVE].",
+                      "people in real-world environments. Keep it to 2 short sentences, under 35 words in total. Start with [WAVE].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = None,
@@ -351,7 +351,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Set expectations for the demo: visitors will meet three research robots today, "
                       "each working on a different project. After each robot speaks, there will be time "
-                      "to ask questions. Keep it to 2 sentences. Use [DEFAULT].",
+                      "to ask questions. Keep it to 1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = None,
@@ -367,7 +367,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Introduce the first research project: conversational AI and retrieval-augmented generation. "
                       "Explain that this project focuses on how robots can hold long, contextually aware conversations "
-                      "by combining language models with a knowledge base. Keep it to 2 sentences. Use [DEFAULT].",
+                      "by combining language models with a knowledge base. Keep it to 1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = CHATBOX,
@@ -398,7 +398,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Hand off to ChatBox, the robot leading the conversational AI research. "
                       "Point towards ChatBox and invite them to say hello to the visitors. "
-                      "1-2 sentences. Use [POINT].",
+                      "1 short sentence, under 20 words. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = CHATBOX,
@@ -410,7 +410,7 @@ DEMO_STEPS = [
         robot_id    = CHATBOX,
         text        = "Greet the visitors warmly for the first time. You are ChatBox. "
                       "Introduce yourself and express genuine excitement about meeting the visitors. "
-                      "2 sentences. Start with [WAVE].",
+                      "1 short sentence, under 20 words. Start with [GREETING].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = CHATBOX,
@@ -434,7 +434,7 @@ DEMO_STEPS = [
         text        = "Explain your research on retrieval-augmented generation (RAG) to a non-expert audience. "
                       "Cover: what RAG is, how combining language models with a searchable knowledge base helps robots "
                       "give accurate answers, and how you maintain context across a long conversation. "
-                      "Make it engaging and accessible. 3-4 sentences. Use [DEFAULT].",
+                      "Make it engaging and accessible. 2 short sentences, under 35 words in total. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
         block_robot_id = CHATBOX,
@@ -448,7 +448,7 @@ DEMO_STEPS = [
         text        = "Open a Q&A session after ChatBox's presentation. "
                       "Invite visitors to ask questions — they can speak directly to ChatBox or to you. "
                       "Let them know you will wait until everyone is ready to move on. "
-                      "2 sentences. Use [DEFAULT].",
+                      "1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         qa_window   = True,
@@ -468,7 +468,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Transition from the ChatBox Q&A to the second project. "
                       "Give a brief, warm sign-off to ChatBox and announce you are moving on. "
-                      "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
+                      "1 short sentence, under 20 words. Use [DEFAULT]. Include 'let us move on' in your response.",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = CHATBOX,
@@ -481,7 +481,7 @@ DEMO_STEPS = [
         text        = "Introduce the second research project: human-aware navigation. "
                       "Frame it as the question: how can a robot move through a crowded space "
                       "safely, politely, and predictably — the way a person would? "
-                      "2 sentences. Use [DEFAULT].",
+                      "1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = SILBOT,
@@ -508,7 +508,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Hand off to Silbot, the robot specialising in human-aware navigation. "
                       "Point towards Silbot and invite them to come say hello to the visitors. "
-                      "1-2 sentences. Use [POINT].",
+                      "1 short sentence, under 20 words. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = SILBOT,
@@ -520,7 +520,7 @@ DEMO_STEPS = [
         robot_id    = SILBOT,
         text        = "Greet the visitors warmly for the first time. You are Silbot. "
                       "Introduce yourself and briefly mention that you navigate spaces with awareness and courtesy. "
-                      "2 sentences. Start with [WAVE].",
+                      "1 short sentence, under 20 words. Start with [WAVE].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = SILBOT,
@@ -546,7 +546,7 @@ DEMO_STEPS = [
                       "plan routes that do not cut through conversations or crowd groups, "
                       "that you were trained in simulation and tested in real office corridors at CARES, "
                       "and your goal of moving through shared spaces the way a respectful colleague would. "
-                      "3-4 sentences. Use [DEFAULT].",
+                      "2 short sentences, under 35 words in total. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
         block_robot_id = SILBOT,
@@ -561,7 +561,7 @@ DEMO_STEPS = [
                       "Invite visitors to ask questions about navigation and social robotics — "
                       "they can speak to Silbot or to you. "
                       "Let them know you will wait until everyone is ready to continue. "
-                      "2 sentences. Use [DEFAULT].",
+                      "1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         qa_window   = True,
@@ -580,7 +580,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Transition from the Silbot Q&A to the third and final project. "
                       "Brief warm sign-off to Silbot and announce the move to the next project. "
-                      "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
+                      "1 short sentence, under 20 words. Use [DEFAULT]. Include 'let us move on' in your response.",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = SILBOT,
@@ -592,7 +592,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Introduce the third research project: emotion-aware interaction. "
                       "Explain that this project studies how robots can recognise a person's emotional state "
-                      "and adapt their communication style accordingly. 2 sentences. Use [DEFAULT].",
+                      "and adapt their communication style accordingly. 1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = NAVEL,
@@ -619,7 +619,7 @@ DEMO_STEPS = [
         robot_id    = PEPPER,
         text        = "Hand off to Navel, the robot leading emotion-aware interaction research. "
                       "Point towards Navel and invite them to say hi to everyone. "
-                      "1-2 sentences. Use [POINT].",
+                      "1 short sentence, under 20 words. Use [POINT].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = NAVEL,
@@ -631,7 +631,7 @@ DEMO_STEPS = [
         robot_id    = NAVEL,
         text        = "Greet the visitors warmly for the first time. You are Navel. "
                       "Introduce yourself and mention that meeting new people is literally part of your research. "
-                      "2 sentences. Start with [WAVE].",
+                      "1 short sentence, under 20 words. Start with [WAVE].",
         generate    = True,
         timeout_sec = 50,
         block_robot_id = NAVEL,
@@ -657,7 +657,7 @@ DEMO_STEPS = [
                       "how you adapt your speaking style based on what you detect "
                       "(e.g. slower when someone looks confused, warmer when someone seems upset), "
                       "and your goal of making conversation with a robot feel natural. "
-                      "3-4 sentences. Use [DEFAULT].",
+                      "2 short sentences, under 35 words in total. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 90,
         block_robot_id = NAVEL,
@@ -671,7 +671,7 @@ DEMO_STEPS = [
         text        = "Open a Q&A session after Navel's presentation on emotion-aware interaction. "
                       "Invite visitors to ask questions — they can speak to Navel or to you. "
                       "Let them know you will be here until everyone is ready to wrap up. "
-                      "2 sentences. Use [DEFAULT].",
+                      "1 short sentence, under 20 words. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         qa_window   = True,
@@ -713,7 +713,7 @@ DEMO_STEPS = [
         text        = "Close the main part of the demo. Thank ChatBox, Silbot, and Navel by name. "
                       "Summarise that each robot brings a unique capability and together you are all "
                       "working towards robots that can truly work alongside people. "
-                      "2-3 sentences. Use [HAPPY].",
+                      "2 short sentences, under 35 words in total. Use [HAPPY].",
         generate    = True,
         timeout_sec = 60,
         block_robot_id = None,
@@ -726,7 +726,7 @@ DEMO_STEPS = [
         text        = "Open a general Q&A — the demo is complete but the floor is open. "
                       "Invite visitors to approach any of the robots or speak to you with any remaining questions. "
                       "Thank them warmly for joining the CARES lab demonstration today. "
-                      "2-3 sentences. Use [DEFAULT].",
+                      "2 short sentences, under 35 words in total. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         qa_window   = True,
@@ -763,17 +763,40 @@ this becomes the default for robots that do not define their own.
 """
 
 
+POINT_OVERRIDES = {
+    "chatbox": {
+        "problem":  ("the problem in ONE short sentence (a robot that does not remember what a person has told "
+                     "it), then ONE everyday example, such as a companion robot or home assistant that forgets a past request. "
+                     "An illustration, not a result you measured", "2"),
+        "approach": ("how it works, with the technical details from your facts: name the retrieval method and "
+                     "index and the language model, and where the memory comes from. "
+                     "Use the exact names you were given", "2"),
+        "impact":   ("one or two more everyday use cases, and why it matters there: what goes wrong when a robot "
+                     "forgets what it was told. An illustration, not a measured result", "2"),
+    },
+}
+"""Per-robot wording for the project talk, keyed by a client_id prefix, then by checklist point:
+(what the point covers, how many sentences). ChatBox is the companion / home-assistant robot, so its talk is
+the problem with examples, how it works in technical terms, then more use cases and why they matter. Step ids
+are unchanged, so interruption and resume work as for any other robot."""
+
+
 def _project_point_steps(robot_id: str) -> list:
     """One PROJECT step per PROJECT_CHECKLIST point — see the comment at the
     call site in build_script() for why they are separate steps."""
+    own = next((o for prefix, o in POINT_OVERRIDES.items() if robot_id.startswith(prefix)), {})
+
+    def _brief(point_id, default):
+        return own.get(point_id, (default, "1-2"))
+
     return [
         DemoStep(
             step_id     = f"{robot_id}_project_{point_id}",
             robot_id    = robot_id,
             text        = f"You are explaining your research to a non-expert audience, "
-                          f"one point at a time. Cover ONLY this point now: {point_brief}. "
+                          f"one point at a time. Cover ONLY this point now: {_brief(point_id, point_brief)[0]}. "
                           "Do not summarise the whole project and do not repeat what you "
-                          "have already said. 1-2 sentences. Use [DEFAULT].",
+                          f"have already said. Keep it to {_brief(point_id, point_brief)[1]} short sentences, under 40 words in total. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             block_robot_id = robot_id,
@@ -849,7 +872,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
         robot_id    = guide_id,
         text        = "You are opening the CARES lab demonstration for a group of visitors. "
                       "Welcome them warmly, introduce yourself as the lab guide, and let them know "
-                      "you are excited to show them around today. Keep it to 2 sentences. Start with [GREETING].",
+                      "you are excited to show them around today. Keep it to 1 short sentence, under 20 words. Start with [GREETING].",
         generate    = True,
         timeout_sec = 60,
         role        = StepRole.OPENING,
@@ -860,7 +883,8 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
         robot_id    = guide_id,
         text        = "Briefly explain what CARES stands for (Centre for Automation and Robotic Engineering Science) "
                       "and what the lab researches — intelligent robots that can communicate, collaborate, and assist "
-                      "people in real-world environments. Keep it to 2-3 sentences. Start with [WAVE].",
+                      "people in real-world environments. Keep it to 2 short sentences, under 35 words in total. Start with "
+                      + ("[GREETING]" if guide_id == CHATBOX else "[WAVE]") + ".",
         generate    = True,
         timeout_sec = 60,
         role        = StepRole.OPENING,
@@ -874,7 +898,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
             text        = f"Set expectations for the demo: visitors will meet {robot_count_word} research robot"
                           f"{'s' if n != 1 else ''} today, each working on a different project. "
                           "After each robot speaks, there will be time to ask questions. "
-                          "Keep it to 2 sentences. Use [DEFAULT].",
+                          "Keep it to 1 short sentence, under 20 words. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             role        = StepRole.OPENING,
@@ -885,7 +909,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
             robot_id    = guide_id,
             text        = "Give the visitors a brief overview of the CARES lab and what they can expect today. "
                           "Invite them to look around and ask you any questions they have. "
-                          "2 sentences. Use [DEFAULT].",
+                          "1 short sentence, under 20 words. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             role        = StepRole.OPENING,
@@ -948,7 +972,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
                            "robot says, and never put their name followed by a "
                            "line of their dialogue — they greet the visitors "
                            "themselves, immediately after you. "
-                           "2-3 sentences. Use [POINT]."),
+                           "2 short sentences, under 35 words in total. Use [POINT]."),
             generate    = True,
             timeout_sec = 60,
             block_robot_id = robot_id,
@@ -966,7 +990,8 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
             step_id     = f"{robot_id}_greeting",
             robot_id    = robot_id,
             text        = "Greet the visitors warmly for the first time. Introduce yourself and express "
-                          "genuine excitement about meeting them. 2 sentences. Start with [WAVE].",
+                          "genuine excitement about meeting them. 1 short sentence, under 20 words. Start with "
+                          + ("[GREETING]" if robot_id == CHATBOX else "[WAVE]") + ".",
             generate    = True,
             timeout_sec = 50,
             block_robot_id = robot_id,
@@ -1019,7 +1044,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
             text        = f"Open a Q&A session after {robot_id}'s presentation. "
                           f"Invite visitors to ask questions — they can speak directly to {robot_id} or to you. "
                           "Let them know you will wait until everyone is ready to move on. "
-                          "2 sentences. Use [DEFAULT].",
+                          "1 short sentence, under 20 words. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             qa_window   = True,
@@ -1037,7 +1062,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
                 robot_id    = guide_id,
                 text        = f"Transition from the {robot_id} Q&A to the next project. "
                               f"Give a brief, warm sign-off to {robot_id} and announce you are moving on. "
-                              "1-2 sentences. Use [DEFAULT]. Include 'let us move on' in your response.",
+                              "1 short sentence, under 20 words. Use [DEFAULT]. Include 'let us move on' in your response.",
                 generate    = True,
                 timeout_sec = 50,
                 block_robot_id = robot_id,
@@ -1051,12 +1076,12 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
             f"Close the main part of the demo. Thank {robot_names} by name. "
             "Summarise that each robot brings a unique capability and together you are all "
             "working towards robots that can truly work alongside people. "
-            "2-3 sentences. Use [HAPPY]."
+            "2 short sentences, under 35 words in total. Use [HAPPY]."
         )
     else:
         wrap_text = (
             "Wrap up the demonstration. Thank the visitors for joining and let them know they are welcome "
-            "to ask you more questions or explore the lab. 2 sentences. Use [HAPPY]."
+            "to ask you more questions or explore the lab. 1 short sentence, under 20 words. Use [HAPPY]."
         )
     # Guide walks back to its starting position before wrapping up —
     # composed by walking the known chain backward from wherever the guide
@@ -1095,7 +1120,7 @@ def build_script(guide_id: str, project_ids: list, subjects: dict = None) -> lis
         text        = "Open a general Q&A — the demo is complete but the floor is open. "
                       "Invite visitors to approach any of the robots or speak to you with any remaining questions. "
                       "Thank them warmly for joining the CARES lab demonstration today. "
-                      "2-3 sentences. Use [DEFAULT].",
+                      "2 short sentences, under 35 words in total. Use [DEFAULT].",
         generate    = True,
         timeout_sec = 60,
         qa_window   = True,
@@ -1143,7 +1168,7 @@ def build_solo_script(robot_id: str, partner_id: str = None) -> list:
             text        = "The lab guide has just introduced you to a group of visitors and "
                           "handed over to you. Greet the visitors warmly, introduce yourself, "
                           "and say you would love to tell them about your project. "
-                          "2 sentences. Start with [GREET].",
+                          "1 short sentence, under 20 words. Start with [GREET].",
             generate    = True,
             timeout_sec = 50,
             block_robot_id = robot_id,
@@ -1158,7 +1183,7 @@ def build_solo_script(robot_id: str, partner_id: str = None) -> list:
                           "are ready to finish. "
                           + (f"Mention that {partner_id} is right beside you and can explain "
                              "its own project if they ask. " if partner_id else "")
-                          + "2 sentences. Use [DEFAULT].",
+                          + "1 short sentence, under 20 words. Use [DEFAULT].",
             generate    = True,
             timeout_sec = 60,
             qa_window   = True,
@@ -1171,7 +1196,7 @@ def build_solo_script(robot_id: str, partner_id: str = None) -> list:
             robot_id    = robot_id,
             text        = "Thank the visitors for listening and for their questions, then hand "
                           "back to the lab guide, who will take it from here. Do not invite "
-                          "more questions. 2 sentences. Use [HAPPY].",
+                          "more questions. 1 short sentence, under 20 words. Use [HAPPY].",
             generate    = True,
             timeout_sec = 60,
             role        = StepRole.CLOSING,

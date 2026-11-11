@@ -12,7 +12,7 @@ Usage:
 """
 
 import os
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Optional
 from dotenv import load_dotenv
 
@@ -43,6 +43,7 @@ class SpeechConfig:
     whisper_compute_type: str    # int8 | float16 | float32
     max_audio_length_sec: int
     sample_rate: int
+    language: str                # en | ... | auto (detect per utterance)
 
 
 @dataclass(frozen=True)
@@ -69,6 +70,24 @@ class ServerConfig:
     host: str
     port: int
     api_token: str   # required on every non-GET request when set; "" = open
+    inbound_port: int = 8790   # robots that dial in to the server (client_config connect_to_server); 0 = off
+
+
+@dataclass(frozen=True)
+class RolesConfig:
+    """The Roles page (gateway/roles_gateway.py): assign role + persona to a robot, persona chat, graph."""
+    port: int                    # 0 = off
+    data_dir: str                # its graph / persona / registry files
+    ai_server: str               # "HOST[:PORT]" persona-chat backend; "" = Ollama above
+    sync_db: bool                # an assigned role also becomes robots.robot_role (what the server's own turns use)
+
+
+@dataclass(frozen=True)
+class MethodBConfig:
+    """Method B (conversation/method_b.py): a gesture tag per Navel sentence, planned in the server."""
+    ollama_model: str            # tagging model on the Ollama above (default: the LLM's); "off" with no ai_server = off
+    ai_server: str               # "HOST[:PORT]" instead of Ollama
+    timeout_sec: float           # the first sentence waits this long for its tag; later ones, until the earlier ones are spoken
 
 
 @dataclass(frozen=True)
@@ -79,6 +98,8 @@ class AppConfig:
     emotion: EmotionConfig
     rag: RagConfig
     server: ServerConfig
+    roles: RolesConfig
+    method_b: MethodBConfig
 
 
 def _require(key: str) -> str:
@@ -127,6 +148,7 @@ def load_config() -> AppConfig:
             whisper_compute_type=_optional("WHISPER_COMPUTE_TYPE", "int8"),
             max_audio_length_sec=_int("WHISPER_MAX_AUDIO_SEC", 30),
             sample_rate=_int("WHISPER_SAMPLE_RATE", 16000),
+            language=_optional("WHISPER_LANGUAGE", "en"),
         ),
         emotion=EmotionConfig(
             model_path=_optional(
@@ -150,6 +172,18 @@ def load_config() -> AppConfig:
             host=_optional("SERVER_HOST", "0.0.0.0"),
             port=_int("SERVER_PORT", 5000),
             api_token=_optional("API_TOKEN", ""),
+            inbound_port=_int("ROBOT_INBOUND_PORT", 8790),
+        ),
+        roles=RolesConfig(
+            port=_int("ROLES_PORT", 8780),
+            data_dir=_optional("ROLES_DATA_DIR", "./roles_data"),
+            ai_server=_optional("ROLES_AI_SERVER", ""),
+            sync_db=_optional("ROLES_SYNC_DB", "0") == "1",
+        ),
+        method_b=MethodBConfig(
+            ollama_model=_optional("METHOD_B_OLLAMA_MODEL", _optional("OLLAMA_MODEL", "qwen2.5:7b")),
+            ai_server=_optional("METHOD_B_AI_SERVER", ""),
+            timeout_sec=_float("METHOD_B_TIMEOUT_SEC", 1.0),
         ),
     )
 

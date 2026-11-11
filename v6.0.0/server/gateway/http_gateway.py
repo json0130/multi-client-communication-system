@@ -20,7 +20,7 @@ No business logic lives here.
 from __future__ import annotations
 import re
 import time
-from flask import Flask, request, jsonify, Blueprint
+from flask import request, jsonify, Blueprint
 
 from robot.robot_registry import RobotRegistry
 from gateway.websocket_gateway import WebSocketGateway
@@ -107,6 +107,9 @@ def create_http_gateway(
         if missing:
             return jsonify({"error": f"Missing fields: {missing}"}), 400
 
+        if data.get("connect_mode") == "inbound":
+            ws_gateway.mark_inbound(data["client_id"])
+
         robot = robot_repo.upsert_robot(
             client_id=data["client_id"],
             robot_name=data["robot_name"],
@@ -119,6 +122,11 @@ def create_http_gateway(
 
         if not robot:
             return jsonify({"error": "Failed to register robot"}), 500
+
+        # A robot that registers is up and listening: dial it now (and again if it
+        # re-registers, or at a new address). One that dials in itself is not dialed.
+        if data.get("connect_mode") != "inbound":
+            ws_gateway.connect_robot(robot.client_id)
 
         return jsonify({
             "success": True,
@@ -313,7 +321,7 @@ def create_http_gateway(
                 "delegation_target": None,
             })
 
-        if turn.outcome in ("acknowledged", "deferred"):
+        if turn.outcome in ("acknowledged", "deferred", "asked_handover"):
             spoken = turn.text or turn.handoff
             return jsonify({
                 "client_id": client_id,

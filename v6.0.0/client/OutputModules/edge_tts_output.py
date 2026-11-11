@@ -39,6 +39,9 @@ class EdgeTTSOutputModule(OutputModule):
         # per robot in its client config; gTTS remains the fallback when
         # edge-tts is unavailable or fails.
         self._voice      = self.config.get('tts_voice', '')
+        # gTTS has one voice, so with Edge refused (403) every robot sounded alike. Shift each robot's
+        # fallback voice by `gtts_pitch` semitones (tempo unchanged); Edge voices are left as they are.
+        self._gtts_pitch = float(self.config.get('gtts_pitch', 0))
 
         # Speaker output (hardcoded to USB speaker; override in config if needed)
         # ALSA's 'default', not a card number. This was pinned to
@@ -331,6 +334,16 @@ class EdgeTTSOutputModule(OutputModule):
                 self._current_has_callback = False
             self._discard(jobs[played:])
 
+    GTTS_RATE = 24000      # gTTS mp3s are 24 kHz mono
+
+    def _audio_filter(self, pitch_semitones: float = 0.0) -> str:
+        """ffmpeg filter: the talking speed, plus a pitch shift that leaves the tempo alone."""
+        speed = float(self.talking_speed)
+        if not pitch_semitones:
+            return f'atempo={speed}'
+        r = 2 ** (pitch_semitones / 12)
+        return f'asetrate={round(self.GTTS_RATE * r)},aresample={self.GTTS_RATE},atempo={speed / r:.4f}'
+
     def _generate_audio(self, text: str, language: str) -> tuple:
         """Generate mp3+wav for one sentence. Returns (mp3, wav) paths or (None, None) on failure."""
         tmp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False).name
@@ -339,6 +352,7 @@ class EdgeTTSOutputModule(OutputModule):
             with self._voice_lock:
                 voice = self._voice
             made = False
+            pitch = 0.0
             if voice:
                 try:
                     import edge_tts
@@ -351,9 +365,10 @@ class EdgeTTSOutputModule(OutputModule):
                                        f"falling back to gTTS for this robot.")
             if not made:
                 gTTS(text=text, lang=language).save(tmp_mp3)
+                pitch = self._gtts_pitch
             result = subprocess.run([
                 'ffmpeg', '-i', tmp_mp3,
-                '-filter:a', f'atempo={self.talking_speed}',
+                '-filter:a', self._audio_filter(pitch),
                 '-ar', '22050', '-ac', '1', '-sample_fmt', 's16', '-y', tmp_wav,
             ], capture_output=True)
             if result.returncode == 0:

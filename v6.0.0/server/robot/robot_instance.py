@@ -26,15 +26,13 @@ adjustable at the database level without reconfiguring individual robot nodes.
 
 from __future__ import annotations
 import time
-from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from dataclasses import dataclass
 from typing import Callable, Optional, Sequence, TYPE_CHECKING
 
-from data import robot_repo, user_repo, chat_log_repo
+from data import robot_repo, chat_log_repo
 from core.rbac import (
     AccessLevel,
     ClearedRecord,
-    DelegationGrant,
     GrantStore,
     MemoryRecord,
     RBACFilter,
@@ -42,6 +40,7 @@ from core.rbac import (
     Visibility,
 )
 from robot.prompt_builder import build_delegation_prompt, build_execution_prompt
+from modules.llm.llm_provider import strip_bad_tags
 
 if TYPE_CHECKING:
     from modules.llm.llm_module import LLMModule
@@ -99,6 +98,14 @@ class RobotInstance:
         # crosses robot instances is a delegation grant (see process_chat).
         self._history: list[dict] = []
         self._max_history = 14  # 7 back-and-forth turns
+
+        # Talk outside the demo (the Roles page's setup, spoken to): the assigned role only. Its own short
+        # conversation, never mixed with the demo's history, never read from or written to the DB.
+        self._roles_history: list[dict] = []
+        self._roles_history_role = None
+        # The role a persona was assigned on the Roles page (gateway/roles_gateway.py). Wins over the DB's
+        # robot_role for this connection, for the demo and for Roles-style talk alike.
+        self.assigned_role: Optional[str] = None
 
         # Cached role/tags/access level — refreshed from DB before each chat
         self._robot_role = "You are a helpful robot."
@@ -203,7 +210,7 @@ class RobotInstance:
 
         # Update conversation history
         self._history.append({"role": "user", "content": user_msg})
-        self._history.append({"role": "assistant", "content": llm_resp.text})
+        self._history.append({"role": "assistant", "content": strip_bad_tags(llm_resp.text)})
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history:]
 
@@ -232,6 +239,7 @@ class RobotInstance:
         style_framing: str = "",
         grounded_facts: Sequence[str] = (),
         standing_in_for: str = "",
+        use_history: bool = True,
     ) -> ChatResult:
         """
         Like process_chat() but fires on_sentence(clean_text, emotion_tag) for each
@@ -247,7 +255,7 @@ class RobotInstance:
         is worded without becoming something the robot reads out.
         """
         self.last_active = time.time()
-        self._refresh_role_from_db()
+        self._refresh_role_from_db(roles_talk=not use_history)
 
         if not self.llm or not self.llm.is_available():
             clean = "LLM module not available."
@@ -266,8 +274,12 @@ class RobotInstance:
                 self._clear_delegated_context(delegated_context, task_id),
             )
         else:
-            rag_context = self._get_rag_context(message)
-            active_peers = self._get_active_peers()
+            # use_history False is talk outside the demo: no retrieval from the DB's chat history, and
+            # (turn.py passes no facts then) nothing else from the DB either, just the assigned role.
+            rag_context = self._get_rag_context(message) if use_history else []
+            # roles talk is the assigned role alone: no teammates to hand over to, and a thin role next to a
+            # detailed peer's was how the ChatBox came to say "I'm Navel"
+            active_peers = self._get_active_peers() if use_history else []
             system, user_msg = build_delegation_prompt(
                 self.robot_name, self._robot_role, self._allowed_tags,
                 message, active_peers, rag_context,
@@ -281,7 +293,13 @@ class RobotInstance:
         from modules.llm.llm_provider import parse_response
         full_text = ""
         first = True
-        for sentence in self.llm.stream_with_history(system, self._history, user_msg):
+        if use_history:
+            history = self._history
+        else:
+            if self._roles_history_role != self._robot_role:     # a new role starts a new conversation
+                self._roles_history, self._roles_history_role = [], self._robot_role
+            history = self._roles_history
+        for sentence in self.llm.stream_with_history(system, history, user_msg):
             full_text += (" " if full_text else "") + sentence
             if first:
                 parsed = parse_response(sentence)
@@ -292,11 +310,11 @@ class RobotInstance:
 
         full_text = full_text.strip()
 
-        self._history.append({"role": "user", "content": user_msg})
-        self._history.append({"role": "assistant", "content": full_text})
-        if len(self._history) > self._max_history:
-            self._history = self._history[-self._max_history:]
-        self._persist(message, full_text)
+        history.append({"role": "user", "content": user_msg})
+        history.append({"role": "assistant", "content": strip_bad_tags(full_text)})
+        del history[:-self._max_history]
+        if use_history:
+            self._persist(message, full_text)
 
         final = parse_response(full_text)
         is_deleg, target_id = self._parse_delegation(full_text)
@@ -425,7 +443,7 @@ class RobotInstance:
 
         # Maintain history so each step builds on prior context
         self._history.append({"role": "user",      "content": instruction})
-        self._history.append({"role": "assistant",  "content": llm_resp.text})
+        self._history.append({"role": "assistant",  "content": strip_bad_tags(llm_resp.text)})
         if len(self._history) > self._max_history:
             self._history = self._history[-self._max_history:]
 
@@ -494,10 +512,13 @@ class RobotInstance:
 
     # ── Internal helpers ──────────────────────────────────────────────────────
 
-    def _refresh_role_from_db(self):
+    def _refresh_role_from_db(self, roles_talk: bool = False):
         """
         Pull latest role, tags and access level from Supabase so web UI and
         database changes apply immediately.
+
+        The role a persona was assigned on the Roles page is used only for `roles_talk`; the demo (and
+        every other turn) speaks as the role stored in the DB.
 
         Access level is re-read here rather than cached at connect time because
         the paper's design calls for hierarchies adjustable at the database level
@@ -505,7 +526,7 @@ class RobotInstance:
         """
         robot = robot_repo.get_robot(self.client_id)
         if robot:
-            self._robot_role = robot.robot_role
+            self._robot_role = (self.assigned_role if roles_talk else None) or robot.robot_role
             self._allowed_tags = robot.allowed_tags
             if getattr(robot, "access_level", None):
                 self._access_level = robot.access_level

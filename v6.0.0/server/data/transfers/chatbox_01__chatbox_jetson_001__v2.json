@@ -1,0 +1,450 @@
+{
+  "transfer_id": 4,
+  "applied_at": "2026-11-08T23:42:48.500790+00:00",
+  "code_commit": "822c4d6",
+  "notes": "Re-transfer after migration 020: companion/home-assistant and co-speech motion topics (2026-11-09)",
+  "from": "chatbox_01",
+  "to": "chatbox_jetson_001",
+  "version": 2,
+  "items": {
+    "facts": 39,
+    "scope_rows": 8,
+    "kg_priors": 1,
+    "style_priors": 0,
+    "step_priors": 4,
+    "qa_prior": {
+      "median_sec": 30.2,
+      "lower_bound": false,
+      "windows": 65,
+      "visitor_ended": 49,
+      "copied": true
+    },
+    "prior_modes": [
+      "mock",
+      "gazebo",
+      "scripted_visitor"
+    ],
+    "step_source_modes": "gazebo+mock+scripted_visitor",
+    "excluded": {
+      "movement_steps": 0,
+      "non_prior_runs": 18,
+      "not_its_step": 24,
+      "qa_non_prior_runs": 4
+    },
+    "sim_prior_cap": 3,
+    "twin_map": {
+      "pepper_01": "pepper_001",
+      "chatbox_01": "chatbox_jetson_001",
+      "navel_01": "navel_001"
+    }
+  },
+  "facts": [
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "model",
+      "fact": "Qwen2.5 at 7B parameters, served locally through Ollama.",
+      "verified": true,
+      "source": "verified: OLLAMA_MODEL in .env"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "method",
+      "fact": "Dense vector retrieval over a FAISS IndexFlatL2 index — an exact search, not an approximate one — with passages embedded locally by nomic-embed-text.",
+      "verified": true,
+      "source": "verified: modules/rag/rag_module.py"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "dataset",
+      "fact": "The index is built per user from that user's own stored interaction history, rebuilt from Supabase when no local index exists.",
+      "verified": true,
+      "source": "verified: modules/rag/rag_module.py"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "limitation",
+      "fact": "When retrieval finds nothing relevant the system must say the information is unavailable rather than generate a specific answer.",
+      "verified": true,
+      "source": "supplied by the researcher — not independently checkable"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "method",
+      "fact": "Long-context memory, so a robot can hold a coherent conversation across many turns and across separate visits.",
+      "verified": true,
+      "source": "drafted from robots.robot_role"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "method",
+      "fact": "Retains what a visitor said earlier and uses it in later answers.",
+      "verified": true,
+      "source": "drafted from robots.robot_role"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "method",
+      "fact": "Structured knowledge the conversational system can retrieve from, alongside the vector index.",
+      "verified": true,
+      "source": "drafted from robots.robot_role"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "method",
+      "fact": "Retrieves relevant documents or stored knowledge before generating an answer.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "method",
+      "fact": "Uses semantic similarity to find information related to the visitor's question.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "method",
+      "fact": "Combines retrieved context with the current conversation before generating a response.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "limitation",
+      "fact": "Retrieval quality depends on the quality, completeness and organisation of the indexed knowledge.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "limitation",
+      "fact": "Semantically similar information is not necessarily factually correct or applicable to the visitor's exact situation.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "limitation",
+      "fact": "Information that is not present in the available knowledge base cannot be reliably supplied as a robot-specific fact.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "kind": "limitation",
+      "fact": "Conflicting retrieved sources may require the system to acknowledge uncertainty rather than select an answer arbitrarily.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "method",
+      "fact": "Generates natural-language responses from the current conversation, system instructions and available context.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "method",
+      "fact": "Can adapt wording and response style based on conversational context.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "method",
+      "fact": "Can combine information from multiple provided context sources into a single response.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "limitation",
+      "fact": "Generated text can sound confident even when the underlying information is incomplete or incorrect.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "limitation",
+      "fact": "The model does not automatically know private robot-specific facts unless they are provided through context or retrieval.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "limitation",
+      "fact": "The same question can produce different wording or emphasis across different generations.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "kind": "limitation",
+      "fact": "Complex instructions can compete with one another when the available context contains conflicting goals.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "method",
+      "fact": "Retains relevant information from earlier turns and makes it available to later responses.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "method",
+      "fact": "Uses previous conversation context to resolve references such as \"that\", \"before\" or \"the robot we discussed\".",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "method",
+      "fact": "Can distinguish information from the current interaction from information stored for longer-term use.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "limitation",
+      "fact": "Memory should not be treated as a perfect transcript of every previous interaction.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "limitation",
+      "fact": "Incorrect or ambiguous information stored in memory can influence later responses.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "kind": "limitation",
+      "fact": "Information from an earlier conversation may no longer reflect the visitor's current preferences or situation.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "method",
+      "fact": "Stores selected information across separate interaction sessions when persistent memory is available.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "method",
+      "fact": "Uses previously stored interaction information to maintain continuity across repeat visits.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "method",
+      "fact": "Separates immediate conversation context from information intended for longer-term retention.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "limitation",
+      "fact": "Long-term continuity depends on reliable identification and retrieval of the relevant previous information.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "limitation",
+      "fact": "Stored preferences and interaction history can become outdated over time.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "kind": "limitation",
+      "fact": "The robot should not assume that a previous visitor's preference still applies without allowing it to be updated.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "method",
+      "fact": "Represents entities and relationships as structured connections rather than only unstructured text.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "method",
+      "fact": "Supports retrieving related facts by following relationships between concepts, robots or interaction topics.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "method",
+      "fact": "Complements vector-based retrieval by providing explicitly structured relationships.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "limitation",
+      "fact": "The graph can only represent relationships that have been defined or extracted into it.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "limitation",
+      "fact": "Incomplete relationships can cause relevant connected information to be missed.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "kind": "limitation",
+      "fact": "Incorrect relationships in the graph can propagate incorrect assumptions into retrieved context.",
+      "verified": true,
+      "source": "researcher-supplied 2026-09-10"
+    }
+  ],
+  "scope": [
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:companion-robot",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:conversational-memory",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:home-assistant-robot",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:knowledge-graphs",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:large-language-models",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:long-term-interaction",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:personal-experiences",
+      "eligible": true,
+      "specialised": true
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "topic_id": "topic:retrieval-augmented-generation",
+      "eligible": true,
+      "specialised": true,
+      "prior_weight": 0.575,
+      "prior_n": 1
+    }
+  ],
+  "style_priors": [],
+  "duration_priors": [
+    {
+      "robot_id": "chatbox_jetson_001",
+      "step_id": "chatbox_jetson_001_greeting",
+      "kind": "step",
+      "median_sec": 6.91,
+      "n": 63,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "step_id": "chatbox_jetson_001_project_approach",
+      "kind": "step",
+      "median_sec": 10.52,
+      "n": 58,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "step_id": "chatbox_jetson_001_project_impact",
+      "kind": "step",
+      "median_sec": 10.51,
+      "n": 60,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "step_id": "chatbox_jetson_001_project_problem",
+      "kind": "step",
+      "median_sec": 9.19,
+      "n": 61,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    },
+    {
+      "robot_id": "chatbox_jetson_001",
+      "step_id": "qa_invite_chatbox_jetson_001",
+      "kind": "qa",
+      "median_sec": 30.2,
+      "n": 49,
+      "source_mode": "gazebo+mock+scripted_visitor"
+    }
+  ]
+}

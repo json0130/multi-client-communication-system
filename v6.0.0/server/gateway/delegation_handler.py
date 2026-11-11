@@ -30,10 +30,11 @@ from __future__ import annotations
 import json
 import re
 import threading
+import time
 import uuid
-from typing import Optional, Sequence, TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
-from core.rbac import DelegationGrant, MemoryRecord, new_grant
+from core.rbac import MemoryRecord, new_grant
 
 if TYPE_CHECKING:
     from robot.robot_registry import RobotRegistry
@@ -42,6 +43,9 @@ if TYPE_CHECKING:
 
 # How many context snippets a Manager may serialize into one hand-off.
 MAX_DELEGATED_SNIPPETS = 3
+
+# Longest a hand-over waits for the robot handing over to stop talking.
+MAX_HANDOVER_WAIT_SEC = 25.0
 
 
 class DelegationHandler:
@@ -135,6 +139,7 @@ class DelegationHandler:
                 task_id=task_id,
             )
             print(f"[Delegation] {target_id} response: {result.response}")
+            self._wait_until_quiet()
             self._ws.send_to_robot(target_id, {
                 "event": "chat_response",
                 "response": result.response,
@@ -153,6 +158,23 @@ class DelegationHandler:
             # Revoke on task completion, success or failure. Grants also carry
             # their own expiry, so a crash between here and there still closes.
             self._revoke(task_id)
+
+    def _wait_until_quiet(self) -> None:
+        """Let whoever is handing over finish talking before the target starts.
+
+        The target's answer is generated while the source is still saying its own sentences and the
+        hand-over line, and was sent the moment it was ready, so two robots spoke over each other.
+        The gateway's estimate counts everything already sent, and it is capped.
+        """
+        quiet = getattr(self._ws, "seconds_until_quiet", None)
+        if quiet is None:
+            return
+        deadline = time.time() + MAX_HANDOVER_WAIT_SEC
+        while time.time() < deadline:
+            wait = quiet()
+            if wait <= 0:
+                return
+            time.sleep(min(wait, 0.5))
 
     def _prompt_for_more_questions(self, target_id: str) -> None:
         """

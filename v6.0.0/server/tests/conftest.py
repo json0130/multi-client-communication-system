@@ -16,7 +16,7 @@ infrastructure.
 from __future__ import annotations
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import pytest
 
@@ -196,6 +196,27 @@ def fake_supabase(monkeypatch):
         except ImportError:
             pass
     return client
+
+
+@pytest.fixture(autouse=True)
+def qa_time_limits_on(monkeypatch, request):
+    """The Q&A time limits are off in production on this branch (a window stays open until the visitor
+    or operator ends it). The existing tests exercise the limits themselves, so they run with them on;
+    tests of the no-limit behaviour opt out with @pytest.mark.no_qa_limits."""
+    if request.node.get_closest_marker("no_qa_limits"):
+        return
+    from demo.demo_orchestrator import DemoOrchestrator
+    monkeypatch.setattr(DemoOrchestrator, "QA_BUDGET_ENABLED", True)
+    monkeypatch.setattr("gateway.websocket_gateway.QA_AUTO_CLOSE_ENABLED", True)
+
+
+@pytest.fixture(autouse=True)
+def handover_asks_off(monkeypatch, request):
+    """Existing tests expect a question for another robot to be handed over at once. The new behaviour
+    (ask the visitor first) is tested with @pytest.mark.ask_before_handover."""
+    if request.node.get_closest_marker("ask_before_handover"):
+        return
+    monkeypatch.setattr("gateway.websocket_gateway.ASK_BEFORE_HANDOVER", False)
 
 
 @pytest.fixture(autouse=True)

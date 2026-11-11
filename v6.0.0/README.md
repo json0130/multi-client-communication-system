@@ -8,7 +8,7 @@ A modular server that manages multiple robots simultaneously. The server initiat
 
 | v5.x | v6.0.0 |
 |---|---|
-| Robot dials into server | Server dials out to robot |
+| Robot dials into server | Server dials out to robot (a robot the server cannot reach may still dial in: see below) |
 | God-object `RobotServer` class | Lean `RobotInstance` + separate modules |
 | DB queries scattered across 4 files | Single `data/` layer, one repo per table |
 | Two near-identical LLM clients | One `LLMProvider` interface, two backends |
@@ -188,6 +188,7 @@ OPENAI_API_KEY=            # optional
 # Speech (Whisper)
 WHISPER_MODEL_SIZE=base    # tiny | base | small | medium
 WHISPER_DEVICE=auto        # auto | cpu | cuda
+WHISPER_LANGUAGE=en        # language Whisper transcribes in; `auto` detects per utterance
 
 # Emotion
 EMOTION_MODEL_PATH=./models/efficientnet_HQRAF_improved_withCon.pth
@@ -197,9 +198,22 @@ RAG_EMBED_MODEL=nomic-embed-text
 
 # Server
 SERVER_PORT=5000
+ROBOT_INBOUND_PORT=8790    # robots that dial in (connect_to_server); 0 = off
+METHOD_B_OLLAMA_MODEL=     # Method B in the server (conversation/method_b.py): a gesture tag per Navel sentence. ON by default
+                           # with the LLM's model (OLLAMA_MODEL); set a model to change it, or "off" for plain speech
+METHOD_B_AI_SERVER=        # HOST[:PORT] instead of Ollama
+METHOD_B_TIMEOUT_SEC=1.0   # how long the first sentence waits for its tag (later ones wait while earlier ones are spoken)
 API_TOKEN=                 # set it: required as X-API-Token on every non-GET request
 DASHBOARD_HOST=            # unset = dashboard on localhost only; 0.0.0.0 = whole LAN
 ```
+
+**A robot the server cannot reach** (behind NAT or on Tailscale, like the Jetson ChatBox) dials in instead.
+Set `"connect_to_server": true` in its `client_config.json` (and `"server_ws_port"` if not 8790). It registers
+over HTTP as usual, then connects to `ws://<server host>:ROBOT_INBOUND_PORT`, sends
+`{"type": "hello", "client_id": ..., "token": API_TOKEN}`, and redials by itself if the connection drops. The
+server treats the socket like any other robot connection, so nothing else changes, and **Connect** on the
+dashboard has nothing to do for it (it is connected when the robot has dialled in). The robot must already be
+registered; allow the inbound port through the server's firewall.
 
 Robots and tools send `API_TOKEN` from their own environment (never from
 `client_config.json`, which is committed): `export API_TOKEN=...` on each robot

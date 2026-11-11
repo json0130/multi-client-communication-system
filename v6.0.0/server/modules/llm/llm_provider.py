@@ -25,6 +25,19 @@ class LLMResponse:
     clean_text: str       # e.g. "Hello there!"
 
 
+_BAD_TAG = re.compile(r"\s*\[[A-Z]+(?: [A-Z]+)+\]\s*")     # "[I AM]": a tag with a space in it is no tag
+
+
+def strip_bad_tags(text: str) -> str:
+    """Leading all-caps bracket groups with a space in them ("[I AM] [GREETING] Hello!"): the model's own, spoken aloud and
+    read by the robot as a gesture called "I AM"."""
+    while True:
+        m = _BAD_TAG.match(text)
+        if not m:
+            return text
+        text = text[m.end():]
+
+
 def parse_response(raw: str) -> LLMResponse:
     """
     Shared parser used by both providers.

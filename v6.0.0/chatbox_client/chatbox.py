@@ -18,7 +18,6 @@ import sys
 import logging
 import subprocess
 import time
-import threading
 from typing import Optional
 
 # The shared robot client (v6.0.0/client): BasicClient, the server protocol,
@@ -50,7 +49,6 @@ logger = logging.getLogger(__name__)
 # Maps LLM emotion tags to ESP32 command strings
 EMOTION_MAP = {
     "GREETING":    "greeting",
-    "WAVE":        "wave",
     "POINT":       "point",
     "CONFUSED":    "confused",
     "SHRUG":       "shrug",

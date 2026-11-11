@@ -29,6 +29,7 @@ Requires: pip install websocket-client
 """
 
 from __future__ import annotations
+import asyncio
 import json
 import logging
 import queue
@@ -67,13 +68,16 @@ if TYPE_CHECKING:
 _looks_like_question = looks_like_question
 
 
-# How long to wait before attempting a reconnect (seconds)
+# A dialed robot is retried for as long as it is registered: a robot that powers on
+# later, or a server that restarts first, must still end up connected. The wait
+# doubles from RECONNECT_DELAY up to RECONNECT_MAX_DELAY (seconds); a robot
+# registering again cuts it short.
 RECONNECT_DELAY = 5
+RECONNECT_MAX_DELAY = 30
 
 # Messages that start a visitor turn: STT + LLM, seconds long. They run on a
 # per-connection worker so the reader keeps reading acks and barge-ins.
 TURN_TYPES = {"chat", "speech"}
-MAX_RECONNECT_ATTEMPTS = 10
 
 ADVANCE_ACK = {
     # What the guide says when a visitor's turn closes the Q&A window. Fixed
@@ -96,6 +100,9 @@ ADVANCE_ACK_WITH_CHANGE = {
     Mechanism.TIME_PRESSURE: "[DEFAULT] Understood",
     "default":               "[DEFAULT] Of course",
 }
+
+# The demo is under way in these states. Outside them, talking to a robot is Roles-style: see answer_kwargs.
+DEMO_ACTIVE_STATES = ("running", "waiting_ack", "qa_window", "awaiting_cue", "paused")
 
 SPEAKING_WORDS_PER_SEC = 2.4
 """Rough speaking rate, used only to wait out a sentence the server cannot
@@ -122,6 +129,50 @@ def _speaking_seconds(text: str) -> float:
     return min(20.0, words / SPEAKING_WORDS_PER_SEC) if words else 0.0
 
 
+DUP_WINDOW_SEC = 8.0
+DUP_SHORT_SEC = 3.0
+DUP_OVERLAP = 0.5
+
+
+def _same_utterance(a: set, b: set, age: float) -> bool:
+    """Two transcriptions of one visitor utterance, heard by two robots' microphones: mostly the same
+    words, or both a short reply ("yes", "no thanks") a moment apart."""
+    if not a or not b:
+        return False
+    if len(a) <= 3 and len(b) <= 3 and age <= DUP_SHORT_SEC:
+        return True
+    return len(a & b) / min(len(a), len(b)) >= DUP_OVERLAP
+
+
+ECHO_WINDOW_SEC = 45.0
+ECHO_OVERLAP = 0.7
+ECHO_MIN_WORDS = 4
+
+
+def _words(text: str) -> list:
+    return re.findall(r"[a-z0-9']+", (text or "").lower().replace("'", ""))
+
+
+def _looks_like_echo(heard: str, said: list) -> bool:
+    """True when most of `heard` is made of words the robots just said: a microphone picking up its own
+    speaker. `said` is the recent spoken lines. Short phrases are never judged, so a visitor's "yes" or
+    "go ahead" always gets through."""
+    heard_w = _words(heard)
+    if len(heard_w) < ECHO_MIN_WORDS:
+        return False
+    vocab = {w for line in said for w in _words(line)}
+    return sum(w in vocab for w in heard_w) / len(heard_w) >= ECHO_OVERLAP
+
+
+ASK_BEFORE_HANDOVER = True
+"""When a question belongs to a robot other than the one that heard it, the one that heard it says the
+other robot specialises in this and asks the visitor whether to ask them, and only hands over once the
+visitor says yes. Off: the hand-over happens at once (conversation/turn.py)."""
+
+QA_AUTO_CLOSE_ENABLED = False
+"""Whether a robot signing off ("let me know if you have any other questions") closes the window after a
+pause. Off on this branch: only the visitor or the operator ends a Q&A window."""
+
 QA_AUTO_CLOSE_SEC = 5.0
 
 QA_WRAP_UP_SILENCE_SEC = 8.0
@@ -146,18 +197,21 @@ class RobotConnection:
         port: int,
         on_message: Callable,
         on_close: Callable,
+        on_open: Optional[Callable] = None,
     ):
         self.client_id = client_id
         self.ip = ip
         self.port = port
         self._on_message = on_message
         self._on_close = on_close
+        self._on_open_cb = on_open
 
         self._ws: Optional[websocket.WebSocketApp] = None
         self._thread: Optional[threading.Thread] = None
         self._connected = False
         self._reconnect_attempts = 0
         self._stop = False
+        self._wake = threading.Event()      # set: stop waiting and dial now
 
         # Turns run here, one at a time and in order. The reader thread used
         # to run them itself, so while one robot's answer was generating
@@ -181,6 +235,7 @@ class RobotConnection:
     def disconnect(self):
         """Close the connection cleanly."""
         self._stop = True
+        self._wake.set()
         self._turns.put(None)
         if self._ws:
             self._ws.close()
@@ -199,6 +254,10 @@ class RobotConnection:
     def is_connected(self) -> bool:
         return self._connected
 
+    def retry_now(self):
+        """The robot said it is up (it registered again): skip the rest of the backoff."""
+        self._wake.set()
+
     # ── Internal ──────────────────────────────────────────────────────────────
 
     def _start_thread(self):
@@ -215,12 +274,15 @@ class RobotConnection:
             daemon=True,
         )
         self._thread.start()
-        print(f"[WS] Connecting to {self.client_id} at {self.url}...")
+        if self._reconnect_attempts == 0:     # a robot that stays off is retried quietly
+            print(f"[WS] Connecting to {self.client_id} at {self.url}...")
 
     def _on_open(self, ws):
         self._connected = True
         self._reconnect_attempts = 0
         print(f"[WS] Connected to {self.client_id}")
+        if self._on_open_cb:
+            self._on_open_cb(self.client_id)
 
     def _handle_message(self, ws, raw):
         try:
@@ -255,23 +317,128 @@ class RobotConnection:
                     self._turn_cancel = None
 
     def _on_error(self, ws, error):
-        print(f"[WS] Error from {self.client_id}: {error}")
+        if self._reconnect_attempts == 0:
+            print(f"[WS] Error from {self.client_id}: {error}")
+
+    def _handle_close(self, ws, code, msg):
+        was_open, self._connected = self._connected, False
+        if was_open or self._reconnect_attempts == 0:
+            print(f"[WS] Connection to {self.client_id} closed (code={code})")
+        if was_open:        # a refused attempt was never a connection to lose
+            self._on_close(self.client_id)
+
+        if self._stop:
+            return
+        delay = min(RECONNECT_MAX_DELAY, RECONNECT_DELAY * 2 ** min(self._reconnect_attempts, 4))
+        if self._reconnect_attempts == 0:
+            print(f"[WS] {self.client_id} not answering; retrying every {RECONNECT_MAX_DELAY}s at most, quietly.")
+        self._reconnect_attempts += 1
+        self._wake.clear()
+        self._wake.wait(delay)
+        if not self._stop:
+            self._start_thread()
+
+
+class InboundRobotConnection(RobotConnection):
+    """A robot that dialled in to the server, for robots the server cannot reach (behind NAT or a firewall,
+    like the Jetson ChatBox). The same interface and the same turn handling as the dial-out connection; the
+    socket is the robot's, so there is nothing to reconnect from this side: the robot redials."""
+
+    def __init__(self, client_id: str, sock, loop, on_message: Callable, on_close: Callable):
+        super().__init__(client_id, "inbound", 0, on_message, on_close)
+        self._sock, self._loop = sock, loop
+        self._connected = True
+
+    @property
+    def url(self) -> str:
+        return f"inbound:{self.client_id}"
+
+    def connect(self):
+        pass
+
+    def disconnect(self):
+        self._stop = True
+        self._turns.put(None)
+        self._connected = False
+        asyncio.run_coroutine_threadsafe(self._sock.close(), self._loop)
+
+    def send(self, data: dict):
+        if not self._connected:
+            print(f"[WS] Cannot send to {self.client_id} — not connected.")
+            return
+        try:
+            asyncio.run_coroutine_threadsafe(self._sock.send(json.dumps(data)), self._loop).result(timeout=5)
+        except Exception as e:
+            print(f"[WS] Send error to {self.client_id}: {e}")
 
     def _handle_close(self, ws, code, msg):
         self._connected = False
-        print(f"[WS] Connection to {self.client_id} closed (code={code})")
+        print(f"[WS] {self.client_id} disconnected (inbound).")
         self._on_close(self.client_id)
 
-        # Auto-reconnect unless we're stopping deliberately
-        if not self._stop and self._reconnect_attempts < MAX_RECONNECT_ATTEMPTS:
-            self._reconnect_attempts += 1
-            print(f"[WS] Reconnecting to {self.client_id} in {RECONNECT_DELAY}s "
-                  f"(attempt {self._reconnect_attempts}/{MAX_RECONNECT_ATTEMPTS})...")
-            time.sleep(RECONNECT_DELAY)
-            self._start_thread()
-        elif self._reconnect_attempts >= MAX_RECONNECT_ATTEMPTS:
-            print(f"[WS] Giving up on {self.client_id} after "
-                  f"{MAX_RECONNECT_ATTEMPTS} attempts.")
+
+class SocketIORobotConnection(RobotConnection):
+    """A robot on the ChatBox Socket.IO client (it connects to `server_url` and emits `client_init`, no
+    registration call, no WebSocket server of its own). Same interface and turn handling as the others; each
+    server -> robot message {"event": E, ...} goes out as Socket.IO event E, and each event the robot emits
+    (its dict carries "type") comes back in as that dict. The robot's reconnect logic does the redialling."""
+
+    def __init__(self, client_id: str, sio, sid: str, on_message: Callable, on_close: Callable):
+        super().__init__(client_id, "socketio", 0, on_message, on_close)
+        self._sio, self.sid = sio, sid
+        self._connected = True
+        # Everything goes out through one queue, in order, a few ms apart: the ChatBox client runs each
+        # event's handler on its own thread, so back-to-back events could otherwise be spoken out of order.
+        self._out: "queue.Queue[Optional[dict]]" = queue.Queue()
+        threading.Thread(target=self._send_worker, daemon=True, name=f"sio-out-{client_id}").start()
+
+    @property
+    def url(self) -> str:
+        return f"socketio:{self.client_id}"
+
+    def connect(self):
+        pass
+
+    def disconnect(self):
+        self._stop = True
+        self._turns.put(None)
+        self._out.put(None)
+        self._connected = False
+        try:
+            self._sio.disconnect(self.sid)
+        except Exception:
+            pass
+
+    def send(self, data: dict):
+        if not self._connected:
+            print(f"[WS] Cannot send to {self.client_id} — not connected.")
+            return
+        if data.get("event") == "chat_sentence":
+            # The ChatBox client registers no handler for chat_sentence (or tts_stop): it speaks chat_response.
+            # Without this every streamed answer, hand-over offer and hand-over line was silent on the robot.
+            tag = (data.get("emotion_tag") or "").strip("[] ")
+            text = data.get("text", "")
+            data = {"event": "chat_response", "response": f"[{tag}] {text}" if tag else text,
+                    "emotion_tag": tag, "clean_text": text}
+        self._out.put(data)
+
+    SEND_GAP_SEC = 0.05
+
+    def _send_worker(self):
+        while True:
+            data = self._out.get()
+            if data is None:
+                return
+            try:
+                self._sio.emit(data.get("event", "message"), data, to=self.sid)
+            except Exception as e:
+                print(f"[WS] Send error to {self.client_id}: {e}")
+            time.sleep(self.SEND_GAP_SEC)
+
+    def _handle_close(self, ws, code, msg):
+        self._connected = False
+        print(f"[WS] {self.client_id} disconnected (socketio).")
+        self._on_close(self.client_id)
 
 
 class WebSocketGateway:
@@ -285,8 +452,13 @@ class WebSocketGateway:
                  kg_router_factory=None, kg_observer=None, flow_planner=None):
         self._registry = registry
         self._connections: dict[str, RobotConnection] = {}
+        self._inbound_ids: set = set()   # robots that registered as dialling in: never dialled out to
         self._lock = threading.Lock()
         self._demo_orchestrator = None   # set via set_demo_orchestrator()
+        self.method_b = None             # conversation.method_b.MethodB, or None: Navel gets plain speech
+        self._last_tag: dict = {}              # client_id -> the pose tag its last spoken line carried
+        self.demo_start_listeners: list = []   # callables(), run when the lab demo is started (roles_gateway)
+        self.ack_listeners: list = []    # callables(step_id) for acks of "persona-N" steps (roles_gateway)
 
         # ── Decision layer ────────────────────────────────────────────────────
         # Both are optional and default to something inert-but-working: without a
@@ -335,6 +507,10 @@ class WebSocketGateway:
         self._utterances = deque(maxlen=400)
         self._utterance_seq = 0
         self._utterance_lock = threading.Lock()
+        # Spoken turns for the Roles page (its /voice feed): one row per heard
+        # question, filled in with what the robot said back while it ran.
+        self._voice_turns: deque = deque(maxlen=50)
+        self._voice_active: dict = {}      # client_id -> the row being answered
 
         # Who the last hand-off named, so the same line is not repeated in
         # front of every answer from the same robot — see route_question.
@@ -354,8 +530,17 @@ class WebSocketGateway:
         # A report beats the word-count estimate; silent clients keep the
         # estimate, so nothing changes for them.
         self._tts_speaking: dict = {}
-        # Whether this window has already invited further questions.
+        # (time, text) of what the robots were told to say lately, to recognise a mic hearing its own speaker
+        self._said_recent: list = []
+        # (time, client_id, words) of what each robot's mic just heard the visitor say
+        self._heard_recent: list = []
+        # Whether this window has already invited further questions, and which robot did.
         self._asked_more_questions = False
+        self._asked_more_by = None
+        # A hand-over the visitor has been asked about and has not answered yet:
+        # {"from_id", "target_id", "question"}. Consumed by the next visitor turn.
+        self._pending_handover = None
+        self._last_answerer = None
 
         # Pending auto-close of the Q&A window after a robot signs off.
         # Cancelled the moment a visitor speaks — see cancel_qa_auto_close.
@@ -400,6 +585,11 @@ class WebSocketGateway:
         and the synthetic `_qa_*` steps the policy generates.
         """
         event = data.get("event")
+        turn = self._voice_active.get(client_id)
+        if turn is not None and event == "chat_sentence":
+            said = _spoken_text(data.get("text") or "")
+            if said:
+                turn["reply"] = (turn["reply"] + " " + said).strip()
         # Judge emptiness on what a listener would HEAR: "[DEFAULT]" is a
         # directive, not a line, and recording it printed a blank turn.
         text = _spoken_text(data.get("text") or "")
@@ -423,6 +613,32 @@ class WebSocketGateway:
                 "kind": step_id or event,
                 "at": time.time(),
             })
+
+    def voice_turn_start(self, client_id: str, text: str) -> dict:
+        """A spoken question was heard: open its row for the Roles page's voice feed."""
+        inst = self._registry.get(client_id)
+        name = getattr(inst, "robot_name", None) or client_id
+        with self._utterance_lock:
+            turn = {"id": 1_000_000 + (self._voice_turns[-1]["id"] - 1_000_000 + 1
+                                       if self._voice_turns else 1),
+                    "robot": "".join(name.lower().split()), "text": text,
+                    "error": None, "done": False, "reply": "", "name": name}
+            self._voice_turns.append(turn)
+            self._voice_active[client_id] = turn
+        return turn
+
+    def voice_turn_done(self, client_id: str, turn: dict) -> None:
+        turn["done"] = True
+        if self._voice_active.get(client_id) is turn:
+            del self._voice_active[client_id]
+
+    def voice_items(self) -> list:
+        """The rows in the shape the Roles page's /voice poll reads."""
+        with self._utterance_lock:
+            return [{"id": t["id"], "robot": t["robot"], "text": t["text"],
+                     "error": t["error"], "done": t["done"],
+                     "out": {"reply": t["reply"], "role": t["name"], "persona": "spoken answer"}}
+                    for t in self._voice_turns]
 
     def record_visitor_line(self, text: str, to_client_id: str) -> None:
         """A visitor's question, shown in the operator's feed as a 'Visitor' turn."""
@@ -484,6 +700,9 @@ class WebSocketGateway:
         self._tracker.open_window()
         self._segment.reset()
         self._asked_more_questions = False
+        self._asked_more_by = None
+        self._pending_handover = None
+        self._last_answerer = None
         # A timer left over from the previous window would close this one
         # almost as soon as it opened.
         self.cancel_qa_auto_close("new window opened")
@@ -502,6 +721,9 @@ class WebSocketGateway:
         """
         self._tracker.close_window()
         self._asked_more_questions = False
+        self._asked_more_by = None
+        self._pending_handover = None
+        self._last_answerer = None
         self.cancel_qa_auto_close("window closed")
         try:
             observations = self._segment.observations()
@@ -820,6 +1042,41 @@ class WebSocketGateway:
     playing nothing at all — and a tour that parks itself forever on a bad
     guess is worse than one that occasionally speaks a little early."""
 
+    def _note_said(self, data: dict) -> None:
+        if data.get("event") in ("chat_sentence", "demo_step"):
+            said = _spoken_text(data.get("text") or "")
+            if said:
+                with self._speech_lock:
+                    self._said_recent.append((time.time(), said))
+
+    def heard_elsewhere(self, client_id: str, heard: str) -> bool:
+        """Did another robot's microphone already hear this same utterance? The room is shared, so every mic
+        transcribes the visitor; only the first is a turn, or the robots answer (and hand over) twice."""
+        now, words = time.time(), set(_words(heard))
+        with self._speech_lock:
+            self._heard_recent = [x for x in self._heard_recent if now - x[0] <= DUP_WINDOW_SEC]
+            dup = any(cid != client_id and _same_utterance(words, ws, now - t)
+                      for t, cid, ws in self._heard_recent)
+            if not dup:
+                self._heard_recent.append((now, client_id, words))
+        return dup
+
+    def heard_own_speech(self, heard: str) -> bool:
+        """Was this transcription just a robot's microphone hearing a robot speak?"""
+        cutoff = time.time() - ECHO_WINDOW_SEC
+        with self._speech_lock:
+            self._said_recent = [x for x in self._said_recent if x[0] >= cutoff]
+            said = [t for _, t in self._said_recent]
+        return _looks_like_echo(heard, said)
+
+    def demo_started(self) -> None:
+        """The lab demo is starting: let whoever set a robot up outside it put the demo's setup back."""
+        for listener in list(self.demo_start_listeners):
+            try:
+                listener()
+            except Exception as e:
+                logger.warning(f"[WS Gateway] demo-start hook failed: {e}")
+
     def note_speech(self, client_id: str, data: dict) -> None:
         """Add whatever was just sent to the estimate of what is still being said.
 
@@ -972,18 +1229,65 @@ class WebSocketGateway:
                                    else (fn, silence, deadline, time.time() + delay))
         timer.start()
 
-    def claim_more_questions_prompt(self) -> bool:
-        """True the FIRST time this Q&A window asks "any other questions?".
+    def claim_more_questions_prompt(self, robot_id: str = None) -> bool:
+        """True the first time this Q&A window asks "any other questions?", and again whenever the robot
+        answering is not the one that asked last.
 
         Reset when a window opens or closes. The prompt exists so a visitor
         knows they can keep going; saying it after every answer tells them
-        nothing new and starts to read as impatience.
+        nothing new and starts to read as impatience. But once per WINDOW
+        meant that when ChatBox had already asked, Navel's answer ended
+        without it. Giving `robot_id` makes it once per change of speaker.
         """
         with self._utterance_lock:
-            if self._asked_more_questions:
+            if self._asked_more_questions and (robot_id is None or robot_id == self._asked_more_by):
                 return False
             self._asked_more_questions = True
+            self._asked_more_by = robot_id
             return True
+
+    def note_answer(self, robot_id: str) -> None:
+        """`robot_id` just answered: a short follow-up ("yes please", "tell me more") is for it, whichever
+        robot's microphone heard it."""
+        self._last_answerer = robot_id
+
+    def last_answerer(self) -> Optional[str]:
+        return self._last_answerer
+
+    # ── Asking before a hand-over ─────────────────────────────────────────────
+
+    def set_pending_handover(self, from_id: str, target_id: str, question: str) -> None:
+        with self._utterance_lock:
+            self._pending_handover = {"from_id": from_id, "target_id": target_id, "question": question}
+
+    def take_pending_handover(self) -> Optional[dict]:
+        """The hand-over the visitor was last asked about, cleared by reading it: it is answered by the
+        next thing they say, and a different question lets the offer lapse."""
+        with self._utterance_lock:
+            pending, self._pending_handover = self._pending_handover, None
+            return pending
+
+    def note_floor(self, target_id: str) -> None:
+        """The visitor agreed: `target_id` now has the floor, so asking it again needs no announcement."""
+        with self._utterance_lock:
+            self._handed_off_to = target_id
+
+    def handover_offer(self, speaker_id: str, target_id: str, message: str) -> str:
+        """What the robot that heard the question says before handing it over: who is better placed, and
+        a question the visitor can answer. Fixed wording, not generated: it is asked, then waited for."""
+        target = self._registry.get(target_id)
+        name = getattr(target, "robot_name", None) or target_id
+        subject = ""
+        try:
+            router = self._kg_router_factory() if self._kg_router_factory else None
+            tid = router.resolve_topic(message) if router else None
+            if tid:
+                from data import demo_kg_repo
+                subject = demo_kg_repo.topic_labels().get(tid, "")
+        except Exception as e:
+            logger.warning(f"[WS Gateway] hand-over subject lookup failed: {e}")
+        about = f" specialises in {subject}, so they" if subject else " specialises in that, so they"
+        return f"{name}{about} can answer it best. Would you like me to ask {name}?"
 
     def _presenting_robot_id(self):
         """Whose block the tour is currently in, or None outside a demo."""
@@ -1018,6 +1322,12 @@ class WebSocketGateway:
         is told it is standing in. Read from this thread's routing decision,
         so call it on the same thread, right after route_question.
         """
+        orch = self._demo_orchestrator
+        in_demo = bool(orch and orch.get_status().get("state") in DEMO_ACTIVE_STATES)
+        if not in_demo:
+            # Talk outside the demo (the Roles page: a persona was assigned, now talk to it): the assigned
+            # role and nothing from the DB: no chat history, no stored project facts.
+            return {"style_framing": "", "grounded_facts": (), "use_history": False}
         stand_in = getattr(self._scratch, "standing_in_for", None)
         if stand_in and stand_in != target_id:
             inst = self._registry.get(stand_in)
@@ -1149,6 +1459,10 @@ class WebSocketGateway:
         # our tour" and nothing would close, which is exactly the robot most
         # likely to say it.
         if is_guide and result.mechanism != Mechanism.CLOSING_PHRASE:
+            return None
+
+        if action.kind is ActionKind.ADVANCE and not QA_AUTO_CLOSE_ENABLED:
+            # None, so the "any other questions?" prompt still goes out unless the answer already asked.
             return None
 
         if action.kind is ActionKind.ADVANCE:
@@ -1400,7 +1714,7 @@ class WebSocketGateway:
             return "we'll keep the question rounds shorter"
         return ""
 
-    def route_question(self, instance, message: str):
+    def route_question(self, instance, message: str, ask_first: bool = False):
         """
         Decide who should actually answer, and hand off if it is not the
         robot that heard the question.
@@ -1428,6 +1742,7 @@ class WebSocketGateway:
         ABSENT_ROBOT_POLICY.
         """
         receiver_id = getattr(instance, "client_id", None)
+        self._scratch.asks_first = False
         result = self._decide(DecisionPoint.QA_ROUTE, instance, message)
         if result is None:
             return instance, receiver_id, None
@@ -1504,8 +1819,14 @@ class WebSocketGateway:
         # again needs no announcement — the visitor just watched it answer.
         with self._utterance_lock:
             already = self._handed_off_to == target_id
-            self._handed_off_to = target_id
+            if already or not ask_first:
+                self._handed_off_to = target_id
         if already:
+            return target, target_id, None
+        if ask_first:
+            # The floor has not moved yet: the caller asks the visitor first (see handover_offer) and
+            # calls note_floor once they say yes.
+            self._scratch.asks_first = True
             return target, target_id, None
 
         return target, target_id, self._handoff_line(receiver_id, target_name, message)
@@ -1558,6 +1879,12 @@ class WebSocketGateway:
         Looks up ip/port from the DB.
         Returns True if connection was initiated.
         """
+        if client_id in self._inbound_ids:
+            # It connects to us. Dialling its registered address (a NAT'd or Tailscale one) would only
+            # fail, retry, and drop the registry entry on every failure.
+            print(f"[WS Gateway] {client_id} dials in; "
+                  f"{'already connected' if client_id in self._connections else 'waiting for it to connect'}.")
+            return True
         from data import robot_repo
         addr = robot_repo.get_robot_address(client_id)
         if not addr:
@@ -1567,9 +1894,14 @@ class WebSocketGateway:
 
         ip, port = addr
         with self._lock:
-            if client_id in self._connections:
-                print(f"[WS Gateway] Already connected to {client_id}")
+            old = self._connections.get(client_id)
+            if old and (old.ip, old.port) == (ip, port):
+                if not old.is_connected():
+                    old.retry_now()         # it re-registered: it is up now, don't wait out the backoff
                 return True
+            if old:                         # registered at a new address: drop the old link
+                del self._connections[client_id]
+                old.disconnect()
 
             conn = RobotConnection(
                 client_id=client_id,
@@ -1577,16 +1909,115 @@ class WebSocketGateway:
                 port=port,
                 on_message=self._on_message,
                 on_close=self._on_robot_close,
+                on_open=self._on_robot_open,
             )
             self._connections[client_id] = conn
             conn.connect()
-
-            # Give it a moment to establish
-            time.sleep(0.5)
-
-            # Trigger registry to create the instance
-            self._registry.connect(client_id)
             return True
+
+    def mark_inbound(self, client_id: str) -> None:
+        """The robot said, when it registered, that it dials in to this server."""
+        self._inbound_ids.add(client_id)
+
+    def start_inbound_server(self, host: str, port: int, token: str = "") -> None:
+        """Listen for robots that connect in. The first message must be
+        {"type": "hello", "client_id": ..., "token": ...}; the robot must already be registered."""
+        import websockets
+
+        async def handler(sock):
+            try:
+                hello = json.loads(await asyncio.wait_for(sock.recv(), timeout=10))
+            except Exception:
+                await sock.close(1008, "hello required")
+                return
+            cid = hello.get("client_id") if hello.get("type") == "hello" else None
+            if not cid or (token and hello.get("token") != token):
+                print(f"[WS Gateway] Inbound connection refused ({'bad token' if cid else 'no hello'}).")
+                await sock.close(1008, "refused")
+                return
+            loop = asyncio.get_running_loop()
+            conn = InboundRobotConnection(cid, sock, loop, self._on_message, self._on_robot_close)
+            with self._lock:
+                old = self._connections.pop(cid, None)
+                self._connections[cid] = conn
+            if old is not None:
+                old.disconnect()       # its handler's close is ignored below: it is no longer the pooled one
+            self._inbound_ids.add(cid)
+            instance = await loop.run_in_executor(None, self._registry.connect, cid)
+            if instance is None:
+                print(f"[WS Gateway] {cid} dialled in but is not registered — register it first.")
+                with self._lock:
+                    if self._connections.get(cid) is conn:
+                        self._connections.pop(cid, None)
+                await sock.close(1008, "not registered")
+                return
+            print(f"[WS Gateway] {cid} connected in from {sock.remote_address}.")
+            try:
+                async for raw in sock:
+                    await loop.run_in_executor(None, conn._handle_message, None, raw)
+            except Exception as e:
+                print(f"[WS Gateway] Inbound error from {cid}: {e}")
+            finally:
+                if self._connections.get(cid) is conn:
+                    conn._handle_close(None, getattr(sock, "close_code", None), "")
+
+        async def serve():
+            async with websockets.serve(handler, host, port, ping_interval=20, ping_timeout=10):
+                await asyncio.Future()
+
+        threading.Thread(target=lambda: asyncio.run(serve()), daemon=True, name="robot-inbound").start()
+        print(f"[WS Gateway] Robots can dial in on ws://{host}:{port}/")
+
+    def socketio_app(self, wsgi_app):
+        """Wrap the Flask WSGI app so the ChatBox Socket.IO client can connect to the same port (server_url).
+        Its first event is client_init {robot_name, client_id, ...}; the robot must already be registered
+        (POST /robots/register) - the unchanged client does not register itself, and an open door would let
+        anyone on the network claim a robot when API_TOKEN is set."""
+        import socketio
+        # max_http_buffer_size: a spoken turn is a base64 WAV in ONE message (16 kHz mono: ~43 KB per second of
+        # speech, 30 s recorded is 1.3 MB). The 1 MB default silently dropped anything past ~23 s.
+        sio = socketio.Server(async_mode="threading", cors_allowed_origins="*", max_http_buffer_size=20_000_000)
+        sid_robot: dict = {}
+
+        @sio.on("client_init")
+        def client_init(sid, data):
+            cid = (data or {}).get("client_id")
+            if not cid:
+                sio.emit("client_init_response", {"success": False, "message": "client_id is required"}, to=sid)
+                return
+            conn = SocketIORobotConnection(cid, sio, sid, self._on_message, self._on_robot_close)
+            with self._lock:
+                old = self._connections.pop(cid, None)
+                self._connections[cid] = conn
+            if old is not None:
+                old.disconnect()
+            self._inbound_ids.add(cid)
+            if self._registry.connect(cid) is None:
+                with self._lock:
+                    if self._connections.get(cid) is conn:
+                        self._connections.pop(cid, None)
+                msg = f"{cid} is not registered: POST /robots/register first"
+                print(f"[WS Gateway] {msg}")
+                sio.emit("client_init_response", {"success": False, "message": msg}, to=sid)
+                return
+            sid_robot[sid] = conn
+            print(f"[WS Gateway] {cid} connected (socketio).")
+            sio.emit("client_init_response", {"success": True, "client_id": cid,
+                     "robot_name": data.get("robot_name"), "message": "connected"}, to=sid)
+
+        @sio.on("disconnect")
+        def disconnect(sid):
+            conn = sid_robot.pop(sid, None)
+            if conn is not None and self._connections.get(conn.client_id) is conn:
+                conn._handle_close(None, None, "")
+
+        @sio.on("*")
+        def anything(event, sid, data):      # ack, speech, image_frame, chat_message, ...: the robot's dict carries its type
+            conn = sid_robot.get(sid)
+            if conn is not None and isinstance(data, dict):
+                conn._handle_message(None, json.dumps(data))
+
+        return socketio.WSGIApp(sio, wsgi_app)
 
     def disconnect_robot(self, client_id: str):
         """Close connection and remove from pool."""
@@ -1596,8 +2027,35 @@ class WebSocketGateway:
                 conn.disconnect()
         self._registry.disconnect(client_id)
 
+    def _vary_chatbox_pose(self, client_id: str, data: dict) -> dict:
+        """The ChatBox answered everything with [DEFAULT], so it stood still. A second [DEFAULT] line in a row
+        becomes [POINT]. Tag-only lines (the pose reset) and robots other than the ChatBox are left alone."""
+        event = data.get("event")
+        if event not in ("demo_step", "chat_sentence"):
+            return data
+        name = str(getattr(self._registry.get(client_id), "robot_name", "")).lower()
+        if "".join(name.split()) != "chatbox":
+            return data
+        if event == "demo_step":
+            m = re.match(r"(\s*\[)([A-Z_]+)(\])", data.get("text") or "")
+            tag = m.group(2) if m else ""
+            spoken = _spoken_text(data.get("text") or "")
+        else:
+            tag, spoken = (data.get("emotion_tag") or "").upper(), _spoken_text(data.get("text") or "")
+        if not tag or not spoken:
+            return data
+        if tag == "DEFAULT" and self._last_tag.get(client_id) == "DEFAULT":
+            tag = "POINT"
+            if event == "demo_step":
+                data = {**data, "text": m.group(1) + tag + m.group(3) + data["text"][m.end():]}
+            else:
+                data = {**data, "emotion_tag": tag}
+        self._last_tag[client_id] = tag
+        return data
+
     def send_to_robot(self, client_id: str, data: dict):
         """Send a JSON payload to a specific robot."""
+        data = self._vary_chatbox_pose(client_id, data)
         event = data.get("event", data.get("type", "?"))
         # Build a readable summary for the terminal
         extra = ""
@@ -1628,6 +2086,7 @@ class WebSocketGateway:
         # Every outbound utterance passes through here, which makes this the
         # one place that can know what is still being spoken.
         try:
+            self._note_said(data)
             self.note_speech(client_id, data)
         except Exception as e:
             logger.warning(f"[WS Gateway] could not time utterance: {e}")
@@ -1641,14 +2100,16 @@ class WebSocketGateway:
 
     def get_connected_ids(self) -> list[str]:
         with self._lock:
-            return list(self._connections.keys())
+            return [cid for cid, c in self._connections.items() if c.is_connected()]
 
     def shutdown(self):
         """Close all connections."""
         with self._lock:
-            for conn in self._connections.values():
-                conn.disconnect()
+            conns = list(self._connections.values())
             self._connections.clear()
+        # Outside the lock: closing a dial-in link runs its close handler on this thread, and that takes the lock.
+        for conn in conns:
+            conn.disconnect()
         self._registry.shutdown()
 
     # ── Message routing ───────────────────────────────────────────────────────
@@ -1713,21 +2174,34 @@ class WebSocketGateway:
                 if audio_b64 and self._awaiting_cue():
                     # Transcribe only: generating here would answer the guide.
                     heard = instance.transcribe(audio_b64).transcription
-                    if heard:
+                    if heard and not self.heard_own_speech(heard) and not self.heard_elsewhere(client_id, heard):
                         self._handle_cue(instance, heard)
                     return
                 if audio_b64:
                     t0 = time.perf_counter()
                     stt = instance.transcribe(audio_b64)
                     stt_sec = time.perf_counter() - t0
+                    if self.heard_own_speech(stt.transcription):
+                        logger.info(f"[WS Gateway] {client_id}: ignored its own speech heard by the mic: "
+                                    f"\"{stt.transcription[:60]}\"")
+                        return
+                    if self.heard_elsewhere(client_id, stt.transcription):
+                        logger.info(f"[WS Gateway] {client_id}: already heard by another robot: "
+                                    f"\"{stt.transcription[:60]}\"")
+                        return
                     self.send_to_robot(client_id, {
                         "event": "speech_response",
                         "transcription": stt.transcription,
                         "confidence": stt.confidence,
                     })
                     if stt.transcription.strip():
-                        handle_turn(self, instance, client_id, stt.transcription,
-                                    stt_sec=stt_sec, cancelled=cancelled)
+                        self.record_visitor_line(stt.transcription.strip(), client_id)   # the dashboard feed's "Visitor" turn
+                        turn = self.voice_turn_start(client_id, stt.transcription.strip())
+                        try:
+                            handle_turn(self, instance, client_id, stt.transcription,
+                                        stt_sec=stt_sec, cancelled=cancelled)
+                        finally:
+                            self.voice_turn_done(client_id, turn)
 
             elif msg_type == "image_frame":
                 frame_b64 = data.get("frame", "")
@@ -1741,7 +2215,11 @@ class WebSocketGateway:
             elif msg_type == "ack":
                 # Demo step acknowledgement — forward to orchestrator
                 step_id = data.get("step_id")
-                if self._demo_orchestrator and step_id:
+                if step_id and str(step_id).startswith("persona-"):
+                    # a step the Roles page sent (gateway/roles_gateway.py), not the demo's
+                    for listener in list(self.ack_listeners):
+                        listener(step_id)
+                elif self._demo_orchestrator and step_id:
                     self._demo_orchestrator.receive_ack(step_id)
                 else:
                     print(f"[WS Gateway] ACK from {client_id}: step_id='{step_id}' "
@@ -1771,11 +2249,22 @@ class WebSocketGateway:
             print(f"[WS Gateway] Error handling '{msg_type}' "
                   f"from {client_id}: {e}")
 
+    def _on_robot_open(self, client_id: str):
+        """A dialed robot's socket is up (first time, or again after a drop): bring its instance up too.
+        In a thread — building the instance loads modules and must not hold up the socket."""
+        threading.Thread(target=self._registry.connect, args=(client_id,), daemon=True,
+                         name=f"instance-{client_id}").start()
+
     def _on_robot_close(self, client_id: str):
-        """Called when a robot's connection drops unexpectedly."""
+        """Called when a robot's connection drops unexpectedly. A dialed connection stays in the pool and
+        keeps retrying; a dial-in one is replaced when the robot connects again."""
+        conn = self._connections.get(client_id)
+        if conn is not None and conn.is_connected():
+            return      # a stale link closing after the robot was re-pointed at a new address
         print(f"[WS Gateway] {client_id} connection dropped.")
         with self._speech_lock:
             self._tts_speaking.pop(client_id, None)   # a gone robot isn't talking
         self._registry.disconnect(client_id)
-        with self._lock:
-            self._connections.pop(client_id, None)
+        if type(conn) is not RobotConnection:
+            with self._lock:
+                self._connections.pop(client_id, None)

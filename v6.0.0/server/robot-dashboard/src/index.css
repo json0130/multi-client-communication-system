@@ -12,6 +12,8 @@
   --offline:   #475569;
   --danger:    #ef4444;
   --mono:      'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
+  --glass-bg:     transparent;
+  --glass-border: rgba(255, 255, 255, 0.16);
 }
 
 /* ── Reset ─────────────────────────────────────────────────── */
@@ -34,19 +36,35 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   display: flex;
   flex-direction: column;
   min-height: 100vh;
+  /* a soft glow for the header's glass to refract */
+  background:
+    radial-gradient(900px 380px at 50% -60px, rgba(96, 165, 250, 0.20), transparent 70%),
+    radial-gradient(600px 320px at 85% 15%, rgba(148, 163, 184, 0.10), transparent 70%);
+  background-attachment: fixed;
 }
 
-/* ── Header ────────────────────────────────────────────────── */
+/* ── Header: a floating frosted-glass pill ─────────────────── */
+/* RolesTab.jsx fills the window below it; keep HEADER_PX there equal to
+   top margin + height + gap (12 + 52 + 12). */
 .header {
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 0 24px;
-  height: 56px;
-  background: var(--surface);
-  border-bottom: 1px solid var(--border);
+  gap: 14px;
+  width: calc(100% - 32px);
+  height: 52px;
+  margin: 12px auto 0;
+  padding: 0 10px 0 18px;
+  border-radius: 999px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  border: 1px solid var(--glass-border);
+  box-shadow:
+    inset 0 1px 0 rgba(255,255,255,0.18),
+    inset 0 -1px 0 rgba(255,255,255,0.04),
+    0 12px 32px rgba(0,0,0,0.38);
   position: sticky;
-  top: 0;
+  top: 12px;
   z-index: 100;
 }
 
@@ -54,13 +72,15 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   display: flex;
   align-items: center;
   gap: 10px;
-  flex: 1;
+  padding-right: 14px;
+  border-right: 1px solid var(--glass-border);
+  flex-shrink: 0;
 }
 
 .header-logo {
-  width: 28px;
-  height: 28px;
-  color: var(--accent);
+  width: 24px;
+  height: 24px;
+  color: #fff;
   flex-shrink: 0;
 }
 
@@ -70,14 +90,8 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: var(--text);
-}
-
-.header-right {
-  flex: 1;
-  display: flex;
-  justify-content: flex-end;
-  align-items: center;
+  color: #fff;
+  white-space: nowrap;
 }
 
 /* ── Nav Tabs ──────────────────────────────────────────────── */
@@ -107,6 +121,39 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   color: var(--text);
   box-shadow: 0 1px 3px rgba(0,0,0,0.4);
 }
+
+.header .nav-tabs {
+  background: transparent;
+  padding: 0;
+  gap: 2px;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.header .nav-tabs::-webkit-scrollbar { display: none; }
+
+.header .nav-tab {
+  padding: 7px 14px;
+  border-radius: 999px;
+  color: rgba(255,255,255,0.72);
+  font-size: 14px;
+  white-space: nowrap;
+}
+.header .nav-tab:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.header .nav-tab.active {
+  color: #fff;
+  background: rgba(255,255,255,0.16);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 1px 4px rgba(0,0,0,0.25);
+}
+
+@media (max-width: 720px) {
+  .header { padding-left: 12px; gap: 8px; }
+  .header-title { display: none; }
+  .header-left { padding-right: 8px; }
+}
+
+/* second-level tabs inside a page (Demo: Run / Knowledge Graph / Flow Plan) */
+.sub-tabs { width: fit-content; max-width: 100%; margin-bottom: 18px; overflow-x: auto; }
 
 /* ── Live dot ──────────────────────────────────────────────── */
 .live-dot {
@@ -770,7 +817,7 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 /* Top control bar */
 .demox-topbar         { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 10px 14px; }
 .demox-state-row      { display: flex; align-items: center; gap: 10px; }
-.demox-controls       { display: flex; gap: 6px; flex-wrap: wrap; margin-left: auto; }
+.demox-controls       { display: flex; gap: 6px; margin-left: auto; }
 
 /* Move-on banner — shown only in qa_window */
 .demox-moveon-banner  { display: flex; align-items: center; gap: 12px; padding: 12px 18px; background: rgba(109,40,217,0.15); border: 1px solid #6d28d9; border-radius: 8px; }
@@ -804,6 +851,13 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 /* Chat pane */
 .demox-chat-pane      { flex: 1; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
 .demox-chat-controls  { display: flex; align-items: center; gap: 8px; }
+.demox-status         { display: flex; flex-direction: column; gap: 6px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+.demox-steptext       { font-size: 0.78rem; line-height: 1.4; color: var(--muted); max-height: 5.6em; overflow: auto; word-break: break-word; }
+
+/* A robot's line is outlined in its Roles-graph colour, with a soft glow. */
+.chat-msg-robot .chat-msg-name { color: var(--rc); }
+.chat-msg-robot .chat-msg-time { color: var(--muted); }
+.chat-msg-robot .chat-bubble   { border-color: var(--rc); background: transparent; box-shadow: 0 0 0 1px var(--rc), 0 0 14px color-mix(in srgb, var(--rc) 35%, transparent); }
 .demox-feed           { flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; padding: 12px; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
 .demox-input-row      { display: flex; gap: 8px; align-items: center; }
 .demox-input-row .form-input { flex: 1; }

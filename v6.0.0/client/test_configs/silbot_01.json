@@ -39,5 +39,6 @@
     "A": 0.75,
     "N": 0.25
   },
-  "tts_voice": "en-GB-RyanNeural"
+  "tts_voice": "en-GB-RyanNeural",
+  "gtts_pitch": -4
 }

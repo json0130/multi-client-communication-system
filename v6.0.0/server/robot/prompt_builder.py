@@ -20,9 +20,25 @@ the fusion point instead of leaking into the LLM silently.
 """
 
 from __future__ import annotations
+import re
 from typing import Sequence
 
 from core.rbac import ClearedRecord, assert_cleared
+
+
+# A visitor asking HOW something works wants the mechanism, with names. The rules above push the model
+# to 1-2 short sentences and it answered in generalities ("it searches for relevant information") with
+# the FAISS index and the model sitting in its facts. Measured on qwen2.5:7b with ChatBox's facts, 13/20
+# answers named one before this directive and 20/20 after.
+HOW_IT_WORKS = re.compile(
+    r"how (does|do|did|is|are)\b.*\b(work|works|built|made|done)|under the hood|technical|technolog"
+    r"|architecture|implement|mechanism|explain how|in more detail", re.I)
+HOW_IT_WORKS_RULE = (
+    "\n*** THE VISITOR ASKED HOW IT WORKS ***\n"
+    "Answer with the mechanism itself: say what happens, in order, and NAME the specific method and "
+    "model from the facts above (for example the index type and the language model). Up to 3 short "
+    "sentences. Do not describe it in general terms when the facts name it.\n"
+)
 
 
 def build_delegation_prompt(
@@ -102,7 +118,9 @@ def build_delegation_prompt(
         peers_block = (
             f"CURRENTLY ACTIVE ROBOTS:\n{peer_lines}\n"
             "If a question is about a subject another robot OWNS, it is theirs "
-            "to answer, not yours — hand it over even if you could attempt it."
+            "to answer, not yours — hand it over even if you could attempt it.\n"
+            f"You are {robot_name}. You are never any of the robots listed above: do not take their "
+            "name, role or project as your own."
         )
     else:
         peers_block = "CURRENTLY ACTIVE ROBOTS:\n  None. You are the only active robot."
@@ -130,6 +148,7 @@ def build_delegation_prompt(
    "goodbye", no "enjoy the rest of your visit". The visitors are standing
    in front of you and the tour continues after this answer; a farewell in
    the middle of it sounds like you think they are leaving.
+6. Always reply in English, whatever language the visitor's words look like.
 
 *** CORRECT EXAMPLES ***
 {example_tag} Hello! How can I help you today?
@@ -166,6 +185,9 @@ left waiting for an answer that will never come."""
         # followed its "RobotX, can you take it?" template and called over a
         # robot the group could not reach, even with a stand-in note after it.
         system_prompt = system_prompt.split("\n*** TEAMMATES & DELEGATION ***")[0]
+
+    if grounded_facts and HOW_IT_WORKS.search(user_message or ""):
+        system_prompt += HOW_IT_WORKS_RULE
 
     return system_prompt, user_message
 

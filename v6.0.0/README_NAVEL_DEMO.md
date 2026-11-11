@@ -104,7 +104,7 @@ subject stay with ChatBox.
   `client/test_configs/navel_01.json`, `gazebo_client/configs/navel_01_sim.json`)
   describes Project 56. It must never claim people have been shown to
   understand robots better, because the human study hasn't been done.
-- **Profile:** `navel_01`'s role is "Co-speech motion researcher", and
+- **Profile:** `navel_01`'s role is "Contextual co-speech motion researcher", and
   `navel_001` inherits it as the physical twin.
 - **Facts:** migration `016_navel_project56` holds the topics, declared scope
   and 26 facts for `navel_01`, plus a note that Method B doesn't run inside

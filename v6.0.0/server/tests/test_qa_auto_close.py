@@ -865,3 +865,47 @@ class TestTheQABudgetCountsQuietSeconds:
         o = self._orch(_NoisyGateway(0.0))
         o._qa_end_event.set()
         assert o._wait_for_qa_close(None) is True
+
+
+class TestAnInterruptionDuringAStepIsNotLost:
+    """
+    Live run: ChatBox's approach step finished, the next step began generating, and the visitor spoke. The
+    interruption put the demo in Q&A, but the loop then sent the generated step anyway (over the answer, in
+    ChatBox's voice) and its WAITING_ACK overwrote the Q&A state, so the demo carried on as if nothing had
+    been asked.
+    """
+
+    def _orch(self, interrupt_during_generation):
+        sent = []
+
+        class WS:
+            orch = None
+
+            def send_to_robot(self, cid, data):
+                sent.append((cid, data))
+
+            def generate_demo_step(self, robot_id, instruction):
+                if interrupt_during_generation:
+                    self.orch.qa_interrupt(source="auto")
+                return "Generated speech."
+
+        ws = WS()
+        o = DemoOrchestrator(ws)
+        ws.orch = o
+        o.load_script(build_script(GUIDE, [A, B]))
+        o._idx = next(i for i, s in enumerate(o._script) if s.generate and s.step_kind != "navigation")
+        o._state = DemoState.RUNNING
+        return o, sent
+
+    def test_a_step_generated_during_an_interruption_is_not_sent(self):
+        o, sent = self._orch(True)
+        step = o._script[o._idx]
+        assert o._send_step(step) is False
+        assert not any(d.get("step_id") == step.step_id for _, d in sent)
+        assert o._state == DemoState.QA_WINDOW
+
+    def test_without_an_interruption_it_is_sent(self):
+        o, sent = self._orch(False)
+        step = o._script[o._idx]
+        assert o._send_step(step) is not False
+        assert any(d.get("step_id") == step.step_id for _, d in sent)

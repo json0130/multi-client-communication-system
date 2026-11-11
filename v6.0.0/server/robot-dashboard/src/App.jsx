@@ -7,6 +7,7 @@ import PersonaModal from './components/PersonaModal'
 import DemoTab from './components/DemoTab'
 import KGTab from './components/KGTab'
 import FlowTab from './components/FlowTab'
+import RolesTab from './components/RolesTab'
 import { ToastContainer } from './components/Toast'
 
 const REFRESH_INTERVAL = 5000
@@ -40,6 +41,7 @@ export default function App() {
   const [lastSync, setLastSync]     = useState(null)
   const [search, setSearch]         = useState('')
   const [filter, setFilter]         = useState('all')
+  const [demoView, setDemoView]   = useState('run')    // Demo sub-tab: 'run' | 'kg' | 'flow'
 
   const fetchAll = useCallback(async () => {
     try {
@@ -101,7 +103,7 @@ export default function App() {
       <header className="header">
         <div className="header-left">
           <div className="header-logo"><RobotIcon /></div>
-          <span className="header-title">Robot Management</span>
+          <span className="header-title">CARES Robots</span>
         </div>
         <nav className="nav-tabs">
           <button className={`nav-tab ${tab === 'robots'   ? 'active' : ''}`} onClick={() => setTab('robots')}>
@@ -110,21 +112,13 @@ export default function App() {
           <button className={`nav-tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
             Personas {personas.length > 0 && `(${personas.length})`}
           </button>
+          <button className={`nav-tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>
+            Roles
+          </button>
           <button className={`nav-tab ${tab === 'demo' ? 'active' : ''}`} onClick={() => setTab('demo')}>
             Demo
           </button>
-          <button className={`nav-tab ${tab === 'kg' ? 'active' : ''}`} onClick={() => setTab('kg')}>
-            Knowledge Graph
-          </button>
-          <button className={`nav-tab ${tab === 'flow' ? 'active' : ''}`} onClick={() => setTab('flow')}>
-            Flow Plan
-          </button>
         </nav>
-        <div className="header-right">
-          <button className="btn btn-secondary" style={{ padding: '5px 12px', fontSize: 12 }} onClick={fetchAll}>
-            Refresh
-          </button>
-        </div>
       </header>
 
       {/* Main */}
@@ -298,21 +292,27 @@ export default function App() {
             </div>
           </>
         )}
-        {/* ── Demo / KG / Flow tabs ──────────────────────────────────────────
+        {/* ── Demo, with Knowledge Graph and Flow Plan as sub-tabs ───────────
             Always mounted, hidden with CSS rather than conditionally rendered.
-            These three keep local state a user builds up during a session —
-            the demo chat feed, which KG cell is selected, a flow-plan preview
-            — and `{cond && <X/>}` unmounts the component on every tab switch,
-            wiping that state. display:none keeps the component (and its
-            polling effects) alive underneath instead. */}
+            These keep local state a user builds up during a session — the demo
+            chat feed, which KG cell is selected, a flow-plan preview — and
+            `{cond && <X/>}` unmounts the component on every switch, wiping
+            that state. display:none keeps the component (and its polling
+            effects) alive underneath instead. */}
         <div style={{ display: tab === 'demo' ? 'block' : 'none', height: '100%' }}>
-          <DemoTab />
+          <div className="nav-tabs sub-tabs">
+            {[['run', 'Run'], ['kg', 'Knowledge Graph'], ['flow', 'Flow Plan']].map(([id, label]) => (
+              <button key={id} className={`nav-tab ${demoView === id ? 'active' : ''}`} onClick={() => setDemoView(id)}>
+                {label}
+              </button>
+            ))}
+          </div>
+          <div style={{ display: demoView === 'run' ? 'block' : 'none' }}><DemoTab /></div>
+          <div style={{ display: demoView === 'kg' ? 'block' : 'none' }}><KGTab /></div>
+          <div style={{ display: demoView === 'flow' ? 'block' : 'none' }}><FlowTab /></div>
         </div>
-        <div style={{ display: tab === 'kg' ? 'block' : 'none', height: '100%' }}>
-          <KGTab />
-        </div>
-        <div style={{ display: tab === 'flow' ? 'block' : 'none', height: '100%' }}>
-          <FlowTab />
+        <div style={{ display: tab === 'roles' ? 'block' : 'none', height: '100%' }}>
+          <RolesTab active={tab === 'roles'} />
         </div>
 
       </main>
