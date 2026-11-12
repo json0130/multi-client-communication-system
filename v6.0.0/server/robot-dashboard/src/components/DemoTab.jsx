@@ -1,3 +1,4 @@
+import { robotColor } from '../robotColors'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   getDemoStatus, getDemoTranscript,
@@ -494,8 +495,6 @@ function StatePill({ state }) {
 }
 
 // The colours the Roles page draws these robots in (gateway/roles_gateway.py DEFAULT_ROBOTS).
-const ROBOT_COLORS = { chatbox: '#ffa46b', navel: '#7dd0f9' }      // the graph's orange and blue, a shade lighter
-const robotColor = (name) => ROBOT_COLORS[Object.keys(ROBOT_COLORS).find(k => String(name || '').toLowerCase().includes(k))]
 
 function ChatMessage({ msg }) {
   const isUser   = msg.role === 'user'

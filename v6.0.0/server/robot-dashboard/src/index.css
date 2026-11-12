@@ -945,12 +945,26 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted); }
 
 /* ── Knowledge graph tab ───────────────────────────────────────────────────── */
-.kg-root          { display: flex; flex-direction: column; gap: 10px; height: 100%; min-height: 0; }
-.kg-header        { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+/* Fills the window below the floating header like the Roles page (top = HEADER_PX in RolesTab.jsx).
+   The Demo sub-tabs stay in flow above it (z-index below), so the top-left corner is theirs. */
+.kg-root          { position: fixed; top: 76px; left: 0; right: 0; bottom: 0; z-index: 10; background: var(--bg); }
+.sub-tabs         { position: relative; z-index: 11; }
+.kg-error, .kg-empty { position: absolute; top: 72px; left: 16px; right: 16px; z-index: 2; }
 .kg-error         { padding: 8px 12px; border-radius: 6px; font-size: 0.8rem;
                     background: rgba(248,113,113,0.12); border: 1px solid #b91c1c; color: #fca5a5; }
 .kg-empty         { padding: 14px 16px; border-radius: 8px; font-size: 0.82rem; line-height: 1.5;
                     background: var(--surface); border: 1px dashed var(--border); color: var(--muted); }
+
+/* Audience fit: a bubble in the bottom-right corner that opens into a panel above itself. */
+.kg-fit-bubble    { position: absolute; right: 16px; bottom: 16px; z-index: 3; border-radius: 999px; padding: 8px 14px;
+                    font-size: 0.78rem; font-weight: 600; color: var(--text); cursor: pointer;
+                    background: color-mix(in srgb, var(--surface) 92%, transparent); border: 1px solid var(--border);
+                    box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+.kg-fit-bubble:hover, .kg-fit-bubble.open { border-color: var(--accent); }
+.kg-fit-panel     { position: absolute; right: 16px; bottom: 60px; z-index: 3; width: min(560px, calc(100% - 32px));
+                    max-height: calc(100% - 140px); overflow-y: auto; padding: 10px 12px; border-radius: 8px;
+                    background: color-mix(in srgb, var(--surface) 94%, transparent); border: 1px solid var(--border);
+                    box-shadow: 0 6px 24px rgba(0,0,0,.35); }
 
 .kg-stats         { display: flex; gap: 8px; flex-wrap: wrap; }
 .kg-stat          { flex: 1; min-width: 88px; padding: 8px 10px; border-radius: 7px;
@@ -982,3 +996,40 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 .kg-kv            { width: 100%; font-size: 0.75rem; border-collapse: collapse; }
 .kg-kv td         { padding: 3px 0; }
 .kg-neighbour     { display: flex; gap: 8px; font-size: 0.74rem; padding: 2px 0; }
+
+/* ── KG graph (d3-force, same forces as the Roles page) ─────────────────── */
+.kg-graph-wrap    { position: absolute; inset: 0; overflow: hidden; background: var(--bg); }
+.kg-graph-wrap svg { position: absolute; inset: 0; width: 100%; height: 100%; cursor: grab; }
+.kg-chips         { position: absolute; right: 130px; bottom: 16px; display: flex; flex-wrap: wrap; justify-content: flex-end;
+                    gap: 6px; max-width: calc(100% - 420px); pointer-events: none; }
+.kg-chips span    { font-size: 0.7rem; color: var(--muted); background: color-mix(in srgb, var(--surface) 85%, transparent);
+                    border: 1px solid var(--border); border-radius: 999px; padding: 3px 9px; pointer-events: auto; }
+.kg-chips b       { color: var(--text); font-weight: 600; margin-right: 2px; }
+.kg-card          { position: absolute; top: 10px; right: 10px; width: 300px; max-height: calc(100% - 20px); overflow-y: auto;
+                    background: color-mix(in srgb, var(--surface) 94%, transparent); border: 1px solid var(--border);
+                    border-radius: 8px; padding: 10px 12px; font-size: 0.78rem; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+.kg-card-title    { font-weight: 600; font-size: 0.82rem; margin-bottom: 6px; padding-right: 18px; }
+.kg-card-sub      { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: .04em; margin: 10px 0 4px; }
+.kg-card-x        { position: absolute; top: 6px; right: 8px; background: none; border: none; color: var(--muted);
+                    font-size: 1rem; line-height: 1; cursor: pointer; }
+.kg-card-x:hover  { color: var(--text); }
+.kg-card .kg-kv td:last-child { text-align: right; font-family: var(--mono); }
+.kgg-link         { stroke-opacity: 0.55; transition: stroke-opacity .15s; }
+.kgg-link.pair    { stroke-opacity: 0.6; }
+.kgg-link.dim     { stroke-opacity: 0.05; }
+.kgg-link.sel     { stroke: #ffd24a !important; stroke-opacity: 1; }
+.kgg-node         { cursor: pointer; transition: opacity .15s; }
+.kgg-node.dim     { opacity: 0.15; }
+.kgg-node-label   { fill: var(--text); font-size: 11px; font-weight: 600; pointer-events: none; user-select: none; }
+.kgg-node-label.topic { fill: var(--text); font-size: 11px; font-weight: 500; opacity: 0.9; }
+.kg-graph-wrap    { --topic-fill: color-mix(in srgb, var(--muted) 35%, var(--surface)); }
+.kg-legend .sw.sq { border-radius: 2px; border-style: dashed; }
+.kgg-pair-label   { fill: #ffd24a; opacity: 0.8; font-size: 10px; pointer-events: none; user-select: none; }
+.kg-legend        { position: absolute; left: 10px; bottom: 10px; display: flex; flex-wrap: wrap; gap: 10px 14px;
+                    align-items: center; font-size: 0.7rem; color: var(--muted); pointer-events: none;
+                    background: color-mix(in srgb, var(--bg) 80%, transparent); padding: 5px 9px; border-radius: 6px; }
+.kg-legend span   { display: inline-flex; align-items: center; gap: 5px; }
+.kg-legend .sw    { width: 10px; height: 10px; border-radius: 50%; border: 1.5px solid currentColor; display: inline-block; }
+.kg-legend .ln    { width: 18px; height: 2px; display: inline-block; background: var(--muted); }
+.kg-legend .ln.dashed { background: repeating-linear-gradient(90deg, var(--muted) 0 4px, transparent 4px 8px); }
+.kg-legend .hint  { margin-left: 6px; opacity: 0.75; }

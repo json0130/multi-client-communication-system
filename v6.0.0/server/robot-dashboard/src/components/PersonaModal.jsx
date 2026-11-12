@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { createPersona } from '../api'
+import { createPersona, updatePersona } from '../api'
 import { useToast } from './Toast'
 import { OceanEditor } from './OceanRadar'
 
@@ -11,24 +11,28 @@ const LANGUAGES     = [
   { value: 'fr', label: 'French'  }, { value: 'de', label: 'German'  },
   { value: 'ja', label: 'Japanese'}, { value: 'zh', label: 'Chinese' },
 ]
+// the ChatBox's actions (modules/chatbox_actions.py) first, then the older emotion tags
 const DEFAULT_TAGS = [
-  '[DEFAULT]', '[WAVE]', '[HAPPY]', '[SAD]', '[CONFUSED]',
-  '[GREETING]', '[ANGRY]', '[SLEEP]', '[POINT]', '[POSE]', '[SHRUG]',
+  '[DEFAULT]', '[GREETING]', '[POINT]', '[CONFUSED]', '[SHRUG]', '[SAD]', '[HANDS_CLAP]', '[EARS_WIGGLE]', '[POSE]',
+  '[WAVE]', '[HAPPY]', '[ANGRY]', '[SLEEP]',
 ]
 
 const defaults = {
   name:         '',
   description:  '',
   robot_role:   '',
-  allowed_tags: ['[DEFAULT]', '[WAVE]', '[HAPPY]', '[SAD]', '[CONFUSED]'],
-  modules:      ['gpt'],
+  allowed_tags: ['[DEFAULT]', '[GREETING]', '[POINT]', '[CONFUSED]', '[SHRUG]', '[SAD]', '[HANDS_CLAP]', '[EARS_WIGGLE]', '[POSE]'],
+  modules:      ['gpt', 'speech'],
   voice_config: { gender: 'female', language: 'en', rate: '+0%', pitch: '+0Hz' },
   capabilities: { face_recognition: false, emotion_understanding: false, navigation: false },
   personality:  { O: 0.5, C: 0.5, E: 0.5, A: 0.5, N: 0.5 },
 }
 
-export default function PersonaModal({ onClose, onCreated }) {
-  const [form, setForm]   = useState(defaults)
+/** Create a persona, or edit `persona` when one is given. A saved persona is also a role on the Roles tab. */
+export default function PersonaModal({ persona, onClose, onSaved }) {
+  const [form, setForm]   = useState(() => persona
+    ? { ...defaults, ...Object.fromEntries(Object.keys(defaults).map(k => [k, persona[k] ?? defaults[k]])) }
+    : defaults)
   const [saving, setSaving] = useState(false)
   const toast = useToast()
 
@@ -83,9 +87,9 @@ export default function PersonaModal({ onClose, onCreated }) {
     if (!form.robot_role.trim()) { toast.error('Role prompt is required'); return }
     setSaving(true)
     try {
-      const persona = await createPersona(form)
-      toast.success(`Persona '${form.name}' created!`)
-      onCreated(persona.persona)
+      const res = persona ? await updatePersona(persona.id, form) : await createPersona(form)
+      toast.success(`Persona '${form.name}' ${persona ? 'saved' : 'created'}`)
+      onSaved(res.persona)
     } catch (e) {
       toast.error(e.message)
     } finally {
@@ -97,7 +101,7 @@ export default function PersonaModal({ onClose, onCreated }) {
     <div className="modal-overlay" onClick={e => e.target === e.currentTarget && onClose()}>
       <div className="modal">
         <div className="modal-title">
-          New persona
+          {persona ? `Edit ${persona.name}` : 'New persona'}
           <button className="modal-close" onClick={onClose}>✕</button>
         </div>
 
@@ -118,6 +122,9 @@ export default function PersonaModal({ onClose, onCreated }) {
           <textarea className="form-textarea" rows={4}
             placeholder="You are... describe the robot's personality and purpose."
             value={form.robot_role} onChange={e => setField('robot_role', e.target.value)} />
+          <div className="muted" style={{ fontSize: 11, marginTop: 4 }}>
+            What the robot is told when this persona is assigned, here or on the Roles tab.
+          </div>
         </div>
 
         <div className="form-group">
@@ -125,18 +132,18 @@ export default function PersonaModal({ onClose, onCreated }) {
           <div className="checkbox-group">
             {ALL_MODULES.map(m => (
               <label key={m} className={`checkbox-pill ${form.modules.includes(m) ? 'checked' : ''}`}>
-                <input type="checkbox" onChange={() => toggleModule(m)} />{m}
+                <input type="checkbox" checked={form.modules.includes(m)} onChange={() => toggleModule(m)} />{m}
               </label>
             ))}
           </div>
         </div>
 
         <div className="form-group">
-          <label className="form-label">Allowed emotion tags</label>
+          <label className="form-label">Allowed action tags</label>
           <div className="checkbox-group">
             {DEFAULT_TAGS.map(tag => (
               <label key={tag} className={`checkbox-pill ${form.allowed_tags.includes(tag) ? 'checked' : ''}`}>
-                <input type="checkbox" onChange={() => toggleTag(tag)} />{tag}
+                <input type="checkbox" checked={form.allowed_tags.includes(tag)} onChange={() => toggleTag(tag)} />{tag}
               </label>
             ))}
           </div>
@@ -147,7 +154,7 @@ export default function PersonaModal({ onClose, onCreated }) {
           <div className="checkbox-group">
             {CAPABILITIES.map(cap => (
               <label key={cap} className={`checkbox-pill ${form.capabilities[cap] ? 'checked' : ''}`}>
-                <input type="checkbox" onChange={() => toggleCapability(cap)} />
+                <input type="checkbox" checked={!!form.capabilities[cap]} onChange={() => toggleCapability(cap)} />
                 {cap.replace(/_/g, ' ')}
               </label>
             ))}
@@ -157,11 +164,11 @@ export default function PersonaModal({ onClose, onCreated }) {
         <div className="form-group">
           <label className="form-label">Voice</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <select className="form-select" value={form.voice_config.gender}
+            <select className="form-select" value={form.voice_config.gender || 'female'}
               onChange={e => setField('voice_config.gender', e.target.value)}>
               {VOICES.map(v => <option key={v.value} value={v.value}>{v.label}</option>)}
             </select>
-            <select className="form-select" value={form.voice_config.language}
+            <select className="form-select" value={form.voice_config.language || 'en'}
               onChange={e => setField('voice_config.language', e.target.value)}>
               {LANGUAGES.map(l => <option key={l.value} value={l.value}>{l.label}</option>)}
             </select>
@@ -177,7 +184,7 @@ export default function PersonaModal({ onClose, onCreated }) {
         <div className="modal-footer">
           <button className="btn btn-secondary" onClick={onClose} disabled={saving}>Cancel</button>
           <button className="btn btn-primary"   onClick={handleSave} disabled={saving}>
-            {saving ? 'Saving...' : 'Create persona'}
+            {saving ? 'Saving...' : persona ? 'Save' : 'Create persona'}
           </button>
         </div>
       </div>

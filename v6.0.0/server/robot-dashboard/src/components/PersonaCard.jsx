@@ -2,7 +2,7 @@ import { deletePersona } from '../api'
 import { useToast } from './Toast'
 import { OceanChart } from './OceanRadar'
 
-export default function PersonaCard({ persona, onDeleted }) {
+export default function PersonaCard({ persona, onEdit, onDeleted }) {
   const toast = useToast()
 
   async function handleDelete() {
@@ -69,6 +69,9 @@ export default function PersonaCard({ persona, onDeleted }) {
       )}
 
       <div style={{ display: 'flex', gap: 8, marginTop: 16 }}>
+        <button className="btn btn-secondary" onClick={() => onEdit(persona)} style={{ flex: 1 }}>
+          Edit
+        </button>
         {!persona.is_default && (
           <button className="btn btn-danger" onClick={handleDelete} style={{ flex: 1 }}>
             Delete

@@ -37,6 +37,7 @@ export default function App() {
   const [personas, setPersonas]     = useState([])
   const [loading, setLoading]       = useState(true)
   const [showPersonaModal, setShowPersonaModal] = useState(false)
+  const [editPersona, setEditPersona] = useState(null)     // the persona open in the modal for editing
   const [showRobotModal,   setShowRobotModal]   = useState(false)
   const [lastSync, setLastSync]     = useState(null)
   const [search, setSearch]         = useState('')
@@ -83,9 +84,12 @@ export default function App() {
   const onlineCount  = robots.filter(r => r.ws_connected).length
   const offlineCount = robots.length - onlineCount
 
-  function handlePersonaCreated(persona) {
-    setPersonas(prev => [...prev, persona])
+  function handlePersonaSaved(persona) {
+    setPersonas(prev => prev.some(p => p.id === persona.id)
+      ? prev.map(p => (p.id === persona.id ? persona : p))
+      : [...prev, persona])
     setShowPersonaModal(false)
+    setEditPersona(null)
   }
 
   function handlePersonaDeleted(id) {
@@ -286,7 +290,7 @@ export default function App() {
                 </div>
               ) : (
                 personas.map(p => (
-                  <PersonaCard key={p.id} persona={p} onDeleted={handlePersonaDeleted} />
+                  <PersonaCard key={p.id} persona={p} onEdit={setEditPersona} onDeleted={handlePersonaDeleted} />
                 ))
               )}
             </div>
@@ -308,7 +312,7 @@ export default function App() {
             ))}
           </div>
           <div style={{ display: demoView === 'run' ? 'block' : 'none' }}><DemoTab /></div>
-          <div style={{ display: demoView === 'kg' ? 'block' : 'none' }}><KGTab /></div>
+          <div style={{ display: demoView === 'kg' ? 'block' : 'none' }}><KGTab active={tab === 'demo' && demoView === 'kg'} /></div>
           <div style={{ display: demoView === 'flow' ? 'block' : 'none' }}><FlowTab /></div>
         </div>
         <div style={{ display: tab === 'roles' ? 'block' : 'none', height: '100%' }}>
@@ -320,8 +324,10 @@ export default function App() {
       {showRobotModal && (
         <RobotModal onClose={() => setShowRobotModal(false)} onCreated={handleRobotCreated} />
       )}
-      {showPersonaModal && (
-        <PersonaModal onClose={() => setShowPersonaModal(false)} onCreated={handlePersonaCreated} />
+      {(showPersonaModal || editPersona) && (
+        <PersonaModal key={editPersona?.id || 'new'} persona={editPersona}
+                      onClose={() => { setShowPersonaModal(false); setEditPersona(null) }}
+                      onSaved={handlePersonaSaved} />
       )}
       <ToastContainer />
     </div>
