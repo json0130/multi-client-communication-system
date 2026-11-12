@@ -26,6 +26,11 @@ from core.config import cfg
 def create_persona_gateway(ws_gateway) -> Blueprint:
     bp = Blueprint("personas", __name__)
 
+    def _changed():
+        """The library changed: the Roles page keeps its roles in step (roles_gateway)."""
+        for fn in list(getattr(ws_gateway, "persona_listeners", None) or []):
+            fn()
+
     # ── Persona CRUD ──────────────────────────────────────────────────────────
 
     @bp.route("/personas", methods=["GET"])
@@ -66,6 +71,7 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
 
         if not persona:
             return jsonify({"error": "Failed to create persona"}), 500
+        _changed()
 
         return jsonify({
             "success": True,
@@ -91,6 +97,7 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
         persona = persona_repo.update(persona_id, updates)
         if not persona:
             return jsonify({"error": "Persona not found or update failed"}), 404
+        _changed()
 
         return jsonify({
             "success": True,
@@ -109,6 +116,7 @@ def create_persona_gateway(ws_gateway) -> Blueprint:
         ok = persona_repo.delete(persona_id)
         if not ok:
             return jsonify({"error": "Delete failed"}), 500
+        _changed()
 
         return jsonify({"success": True, "message": f"Persona '{p.name}' deleted."})
 

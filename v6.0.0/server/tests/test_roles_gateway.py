@@ -43,7 +43,8 @@ class FakeWS:
     """what GatewayHub needs of WebSocketGateway; `acker` plays a robot that acks every step it is told"""
 
     def __init__(self, up=("chatbox_jetson_001", "navel_001"), acker=False):
-        self.ack_listeners, self.demo_start_listeners, self.up, self.sent, self.acker = [], [], list(up), [], acker
+        self.ack_listeners, self.demo_start_listeners, self.persona_listeners = [], [], []
+        self.up, self.sent, self.acker = list(up), [], acker
         self.registry = _Registry(up)
 
     def get_connected_ids(self):
@@ -302,3 +303,32 @@ def test_starting_the_demo_puts_the_base_voice_back_not_the_personas():
     for fn in ws.demo_start_listeners:
         fn()
     assert ws.sent == []                                                       # nothing assigned since: nothing to undo
+
+
+def test_dashboard_personas_are_roles_on_the_page(tmp_path):
+    """A persona made in the dashboard's Persona library is a role the Roles page can assign; its role prompt
+    is what the ChatBox gets; deleting it in the library removes the role. The seeded roles stay."""
+    from types import SimpleNamespace as NS
+    lib = [NS(name="Security Guard", description="guards the lab", robot_role="You are a security guard robot.")]
+    ws = FakeWS(acker=True)
+    server, _hub = start_roles_service(ws, str(tmp_path), port=0, host="127.0.0.1", action_tags=False,
+                                       llm=StubLLM(), server_registry=ws.registry, personas=lambda: list(lib))
+    base = f"http://127.0.0.1:{server.server_port}"
+
+    def call(path, body=None):
+        req = urllib.request.Request(base + path, data=None if body is None else json.dumps(body).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.load(r)
+    try:
+        roles = {r["id"]: r for r in call("/persona")["roles"]}
+        assert roles["role:security-guard"]["brief"] == "You are a security guard robot."
+        assert "role:tutor" in roles
+        assert call("/persona", {"robot": "chatbox", "role": "role:security-guard", "ocean": OCEAN})["ok"] is True
+        assert any(d.get("robot_role") == "You are a security guard robot." for _c, d in ws.sent)
+        lib.clear()
+        for fn in ws.persona_listeners:
+            fn()
+        assert "role:security-guard" not in {r["id"] for r in call("/persona")["roles"]}
+    finally:
+        server.shutdown()

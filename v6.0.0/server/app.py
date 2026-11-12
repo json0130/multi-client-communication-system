@@ -737,6 +737,7 @@ def main():
     # ── Roles page: assign role + persona, persona chat, graph (own port) ─────
     if cfg.roles.port:
         from gateway.roles_gateway import start_roles_service
+        from data import persona_repo
         on_persona = None
         if cfg.roles.sync_db:
             from data import robot_repo
@@ -747,7 +748,7 @@ def main():
             ws_gateway, cfg.roles.data_dir, cfg.roles.port, cfg.server.host,
             ai_server=cfg.roles.ai_server, ollama_model=cfg.llm.ollama_model,
             ollama_url=f"http://{cfg.llm.ollama_host}:{cfg.llm.ollama_port}", on_persona=on_persona,
-            server_registry=registry)
+            server_registry=registry, personas=persona_repo.get_all)
 
     # ── Start Flask ───────────────────────────────────────────────────────────
     print("=" * 55)

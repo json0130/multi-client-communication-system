@@ -458,6 +458,7 @@ class WebSocketGateway:
         self.method_b = None             # conversation.method_b.MethodB, or None: Navel gets plain speech
         self._last_tag: dict = {}              # client_id -> the pose tag its last spoken line carried
         self.demo_start_listeners: list = []   # callables(), run when the lab demo is started (roles_gateway)
+        self.persona_listeners: list = []      # callables(), run when the Persona library changes (persona_gateway → roles_gateway)
         self.ack_listeners: list = []    # callables(step_id) for acks of "persona-N" steps (roles_gateway)
 
         # ── Decision layer ────────────────────────────────────────────────────

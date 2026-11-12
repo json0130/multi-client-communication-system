@@ -198,14 +198,47 @@ class GatewayHub:
         return {"robots": len(live), "sent": bool(live), "steps": n}
 
 
+def sync_personas_to_roles(kg_path: str, personas) -> int:
+    """The dashboard's Persona library (the `personas` table) as library roles of the ChatBox graph, so a
+    persona made there is a role the Roles page can assign. The persona's role prompt becomes the role's
+    brief: what push_persona sends the robot. A role that is in neither the library nor the seed is dropped
+    (a persona deleted in the dashboard). Returns how many personas were synced."""
+    from modules.graph_relationship.roles import ensure_role, library_roles, role_id
+    from modules.graph_relationship.store import InMemoryGraphStore
+    from modules.role_seed import ROLE_LIBRARY
+
+    store = InMemoryGraphStore()
+    if not store.load(kg_path, quiet=True):
+        return 0
+    keep = {role_id(label) for label in ROLE_LIBRARY}
+    n = 0
+    for p in personas:
+        if not getattr(p, "name", ""):
+            continue
+        ensure_role(store, p.name, p.robot_role or p.description or "")
+        keep.add(role_id(p.name))
+        n += 1
+    for role in library_roles(store):
+        if role.id not in keep:
+            store.delete_node(role.id)
+    # ponytail: last writer wins against the page's own saves of this file; they are both whole-file atomic
+    # replaces and a persona edit racing a role assignment is a click apart, so no lock.
+    tmp = kg_path + ".tmp"
+    store.save(tmp)
+    os.replace(tmp, kg_path)
+    return n
+
+
 def start_roles_service(ws, data_dir: str, port: int = 8780, host: str = "0.0.0.0",
                         ai_server: str = "", ollama_model: str = "qwen2.5:7b",
                         ollama_url: str = "http://127.0.0.1:11434",
                         action_tags: bool = True, on_persona=None, specs=None, llm=None,
-                        server_registry=None):
+                        server_registry=None, personas=None):
     """Build the persona stack on `ws` (the WebSocketGateway) and serve the Roles page in a thread.
     `server_registry` is the server's robot registry, used to match connected robots by name.
-    Returns (server, hub). Graph and persona files are kept in `data_dir`."""
+    `personas` is a callable returning the Persona library's records; they are kept in the ChatBox graph as
+    roles, now and whenever the library changes. Returns (server, hub). Graph and persona files are kept in
+    `data_dir`."""
     from http.server import ThreadingHTTPServer
 
     from modules.graph_relationship.viz.server import (
@@ -228,6 +261,11 @@ def start_roles_service(ws, data_dir: str, port: int = 8780, host: str = "0.0.0.
         return st, PersonaChat(path, st._persona_path(), llm)
 
     spaces = {s["id"]: space(s) for s in specs}
+    if personas is not None:
+        kg_path = os.path.join(data_dir, "kg_culture.json")
+        sync = lambda: sync_personas_to_roles(kg_path, personas())    # noqa: E731
+        sync()
+        ws.persona_listeners.append(sync)
     state, chat = spaces.pop(PRIMARY)
     tagger = None
     if action_tags:
