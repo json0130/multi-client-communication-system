@@ -1,16 +1,15 @@
 # navel-demo.service — start the Navel lab-demo client at boot.
 #
 # This makes the Navel robot register + listen for the central server automatically
-# whenever it is powered on. It auto-detects its own IP (run.py) so no config edit
-# is needed, and restarts itself if it ever crashes.
+# whenever it is powered on. It auto-detects its own IP (BasicClient) so no config
+# edit is needed, and restarts itself if it ever crashes.
 #
-# DEPLOY: copy BOTH folders onto the robot, side by side —
-#   v6.0.0/navel_client -> /home/navel/control-studio/scripts/navel_client_Lab-Demo
-#   v6.0.0/client       -> /home/navel/control-studio/scripts/client
-# (run.py imports the shared robot client from ../client, or ROBOT_CLIENT_DIR.)
+# DEPLOY: copy the one folder onto the robot —
+#   v6.0.0/client -> /home/navel/control-studio/scripts/client
+# (the old scripts/navel_client_Lab-Demo folder is no longer used.)
 #
 # INSTALL (run on the Navel robot, once):
-#   sudo cp navel-demo.service /etc/systemd/system/navel-demo.service
+#   sudo cp robots/navel/navel-demo.service /etc/systemd/system/navel-demo.service
 #   # --- edit the path/user below if your folder is not the default ---
 #   sudo systemctl daemon-reload
 #   sudo systemctl enable navel-demo.service     # start on every boot
@@ -30,10 +29,10 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=navel
-WorkingDirectory=/home/navel/control-studio/scripts/navel_client_Lab-Demo
-ExecStart=/usr/bin/python3 run.py
+WorkingDirectory=/home/navel/control-studio/scripts/client
+ExecStart=/usr/bin/python3 run.py navel
 
-# Navel SDK shared-memory lib (run.py also sets a sane default; this is belt-and-braces)
+# Navel SDK shared-memory lib (robots/navel/tts_output.py also sets a sane default; this is belt-and-braces)
 Environment=NAVEL_SHM_LIB=/usr/lib/python3/dist-packages/navel/libnavel_shm.cpython-311-aarch64-linux-gnu.so
 Environment=PYTHONUNBUFFERED=1
 # The server write token, if the server sets API_TOKEN:

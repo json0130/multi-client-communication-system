@@ -1,6 +1,6 @@
-# gazebo_client
+# robots/gazebo
 
-Bridges the 4 simulated TurtleBot3 robots in `../gazebo/lab_world` into the
+Bridges the 4 simulated TurtleBot3 robots in `v6.0.0/gazebo/lab_world` into the
 v6.0.0 demo server as normal robot clients, using the same `BasicClient` base
 every real robot (Pepper, ChatBox, Navel, Silbot) uses — the server can't
 tell the difference between a simulated and a real robot registering as
@@ -87,12 +87,12 @@ Four commands, one per terminal:
 3. Start the dashboard (as normal — unrelated to this package).
 
 4. Start and connect all 4 bridges in one go, with `run_gazebo_demo.py` —
-   the Gazebo equivalent of `client/run_lab_test.py`. ROS2 must be sourced
+   the Gazebo equivalent of `run_lab_test.py`. ROS2 must be sourced
    in THIS shell first, since the bridge subprocesses inherit its
    environment (no need to source it again per-robot):
    ```
    source /opt/ros/humble/setup.bash
-   cd v6.0.0/gazebo_client
+   cd v6.0.0/client
    python3 run_gazebo_demo.py
    ```
    It spawns `pepper_01`/`chatbox_01`/`navel_01`/`silbot_01`, waits for them
@@ -103,7 +103,7 @@ Four commands, one per terminal:
    To run a bridge on its own instead (e.g. while iterating on one robot),
    the old per-process form still works:
    ```
-   python3 gazebo_bridge.py configs/pepper_01_sim.json
+   python3 run.py gazebo --config configs/sim/pepper_01_sim.json
    ```
 
 Then, to actually run the tour:

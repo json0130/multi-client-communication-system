@@ -5,7 +5,7 @@ The server and the shared robot client, talking over a real WebSocket.
 
 Every other test fakes one side of the wire. This one runs the real
 WebSocketGateway + DemoOrchestrator against the real BasicClient (v6.0.0/client,
-which navel_client/run.py extends on the robot) on a localhost port, and walks
+which client/robots/navel extends on the robot) on a localhost port, and walks
 the Navel solo demo end to end: the guide's intro is ignored, the hand-off
 starts it, every scripted step is spoken and acked, a question gets a streamed
 answer, an interruption stops speech, and "no more questions" ends it.
@@ -32,9 +32,9 @@ from decision import DecisionRecorder, MemoryDecisionSink
 from demo.demo_orchestrator import DemoOrchestrator
 from gateway.websocket_gateway import WebSocketGateway
 
-# Loaded by file path, not by putting v6.0.0/client on sys.path: that folder
-# has its own robot.py, and once it is on the path a later `import robot`
-# (the server's package) can resolve to it. client.py imports nothing local.
+# Loaded by file path, not by putting v6.0.0/client on sys.path: that folder's
+# top-level names (robots, InputModules, run) would then shadow or be shadowed by
+# the server's own. client.py imports nothing local.
 _CLIENT_PY = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(
     os.path.abspath(__file__)))), "client", "client.py")
 _spec = importlib.util.spec_from_file_location("shared_robot_client", _CLIENT_PY)

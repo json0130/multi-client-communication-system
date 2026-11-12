@@ -1,4 +1,4 @@
-# OutputModules/navel_tts_output.py — Navel SDK text-to-speech
+# robots/navel/tts_output.py — Navel SDK text-to-speech
 #
 # Speaks via the Navel robot's onboard SDK (`robot.say()`), which is NON-BLOCKING.
 # Because robot.say() returns immediately, we estimate the speech duration from the

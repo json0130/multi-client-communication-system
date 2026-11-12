@@ -321,9 +321,9 @@ class TestProject56Migration:
 
 class TestOnePersona:
 
-    CONFIGS = ("navel_client/client_config.json",
-               "gazebo_client/configs/navel_01_sim.json",
-               "client/test_configs/navel_01.json")
+    CONFIGS = ("client/configs/navel.json",
+               "client/configs/sim/navel_01_sim.json",
+               "client/configs/lab/navel_01.json")
 
     def test_every_navel_config_describes_project_56_the_same_way(self):
         roles = {json.load(open(os.path.join(V6, p)))["robot_role"] for p in self.CONFIGS}
@@ -344,7 +344,7 @@ class TestNavelGestureTags:
         assert len(tags) == 1 and len(tags.pop()) == 11
 
     def test_the_solo_script_only_asks_for_gestures_navel_has(self):
-        allowed = set(self._tags("navel_client/client_config.json"))
+        allowed = set(self._tags("client/configs/navel.json"))
         asked = {tag for s in build_solo_script(NAVEL)
                  for tag in re.findall(r"\[[A-Z]+\]", s.text)}
         assert asked and asked <= allowed, asked - allowed

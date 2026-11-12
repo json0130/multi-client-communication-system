@@ -15,6 +15,25 @@ from gtts import gTTS
 logger = logging.getLogger(__name__)
 
 
+def edge_tts_config(robot_config: dict) -> dict:
+    """This module's config, built from the ROBOT's own config, not only from an
+    "edge_tts_config" block most configs never had. Defaulting to that block alone
+    meant the per-robot `tts_voice` at the top level of pepper_01.json /
+    chatbox_01.json / navel_01.json / silbot_01.json never reached TTS: it read no
+    voice, fell through to gTTS (no voice selection) and all four robots spoke in
+    one voice. A top-level key is copied only if the robot set it and
+    edge_tts_config says nothing about it."""
+    cfg = dict(robot_config.get("edge_tts_config") or {})
+    cfg.setdefault("rate", "+0%")
+    cfg.setdefault("pitch", "+0Hz")
+    cfg.setdefault("remove_emotion_tags", True)
+    for key in ("tts_voice", "gtts_pitch", "audio_device", "audio_cmd", "sim_speed"):
+        if robot_config.get(key) is not None:
+            cfg.setdefault(key, robot_config[key])
+    cfg.setdefault("tts_voice", cfg.get("voice", ""))
+    return cfg
+
+
 class EdgeTTSOutputModule(OutputModule):
     """
     Google TTS output with runtime voice config update support.
@@ -204,7 +223,7 @@ class EdgeTTSOutputModule(OutputModule):
         for item in keep:
             self.tts_queue.put(item)
 
-    # ── Runtime voice update (called by robot.py on persona_update) ───────────
+    # ── Runtime voice update (called by BasicClient.on_persona_update) ───────────
 
     def update_voice_config(self, voice_config: dict):
         """

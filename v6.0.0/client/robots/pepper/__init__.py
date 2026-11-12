@@ -1,15 +1,14 @@
 """
-pepper_shit/pepper_bridge.py
-============================
-Bridge adapter: v6.0.0 WebSocket protocol  ↔  Pepper NAOqi TCP protocol.
+robots/pepper — Pepper, through a bridge to its NAOqi TCP server
+================================================================
+    python3 run.py pepper
 
-From the central server's perspective: a normal v6.0.0 robot client.
-From Pepper's perspective: a normal chatbot_client.
+From the central server's perspective: a normal robot client.
+From Pepper's perspective: a normal chatbot_client on its TCP port
+(pepper_config.pepper_ip / pepper_port in configs/pepper.json).
 
-Run from this directory:
-    python pepper_bridge.py
-
-Requires client_config.json in the same directory with a "pepper_config" block.
+utils/ is the shared Pepper connection library, a git submodule
+(ftra778/utils): `git submodule update --init` after cloning.
 """
 
 import json
@@ -21,10 +20,8 @@ import os
 import threading
 import time
 
-# ── Add v6.0.0/client to path so we can import BasicClient ───────────────────
-# pepper_shit/ lives inside v6.0.0/, so client/ is one level up
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, '..', 'client'))
+# utils/connection.py imports `utils.colors`, so the folder holding utils/ goes on the path.
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from client import BasicClient          # noqa: E402
 from utils.connection import Connection  # noqa: E402
@@ -134,17 +131,6 @@ class PepperBridge(BasicClient):
 
             logger.info("[Bridge] Pepper not reachable — retrying in 5 s...")
             time.sleep(5)
-
-    # ── Emotion hook ──────────────────────────────────────────────────────────
-
-    def on_emotion_detected(self, emotion_tag: str):
-        """
-        Called for every [TAG] found in server responses.
-        Extend this to send Pepper gesture/animation commands.
-        """
-        logger.info(f"[Emotion] {emotion_tag.strip().upper()}")
-        # TODO: map tag → Pepper animation, e.g.:
-        #   self._send_pepper({"command": "animate", "content": "Hey_1"})
 
     # ── Demo step handler ─────────────────────────────────────────────────────
 
@@ -454,36 +440,4 @@ class PepperBridge(BasicClient):
             return False
 
 
-# ── Entry point ───────────────────────────────────────────────────────────────
-
-def main():
-    try:
-        bridge = PepperBridge("client_config.json")
-
-        print("\n" + "=" * 60)
-        print(f"  Pepper Bridge")
-        print(f"  Robot   : {bridge.config.get('robot_name', 'Pepper')}")
-        print(f"  ID      : {bridge.config.get('client_id')}")
-        print(f"  Server  : {bridge.config.get('server_url')}")
-        print(f"  WS port : {bridge.config.get('ws_port')}")
-        print(f"  Pepper  : {bridge.config.get('pepper_config', {}).get('pepper_ip')}:"
-              f"{bridge.config.get('pepper_config', {}).get('pepper_port')}")
-        print(f"  Modules : {', '.join(bridge.config.get('modules', []))}")
-        print("=" * 60 + "\n")
-
-        bridge.run()
-        return 0
-
-    except FileNotFoundError:
-        print("Error: client_config.json not found in pepper_shit/")
-        return 1
-    except KeyboardInterrupt:
-        print("\nStopped")
-        return 0
-    except Exception as e:
-        logger.error(f"Critical error: {e}", exc_info=True)
-        return 1
-
-
-if __name__ == "__main__":
-    sys.exit(main())
+Robot = PepperBridge

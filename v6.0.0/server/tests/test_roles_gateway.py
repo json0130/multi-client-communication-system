@@ -21,7 +21,7 @@ OCEAN = {"O": 0.6, "C": 0.8, "E": -0.3, "A": 0.7, "N": -0.5}
 
 
 NAMES = {"chatbox_jetson_001": "ChatBox", "navel_001": "Navel",        # the real robots
-         "chatbox_01": "ChatBox", "navel_01": "Navel", "pepper_01": "Pepper"}      # the fake ones (client/test_configs)
+         "chatbox_01": "ChatBox", "navel_01": "Navel", "pepper_01": "Pepper"}      # the fake ones (client/configs/lab)
 
 
 class _Robot:

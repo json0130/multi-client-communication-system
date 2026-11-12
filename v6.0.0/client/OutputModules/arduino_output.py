@@ -26,7 +26,7 @@ class ArduinoOutputModule(OutputModule):
         self.monitor_thread = None
         self.last_esp32_message = ""
 
-        # Callbacks (assigned by robot.py)
+        # Callbacks (assigned by robots/chatbox)
         self.on_connected = None
         self.on_disconnected = None
         self.on_connection_error = None
@@ -61,7 +61,7 @@ class ArduinoOutputModule(OutputModule):
             time.sleep(2) 
             self.connected = True
             
-            # Fire the callback so robot.py knows we succeeded
+            # Fire the callback so the robot knows we succeeded
             if self.on_connected:
                 self.on_connected()
                 

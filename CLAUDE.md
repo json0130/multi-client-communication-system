@@ -21,9 +21,10 @@ env vars, HTTP API, profile format); this file only covers what isn't in there.
 | `server/decision/` | flow planner, grounding, KG, presence, visitor profile, style fit |
 | `server/demo/` | lab demo orchestrator + script |
 | `server/tools/` | `check_*.py` layer checkpoints, eval/harness/stats scripts |
-| `client/` | the shared robot client: `BasicClient` (WebSocket server the server dials, protocol), voice input, TTS, console/Arduino output |
-| `*_client/` | per-robot entry script + config, plus only what is robot-specific (Navel SDK TTS/mic, Pepper NAOqi bridge, Gazebo bridge). They import `../client` (or `ROBOT_CLIENT_DIR`), so deploy `client/` beside them |
-| `gazebo/`, `gazebo_client/` | simulated lab world + bridge (current branch) |
+| `client/` | every robot client: `client.py` (`BasicClient`, the whole protocol), shared `InputModules/`/`OutputModules/`, `run.py <robot>` entry point. Deploy the whole folder |
+| `client/robots/` | one module per platform, only what is robot-specific (Navel SDK TTS/mic, ChatBox ESP32, Pepper NAOqi bridge, Gazebo ROS bridge). No module → `generic.py`. New platform: `_template.py` |
+| `client/configs/` | `<robot>.json` per real robot; `lab/` (fake robots, `run_lab_test.py`), `sim/` (Gazebo, `run_gazebo_demo.py`) |
+| `gazebo/` | simulated lab world |
 
 ## Commands
 
@@ -33,7 +34,7 @@ python3 app.py                                    # from v6.0.0/server
 ```
 
 - Run pytest **from `v6.0.0/server`** — `pytest.ini` scopes collection there on purpose.
-  The shared robot client has its own few tests: `cd v6.0.0/client && python3 -m pytest test_*.py`.
+  The robot client has its own tests: `cd v6.0.0/client && python3 -m pytest test_*.py`.
 - The suite is hermetic: no network, DB, Ollama or `.env`. A guard fixture fails any
   test that reaches a real Supabase client; opt out with `@pytest.mark.allow_db` only
   if there's no other way.

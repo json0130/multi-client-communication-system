@@ -19,7 +19,7 @@ there is no such thing as "just let it run" here.
                 to show the barge-in path (tts_stop -> qa_interrupt ->
                 resume of the remaining text).
 
-Start the full demo stack first (Gazebo, gazebo_client bridges, app.py),
+Start the full demo stack first (Gazebo, client/run_gazebo_demo.py, app.py),
 start screen recording, then run one of:
 
     python3 tools/video_scenarios.py clean
@@ -56,7 +56,7 @@ QUESTIONS = {
 INTERRUPT_QUESTION = "Sorry to interrupt — what does your robot actually do?"
 
 # Distinct from all four robot voices (Pepper=en-GB-Sonia, ChatBox=en-US-Guy,
-# Navel=en-AU-Natasha, Silbot=en-GB-Ryan — see gazebo_client/configs/*.json)
+# Navel=en-AU-Natasha, Silbot=en-GB-Ryan — see client/configs/sim/*.json)
 # so a visitor line is never mistaken for a robot's own voice.
 VISITOR_VOICE = "en-US-AriaNeural"
 

@@ -1,10 +1,9 @@
 # ChatBox client — v6.0.0 multi-robot server
 #
-# Build context must be the v6.0.0/ directory (one level up), so that
-# both chatbox_client/ and client/ are accessible during the build:
+# Build context is the v6.0.0/client directory:
 #
-#   cd v6.0.0/
-#   docker build -f chatbox_client/Dockerfile -t chatbox-client .
+#   cd v6.0.0/client
+#   docker build -f robots/chatbox/Dockerfile -t chatbox-client .
 #
 # Run (with host networking for mDNS/ALSA/serial access):
 #   docker run --rm -it \
@@ -81,12 +80,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && apt-get autoremove -y && apt-get clean \
     && rm -rf /var/lib/apt/lists/* /tmp/espeak-ng-src
 
-# Copy the shared robot client (chatbox.py imports it from ../client)
-COPY client /app/client
+# The robot client; ChatBox is robots/chatbox
+COPY . /app/client
 
-# Copy chatbox client
-COPY chatbox_client /app/chatbox_client
+WORKDIR /app/client
 
-WORKDIR /app/chatbox_client
-
-CMD ["python3", "chatbox.py"]
+CMD ["python3", "run.py", "chatbox"]

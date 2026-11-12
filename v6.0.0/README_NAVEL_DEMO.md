@@ -100,8 +100,8 @@ subject stay with ChatBox.
   full tour is unchanged.
 
 ### Navel's knowledge and gestures
-- **Persona:** `robot_role` in all three Navel configs (`navel_client/`,
-  `client/test_configs/navel_01.json`, `gazebo_client/configs/navel_01_sim.json`)
+- **Persona:** `robot_role` in all three Navel configs (`client/configs/navel.json`,
+  `client/configs/lab/navel_01.json`, `client/configs/sim/navel_01_sim.json`)
   describes Project 56. It must never claim people have been shown to
   understand robots better, because the human study hasn't been done.
 - **Profile:** `navel_01`'s role is "Contextual co-speech motion researcher", and
@@ -138,7 +138,8 @@ The Navel side lives in **`robot-robot-interaction`**, branch
 - `navel-client/` speaks this server's protocol;
 - `navel-server/tools/method_b_plan_service.py` is the Method B planner.
 
-On the robot, the client is deployed to `~/control-studio/scripts/navel-client-demo/`.
+On the robot, `v6.0.0/client` is deployed to `~/control-studio/scripts/client/`
+(`client/robots/navel/navel-demo.service` starts it at boot).
 
 ```bash
 # 1. This PC: central server
@@ -148,7 +149,7 @@ cd v6.0.0/server && python3 app.py
 cd robot-robot-interaction/navel-server && python3 tools/method_b_plan_service.py --port 8001
 
 # 3. Navel
-cd ~/control-studio/scripts/navel-client-demo && python3 robot.py
+cd ~/control-studio/scripts/client && python3 run.py navel
 ```
 
 Then **Connect** `navel_001` on the dashboard, and **Start** with only Navel

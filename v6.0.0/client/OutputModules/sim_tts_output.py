@@ -1,20 +1,22 @@
-# gazebo_client/sim_tts_output.py
+# OutputModules/sim_tts_output.py
 """
-SimTTSOutputModule — a "speech" output module for simulated robots.
+SimTTSOutputModule — the whole speech contract, minus the speaker.
 
 Implements the same speak_with_callback / interrupt / clear_non_callback_items
 contract as OutputModules/edge_tts_output.py (see client/client.py's
-_on_demo_step / _on_chat_sentence / _on_tts_stop), but there is no speaker to
-play audio on: "speaking" is a console log line held for the estimated
-duration of the sentence, exactly like PepperBridge._speak() estimates
-duration from word count instead of measuring real playback.
+_on_demo_step / _on_chat_sentence / _on_tts_stop), and reports tts_state.
+
+As it is (Gazebo's tts_mode "console"), "speaking" is a console log line held
+for the estimated duration of the sentence. A robot with its own speech SDK
+subclasses it and overrides say() (robots/_template.py): the queue, the demo
+ACK callbacks, barge-in and the unspoken remainder all come with it.
 """
 
 import re
 import threading
 import queue
 import logging
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 from client import OutputModule
 
@@ -130,6 +132,19 @@ class SimTTSOutputModule(OutputModule):
         for item in keep:
             self.tts_queue.put(item)
 
+    def say(self, sentence: str):
+        """Speak one sentence (tags already removed) and return when it has been said.
+
+        Override for a real robot. A non-blocking SDK call (Navel's robot.say)
+        sends, then waits estimated_duration(); waiting on self._interrupt_event
+        lets a barge-in cut that wait short."""
+        duration = self.estimated_duration(sentence)
+        logger.info(f"[SimTTS] Speaking (~{duration:.1f}s): {sentence[:70]}")
+        self._interrupt_event.wait(timeout=duration)
+
+    def estimated_duration(self, sentence: str) -> float:
+        return max(0.3, len(sentence.split()) / self._wps)
+
     # ── Internal ────────────────────────────────────────────────────────────
 
     def _prepare_text(self, text: str) -> str:
@@ -176,6 +191,7 @@ class SimTTSOutputModule(OutputModule):
             self.client.is_speaking.set()
         if self.client and hasattr(self.client, "tts_started_event"):
             self.client.tts_started_event.set()
+        self.report_speaking(True)
 
         try:
             for i, sentence in enumerate(sentences):
@@ -183,14 +199,12 @@ class SimTTSOutputModule(OutputModule):
                     break
                 with self._progress_lock:
                     self._current_idx = i
-                duration = max(0.3, len(sentence.split()) / self._wps)
-                logger.info(f"[SimTTS] Speaking (~{duration:.1f}s): {sentence[:70]}")
-                # Interruptible wait — an interrupt() mid-sentence returns
-                # immediately instead of finishing out the estimated duration.
-                self._interrupt_event.wait(timeout=duration)
+                self.say(sentence)
         finally:
             if self.client and hasattr(self.client, "is_speaking"):
                 self.client.is_speaking.clear()
+            if self.tts_queue.empty():
+                self.report_speaking(False)
             with self._progress_lock:
                 self._current_sentences = []
                 self._current_idx = -1

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """
 run_gazebo_demo.py — Start all 3 simulated robot bridges and connect them to
-the server. The Gazebo equivalent of client/run_lab_test.py.
+the server. The Gazebo equivalent of run_lab_test.py.
 
 Requires Gazebo already running (gazebo/launch_demo_env.launch.py) and ROS2
 sourced in THIS shell before running this script — child processes inherit
 this process's environment, so `source /opt/ros/humble/setup.bash` once here
 is enough for all three bridges.
 
-Usage:  cd v6.0.0/gazebo_client && python3 run_gazebo_demo.py
+Usage:  cd v6.0.0/client && python3 run_gazebo_demo.py
 """
 import json
 import os
@@ -19,10 +19,10 @@ import subprocess
 import requests
 
 CONFIGS = [
-    "configs/pepper_01_sim.json",
-    "configs/chatbox_01_sim.json",
-    "configs/navel_01_sim.json",
-    "configs/silbot_01_sim.json",
+    "configs/sim/pepper_01_sim.json",
+    "configs/sim/chatbox_01_sim.json",
+    "configs/sim/navel_01_sim.json",
+    "configs/sim/silbot_01_sim.json",
 ]
 STARTUP_WAIT = 5   # seconds — a touch longer than run_lab_test.py's, since
                     # rclpy.init() + node/subscription setup adds a little
@@ -52,7 +52,7 @@ def main():
     print("Starting Gazebo-simulated robot bridges...\n")
     for r in robots:
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(here, "gazebo_bridge.py"), r["cfg"]],
+            [sys.executable, os.path.join(here, "run.py"), "gazebo", "--config", r["cfg"]],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

@@ -1,4 +1,4 @@
-# InputModules/voice_input.py — Navel ODAS microphone capture
+# robots/navel/voice_input.py — Navel ODAS microphone capture
 #
 # Captures from the Navel robot's "odas_1" mic array at 48kHz, applies a simple
 # volume-based VAD, downsamples to 16kHz, and sends WAV bytes to the server as

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 run_lab_test.py — Start all 4 test robot instances and connect them to the server.
-Usage:  cd v6.0.0/client && python run_lab_test.py
+Usage:  cd v6.0.0/client && python3 run_lab_test.py
 """
 import json
 import os
@@ -12,10 +12,10 @@ import subprocess
 import requests
 
 CONFIGS = [
-    "test_configs/pepper_01.json",
-    "test_configs/chatbox_01.json",
-    "test_configs/navel_01.json",
-    "test_configs/silbot_01.json",
+    "configs/lab/pepper_01.json",
+    "configs/lab/chatbox_01.json",
+    "configs/lab/navel_01.json",
+    "configs/lab/silbot_01.json",
 ]
 STARTUP_WAIT = 4   # seconds to let robots start their WS servers and self-register
 
@@ -43,7 +43,7 @@ def main():
     print("Starting lab demo test robots...\n")
     for r in robots:
         proc = subprocess.Popen(
-            [sys.executable, os.path.join(here, "test_robot.py"), r["cfg"]],
+            [sys.executable, os.path.join(here, "run.py"), "generic", "--config", r["cfg"]],
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,

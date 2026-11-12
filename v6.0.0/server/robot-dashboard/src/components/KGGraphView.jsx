@@ -199,7 +199,7 @@ export default function KGGraphView({ topics, links, edges, robots, robotIds, su
 
   const nameOf = rid => robots.find(r => r.client_id === rid)?.robot_name || rid
   const labelOf = tid => topics.find(t => t.id === tid)?.label || tid
-  // The record carries no sim flag. The sim / test clients (gazebo_client/configs, client/test_configs) run
+  // The record carries no sim flag. The sim / test clients (client/configs/sim, client/configs/lab) run
   // on loopback with ids like chatbox_01; the real robots are chatbox_jetson_001 / navel_001 on the LAN.
   const isSim = rid => {
     const ip = robots.find(r => r.client_id === rid)?.ip_address || ''

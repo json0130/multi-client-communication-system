@@ -1,6 +1,6 @@
 """
-gazebo_client/gazebo_bridge.py
-===============================
+robots/gazebo — a simulated robot in Gazebo
+===========================================
 Bridge adapter: v6.0.0 WebSocket protocol  <->  a simulated robot in Gazebo.
 
 From the central server's perspective: a normal v6.0.0 robot client — it
@@ -15,35 +15,30 @@ This is separate from gazebo/approach_demo.py's open-loop scripted tour,
 which remains a standalone manually-run script for ad hoc testing — the
 two are not meant to run against the same robot at the same time.
 
-Run from this directory, one process per simulated robot:
-    python3 gazebo_bridge.py configs/pepper_01_sim.json
+One process per simulated robot (run_gazebo_demo.py starts all of them):
+    python3 run.py gazebo --config configs/sim/pepper_01_sim.json
 
 Requires ROS2 sourced first (e.g. `source /opt/ros/humble/setup.bash`) and
-a "gazebo_config" block in the given client_config.json.
+a "gazebo_config" block in the config.
 """
 
 import logging
 import math
-import os
-import sys
 import threading
 import time
 
-_HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(_HERE, "..", "client"))
+from client import BasicClient, api_headers
+from InputModules.text_input import TextInputModule
+from OutputModules.edge_tts_output import EdgeTTSOutputModule, edge_tts_config
 
-from client import BasicClient, api_headers  # noqa: E402
-from InputModules.text_input import TextInputModule  # noqa: E402
-from OutputModules.edge_tts_output import EdgeTTSOutputModule  # noqa: E402
+import rclpy
+from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
+from nav_msgs.msg import Odometry
+from geometry_msgs.msg import Twist
+import requests
 
-import rclpy  # noqa: E402
-from rclpy.node import Node  # noqa: E402
-from rclpy.executors import ExternalShutdownException  # noqa: E402
-from nav_msgs.msg import Odometry  # noqa: E402
-from geometry_msgs.msg import Twist  # noqa: E402
-import requests  # noqa: E402
-
-from sim_tts_output import SimTTSOutputModule  # noqa: E402
+from OutputModules.sim_tts_output import SimTTSOutputModule
 
 logging.basicConfig(
     level=logging.INFO,
@@ -151,17 +146,7 @@ class GazeboBridge(BasicClient):
         if tts_mode == "console":
             tts = SimTTSOutputModule("sim_tts_output", {"words_per_second": words_per_second})
         else:
-            # Same construction robot.py's SimpleConcurrentClient uses —
-            # built from the robot's own top-level config, not a separate
-            # edge_tts_config block most configs never set.
-            edge_cfg = dict(self.config.get("edge_tts_config") or {})
-            edge_cfg.setdefault("rate", "+0%")
-            edge_cfg.setdefault("pitch", "+0Hz")
-            edge_cfg.setdefault("remove_emotion_tags", True)
-            for key in ("tts_voice", "audio_device", "audio_cmd", "sim_speed"):
-                if self.config.get(key) is not None:
-                    edge_cfg.setdefault(key, self.config[key])
-            tts = EdgeTTSOutputModule("edge_tts_output", edge_cfg)
+            tts = EdgeTTSOutputModule("edge_tts_output", edge_tts_config(self.config))
         self.register_output_module(tts)
 
         text_input = TextInputModule("text_input")
@@ -484,46 +469,4 @@ class GazeboBridge(BasicClient):
         return False
 
 
-# ── Entry point ───────────────────────────────────────────────────────────
-
-def main():
-    config_file = sys.argv[1] if len(sys.argv) > 1 else "client_config.json"
-    try:
-        bridge = GazeboBridge(config_file)
-
-        print("\n" + "=" * 60)
-        print("  Gazebo Bridge")
-        print(f"  Robot     : {bridge.config.get('robot_name', 'Robot')}")
-        print(f"  ID        : {bridge.config.get('client_id')}")
-        print(f"  Server    : {bridge.config.get('server_url')}")
-        print(f"  WS port   : {bridge.config.get('ws_port')}")
-        gz = bridge.config.get("gazebo_config", {})
-        print(f"  ROS ns    : {gz.get('ros_namespace')}")
-        print(f"  Odom topic: {gz.get('odom_topic')}")
-        print("=" * 60 + "\n")
-
-        bridge.run()
-        return 0
-
-    except FileNotFoundError:
-        print(f"Error: config file not found: {config_file}")
-        return 1
-    except KeyboardInterrupt:
-        print("\nStopped")
-        return 0
-    except Exception as e:
-        logger.error(f"Critical error: {e}", exc_info=True)
-        return 1
-
-
-if __name__ == "__main__":
-    code = main()
-    # os._exit(), not sys.exit(): rclpy installs its own process-level
-    # signal handlers, and observed in testing that after our own stop()
-    # sequence completes cleanly (logged "[Client] Stopped.") the process
-    # can still fail to actually terminate on SIGTERM — something in
-    # rclpy's C-level state outlives our teardown and blocks normal
-    # interpreter shutdown. sys.exit() only raises SystemExit, which that
-    # state can swallow; os._exit() ends the process immediately at the OS
-    # level regardless, which is safe here since stop() has already run.
-    os._exit(code)
+Robot = GazeboBridge

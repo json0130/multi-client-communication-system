@@ -1,21 +1,19 @@
 """
 client.py — Base Client (v6.0.0)
 =================================
-Key change from v5.x:
-  The robot no longer dials OUT to the server.
-  Instead it runs a WebSocket SERVER and waits for the central
-  server to connect to it.
+The whole server protocol, shared by every robot. A robot is a BasicClient
+subclass in robots/ that registers its own Input/Output modules; run.py starts
+it (see robots/_template.py).
 
-Everything the Input/Output modules touch is unchanged:
+The robot runs a WebSocket SERVER and the central server connects to it, or,
+with `connect_to_server`, the robot dials the server instead.
+
+What Input/Output modules use:
   self.client.send_to_server(type, data)
   self.client.process_server_response(data, type)
   self.client.is_speaking          (threading.Event)
   self.client.tts_started_event    (threading.Event)
   self.client.running              (bool)
-
-The only thing that changed in robot.py is one line:
-  OLD: self.server_connection.sio.on('chat_response', handler)
-  NEW: self.server_connection.register_handler('chat_response', handler)
 """
 
 import asyncio
@@ -198,8 +196,8 @@ class ServerConnection:
         Register a callback for a named event pushed by the server.
         Replaces any existing handler for that event.
 
-        robot.py usage:
-            self.server_connection.register_handler('chat_response', self.on_chat_response)
+        usage:
+            self.server_connection.register_handler('demo_nav', self._on_nav_goal)
         """
         with self._lock:
             self._handlers[event] = callback
@@ -330,7 +328,7 @@ class ServerConnection:
         Handle persona_update pushed by the central server.
         1. Updates in-memory config immediately
         2. Writes updated client_config.json to disk
-        3. Calls any registered persona_update handler (so robot.py can update TTS)
+        3. Calls the registered persona_update handler (BasicClient.on_persona_update: the TTS voice)
         """
         import json as _json
         persona_name = data.get("persona_name", "Unknown")
@@ -478,6 +476,7 @@ class BasicClient:
         self.server_connection.register_handler("demo_step",        self._on_demo_step)
         self.server_connection.register_handler("tts_stop",         self._on_tts_stop)
         self.server_connection.register_handler("demo_nav",         self._default_nav_handler)
+        self.server_connection.register_handler("persona_update",   self.on_persona_update)
 
         self.input_modules:  Dict[str, InputModule]  = {}
         self.output_modules: Dict[str, OutputModule] = {}
@@ -821,7 +820,19 @@ class BasicClient:
         Hook called when an emotion tag is found in a server response.
         Override in subclasses to send commands to hardware (e.g. Arduino).
         """
-        pass
+        logger.info(f"[Emotion] {emotion_tag.strip().upper()}")
+
+    def on_persona_update(self, data: dict):
+        """The server assigned a new persona; the config is already updated and saved
+        (ServerConnection._apply_persona_update). Retune every TTS module's voice live."""
+        logger.info(f"[Persona] Switching to: '{data.get('persona_name', 'Unknown')}'")
+        voice_config = data.get("voice_config") or {}
+        if not voice_config:
+            return
+        for module in self.output_modules.values():
+            if hasattr(module, "update_voice_config"):
+                module.update_voice_config(voice_config)
+                logger.info(f"[Persona] {module.name} voice updated: {voice_config}")
 
     # ── Lifecycle ─────────────────────────────────────────────────────────────
 
@@ -882,6 +893,7 @@ class BasicClient:
         try:
             if not self.start():
                 return
+            self.print_startup_info()
             logger.info("[Client] Running — press Ctrl+C to stop")
             while self.running:
                 time.sleep(1)
@@ -891,6 +903,22 @@ class BasicClient:
             logger.error(f"[Client] Runtime error: {e}")
         finally:
             self.stop()
+
+    def print_startup_info(self):
+        cfg = self.config
+        print("\n" + "=" * 60)
+        print(f"  {cfg.get('robot_name', 'Robot')} — {type(self).__module__}")
+        print("=" * 60)
+        print(f"  ID       : {cfg.get('client_id')}")
+        print(f"  Server   : {cfg.get('server_url')}")
+        if cfg.get("connect_to_server"):
+            print(f"  Dials in : {self.server_connection._server_ws_url()}")
+        else:
+            print(f"  Listens  : {cfg.get('ip_address')}:{cfg.get('ws_port', 8765)}")
+        print(f"  Modules  : {', '.join(cfg.get('modules', []))}")
+        print(f"  Input    : {', '.join(self.input_modules) or '-'}")
+        print(f"  Output   : {', '.join(self.output_modules) or '-'}")
+        print("=" * 60 + "\n")
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
