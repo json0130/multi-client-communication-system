@@ -18,7 +18,7 @@ done
 
 PY=${PYTHON:-../robot/bin/python}
 [ -x "$PY" ] || PY=python3
-PY=$(command -v "$PY")
+PY=$(realpath -s "$(command -v "$PY")")   # absolute (the parts cd first), venv symlink kept
 
 # Any exit (Ctrl+C, or one part dying) takes the other parts down with it.
 trap 'trap - EXIT INT TERM; kill 0 2>/dev/null' EXIT INT TERM
