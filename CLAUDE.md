@@ -31,6 +31,7 @@ env vars, HTTP API, profile format); this file only covers what isn't in there.
 ```bash
 cd v6.0.0/server && python3 -m pytest tests/      # ~1s, hermetic
 python3 app.py                                    # from v6.0.0/server
+./server_start.sh [--robots]                      # from v6.0.0: server + dashboard (+ fake lab robots)
 ```
 
 - Run pytest **from `v6.0.0/server`** — `pytest.ini` scopes collection there on purpose.
