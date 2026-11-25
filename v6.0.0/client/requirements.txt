@@ -1,29 +1,13 @@
-# ChatBox client requirements (non-Docker)
-# Install with: pip install -r requirements.txt
+# Robot client requirements (Python >= 3.8). setup.sh installs these into .venv.
+# System packages (setup.sh installs them): ffmpeg alsa-utils portaudio19-dev
 
-# Core communication
 websockets>=11.0
 requests>=2.28
-
-# Audio input
-pyaudio>=0.2.13
-
-# Speech / TTS
-gtts>=2.3
-gTTS>=2.3
-
-# Arduino serial
-pyserial>=3.5
-
-# Utilities
+pyaudio>=0.2.13      # mic input; builds from source on Jetson (needs portaudio19-dev)
+gtts>=2.3            # default TTS voice
+pyserial>=3.5        # ChatBox ESP32
 numpy>=1.24
 
-# Optional: RealSense camera (only needed if emotion module is enabled)
-# pyrealsense2>=2.50
-
-# Optional: pyttsx3 TTS fallback
-# pyttsx3>=2.90
-
-# System packages also needed (install via apt):
-#   sudo apt install ffmpeg espeak alsa-utils portaudio19-dev
-#   sudo apt install libportaudio2 libportaudiocpp0
+# Optional, per robot:
+# edge-tts           # neural voices, used when a config sets tts_voice (else gTTS)
+# pyrealsense2       # RealSense camera input

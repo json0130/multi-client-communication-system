@@ -27,9 +27,8 @@ Type=simple
 # --- EDIT THESE PER ROBOT ---------------------------------------------------
 User=<robot-user>
 WorkingDirectory=</absolute/path/to/client>
-ExecStart=/usr/bin/python3 run.py <robot>          # e.g. run.py chatbox, run.py irobi
-# If the client runs under a conda/venv, point at that python instead, e.g.:
-#   ExecStart=/home/<user>/miniconda3/envs/<env>/bin/python run.py <robot>
+ExecStart=</absolute/path/to/client>/.venv/bin/python run.py <robot>   # e.g. run.py chatbox, run.py irobi
+# .venv comes from ./setup.sh. Without one: ExecStart=/usr/bin/python3 run.py <robot>
 # Robot-specific env vars go here, e.g. for the Navel SDK:
 #   Environment=NAVEL_SHM_LIB=/usr/lib/python3/dist-packages/navel/libnavel_shm.cpython-311-aarch64-linux-gnu.so
 # ---------------------------------------------------------------------------

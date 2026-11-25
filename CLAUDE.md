@@ -21,7 +21,7 @@ env vars, HTTP API, profile format); this file only covers what isn't in there.
 | `server/decision/` | flow planner, grounding, KG, presence, visitor profile, style fit |
 | `server/demo/` | lab demo orchestrator + script |
 | `server/tools/` | `check_*.py` layer checkpoints, eval/harness/stats scripts |
-| `client/` | every robot client: `client.py` (`BasicClient`, the whole protocol), shared `InputModules/`/`OutputModules/`, `run.py <robot>` entry point. Deploy the whole folder |
+| `client/` | every robot client: `client.py` (`BasicClient`, the whole protocol), shared `InputModules/`/`OutputModules/`, `run.py <robot>` entry point. Deploy the whole folder; `export_kit.sh <dest>` copies just the shared parts (no lab robots) to another robot's repo |
 | `client/robots/` | one module per platform, only what is robot-specific (Navel SDK TTS/mic, ChatBox ESP32, Pepper NAOqi bridge, Gazebo ROS bridge). No module → `generic.py`. New platform: `_template.py` |
 | `client/configs/` | `<robot>.json` per real robot; `lab/` (fake robots, `run_lab_test.py`), `sim/` (Gazebo, `run_gazebo_demo.py`) |
 | `gazebo/` | simulated lab world |

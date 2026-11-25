@@ -1,43 +1,30 @@
 #!/bin/bash
-# setup.sh — Install all ChatBox client dependencies (non-Docker)
-# Run once on the Jetson or Ubuntu machine:
-#   chmod +x setup.sh && ./setup.sh
+# setup.sh — install the robot client on any Linux robot or laptop (once per machine).
+#   ./setup.sh
+# Makes client/.venv (Python >= 3.8) and installs requirements.txt into it. Then run
+#   .venv/bin/python run.py <robot>
+# or point robot-client.service's ExecStart at that python.
+#
+# The venv sees the system's packages (--system-site-packages), so a robot SDK that
+# lives in the system python (Navel's navel, ROS's rclpy) still imports.
+# Jetson Nano (JetPack 4 = Ubuntu 18.04) ships Python 3.6, too old; this installs
+# python3.8 from apt beside it.
 
 set -e
+cd "$(dirname "$0")"
 
-echo "=================================================="
-echo "  ChatBox Client Setup"
-echo "=================================================="
-
-# System packages
-echo ""
-echo "Installing system packages..."
 sudo apt-get update -qq
-sudo apt-get install -y \
-    ffmpeg \
-    espeak espeak-data \
-    alsa-utils \
-    portaudio19-dev libportaudio2 libportaudiocpp0 \
-    python3-pip python3-dev
+sudo apt-get install -y ffmpeg alsa-utils portaudio19-dev python3-pip python3-dev python3-venv
 
-# Python packages
-echo ""
-echo "Installing Python packages..."
-pip3 install --upgrade pip
-pip3 install websockets requests pyserial gtts numpy
+PY=python3
+if ! $PY -c 'import sys; sys.exit(sys.version_info < (3, 8))'; then
+    sudo apt-get install -y python3.8 python3.8-dev python3.8-venv
+    PY=python3.8
+fi
 
-# PyAudio (build from source to avoid _portaudio errors on Jetson)
-echo ""
-echo "Installing PyAudio..."
-pip3 install --no-binary :all: pyaudio || pip3 install pyaudio
+$PY -m venv --system-site-packages .venv
+.venv/bin/pip install --upgrade pip
+.venv/bin/pip install -r requirements.txt
 
-# Optional: RealSense (uncomment if using emotion module)
-# pip3 install pyrealsense2
-
-echo ""
-echo "=================================================="
-echo "  Setup complete!"
-echo "  Next steps:"
-echo "  1. Edit configs/chatbox.json — set server_url"
-echo "  2. python3 run.py chatbox"
-echo "=================================================="
+echo
+echo "Done. Start a robot:  $(pwd)/.venv/bin/python run.py <robot>"
