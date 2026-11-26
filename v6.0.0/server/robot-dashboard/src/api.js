@@ -32,6 +32,12 @@ export const assignPersona   = (id, persona_id) =>
 export const chatRobot       = (id, message)    =>
   req('POST', `/robots/${id}/chat`, { message })
 
+// ── Roles page (gateway/roles_gateway.py, its own port) ──────────────────────
+export const ROLES_URL = import.meta.env.VITE_ROLES_URL || `http://${window.location.hostname}:8780/`
+// Each robot on the Roles page with what was applied there (role_label, persona, ocean).
+export const getRolesRegistry = () =>
+  fetch(`${ROLES_URL}registry`).then(r => (r.ok ? r.json() : { robots: [] }))
+
 // ── Personas ──────────────────────────────────────────────────────────────────
 export const getPersonas    = ()         => req('GET',  '/personas')
 export const getPersona     = (id)       => req('GET',  `/personas/${id}`)

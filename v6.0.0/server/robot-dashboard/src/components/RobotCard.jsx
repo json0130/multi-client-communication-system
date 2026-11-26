@@ -1,8 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
-import { connectRobot, disconnectRobot, assignPersona, updateRobot, deleteRobot } from '../api'
+import { connectRobot, disconnectRobot, updateRobot, deleteRobot } from '../api'
 import { useToast } from './Toast'
-
-const ALL_MODULES = ['gpt', 'speech', 'emotion', 'rag', 'navigation']
 
 function RobotPlaceholder() {
   return (
@@ -24,10 +22,9 @@ function RobotPlaceholder() {
   )
 }
 
-export default function RobotCard({ robot, personas, onRefresh }) {
+// `role`: this robot's entry on the Roles page (its GET /registry): what was applied there, or undefined
+export default function RobotCard({ robot, role, onRefresh }) {
   const [busy, setBusy]                       = useState(false)
-  const [selectedPersona, setSelectedPersona] = useState('')
-  const [expanded, setExpanded]               = useState(false)
   const [photo, setPhoto]                     = useState(null)
   const fileRef                               = useRef(null)
   const toast = useToast()
@@ -37,12 +34,9 @@ export default function RobotCard({ robot, personas, onRefresh }) {
   const [editName, setEditName]     = useState(robot.robot_name)
   const [editIp,   setEditIp]       = useState(robot.ip_address || '')
   const [editPort, setEditPort]     = useState(robot.ws_port ? String(robot.ws_port) : '')
-  const [editMods, setEditMods]     = useState(new Set(robot.modules || []))
   const [confirmDel, setConfirmDel] = useState(false)
 
   const isOnline       = robot.ws_connected
-  const currentPersona = personas.find(p => p.id === robot.persona_id)
-  const modules        = robot.modules || []
   const photoKey       = `robot_photo_${robot.client_id}`
 
   useEffect(() => {
@@ -55,8 +49,7 @@ export default function RobotCard({ robot, personas, onRefresh }) {
     setEditName(robot.robot_name)
     setEditIp(robot.ip_address || '')
     setEditPort(robot.ws_port ? String(robot.ws_port) : '')
-    setEditMods(new Set(robot.modules || []))
-  }, [robot.robot_name, robot.ip_address, robot.ws_port, robot.modules])
+  }, [robot.robot_name, robot.ip_address, robot.ws_port])
 
   function handlePhotoClick() { fileRef.current?.click() }
 
@@ -71,14 +64,6 @@ export default function RobotCard({ robot, personas, onRefresh }) {
     }
     reader.readAsDataURL(file)
     e.target.value = ''
-  }
-
-  function toggleMod(m) {
-    setEditMods(prev => {
-      const next = new Set(prev)
-      next.has(m) ? next.delete(m) : next.add(m)
-      return next
-    })
   }
 
   // ── Handlers ────────────────────────────────────────────────────────────────
@@ -103,18 +88,6 @@ export default function RobotCard({ robot, personas, onRefresh }) {
     finally { setBusy(false) }
   }
 
-  async function handleAssign() {
-    if (!selectedPersona) return
-    setBusy(true)
-    try {
-      const res = await assignPersona(robot.client_id, selectedPersona)
-      toast.success(res.message)
-      setSelectedPersona('')
-      onRefresh()
-    } catch (e) { toast.error(e.message) }
-    finally { setBusy(false) }
-  }
-
   async function handleSaveEdit() {
     if (!editName.trim()) { toast.error('Name cannot be empty'); return }
     setBusy(true)
@@ -123,7 +96,6 @@ export default function RobotCard({ robot, personas, onRefresh }) {
         robot_name: editName.trim(),
         ip_address: editIp.trim() || null,
         ws_port:    editPort ? (parseInt(editPort, 10) || null) : null,
-        modules:    [...editMods],
       })
       toast.success('Robot updated')
       setEditing(false)
@@ -183,20 +155,6 @@ export default function RobotCard({ robot, personas, onRefresh }) {
             />
           </div>
 
-          <label className="edit-field-label" style={{ marginTop: 8 }}>Modules</label>
-          <div className="edit-modules">
-            {ALL_MODULES.map(m => (
-              <label key={m} className="edit-module-check">
-                <input
-                  type="checkbox"
-                  checked={editMods.has(m)}
-                  onChange={() => toggleMod(m)}
-                />
-                {m}
-              </label>
-            ))}
-          </div>
-
           <div style={{ display: 'flex', gap: 6, marginTop: 12 }}>
             <button className="btn btn-primary btn-sm" onClick={handleSaveEdit} disabled={busy}>
               {busy ? 'Saving…' : 'Save'}
@@ -249,72 +207,18 @@ export default function RobotCard({ robot, personas, onRefresh }) {
             <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
           </div>
 
-          {/* Persona */}
+          {/* Persona: what the Roles page applied to this robot */}
           <div className="card-section">
             <div className="card-label">Persona</div>
-            <div className={`persona-pill ${!currentPersona ? 'none' : ''}`}>
-              {currentPersona
-                ? <><span style={{ opacity: 0.6 }}>◈</span>{currentPersona.name}</>
-                : <><span style={{ opacity: 0.4 }}>◻</span>No persona assigned</>
+            <div className={`persona-pill ${!role?.role_label ? 'none' : ''}`}>
+              {role?.role_label
+                ? <><span style={{ opacity: 0.6 }}>◈</span>{role.role_label}</>
+                : <><span style={{ opacity: 0.4 }}>◻</span>None applied on the Roles page</>
               }
             </div>
-            {currentPersona?.robot_role && (
-              <>
-                <div style={{
-                  marginTop: 6, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)',
-                  lineHeight: 1.5, overflow: 'hidden', display: '-webkit-box',
-                  WebkitLineClamp: expanded ? 'unset' : 2, WebkitBoxOrient: 'vertical', cursor: 'pointer',
-                }} onClick={() => setExpanded(e => !e)}>
-                  {currentPersona.robot_role}
-                </div>
-                <button onClick={() => setExpanded(e => !e)} style={{
-                  background: 'none', border: 'none', color: 'var(--muted)',
-                  fontSize: 10, cursor: 'pointer', padding: '2px 0', fontFamily: 'var(--mono)',
-                }}>
-                  {expanded ? '▲ less' : '▼ more'}
-                </button>
-              </>
-            )}
-          </div>
-
-          {/* Modules */}
-          <div className="card-section">
-            <div className="card-label">Modules</div>
-            <div className="module-list">
-              {ALL_MODULES.map(m => (
-                <span key={m} className={`module-badge ${modules.includes(m) ? 'active' : ''}`}>{m}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* Assign persona */}
-          <div className="card-section">
-            <div className="card-label">Assign persona</div>
-            <div className="assign-row">
-              <select
-                className="form-select"
-                value={selectedPersona}
-                onChange={e => setSelectedPersona(e.target.value)}
-                disabled={busy}
-              >
-                <option value="">Select...</option>
-                {personas.map(p => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}{p.is_default ? ' ★' : ''}
-                  </option>
-                ))}
-              </select>
-              <button
-                className="btn btn-primary assign-btn"
-                onClick={handleAssign}
-                disabled={busy || !selectedPersona}
-              >
-                Assign
-              </button>
-            </div>
-            {!isOnline && selectedPersona && (
-              <div style={{ fontSize: 10, color: 'var(--muted)', marginTop: 4, fontFamily: 'var(--mono)' }}>
-                Offline — will apply on next connect
+            {role?.persona && (
+              <div style={{ marginTop: 6, fontFamily: 'var(--mono)', fontSize: 10, color: 'var(--muted)', lineHeight: 1.5 }}>
+                {role.persona}
               </div>
             )}
           </div>

@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { ROLES_URL as URL_ } from '../api'
 
 /**
  * Roles: assign a role + OCEAN personality to a robot and watch the role/persona graph.
@@ -16,7 +17,6 @@ import { useState, useEffect, useRef } from 'react'
  * postMessage {theme}, so switching doesn't reload the graph.
  */
 
-const URL_ = import.meta.env.VITE_ROLES_URL || `http://${window.location.hostname}:8780/`
 const HEADER_PX = 76     // the floating .header in index.css: 12 top + 52 high + 12 gap
 
 export default function RolesTab({ active, theme }) {

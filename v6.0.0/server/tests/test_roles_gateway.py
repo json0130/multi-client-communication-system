@@ -166,6 +166,7 @@ def page(tmp_path):
                 return r.status, json.load(r)
         except urllib.error.HTTPError as e:
             return e.code, json.load(e)
+    call.base = base
     yield call, ws, hub
     server.shutdown()
 
@@ -374,3 +375,13 @@ def test_dashboard_personas_are_roles_on_the_page(tmp_path):
         assert "role:security-guard" not in {r["id"] for r in call("/persona")["roles"]}
     finally:
         server.shutdown()
+
+
+def test_the_dashboard_card_can_read_what_was_applied(page):
+    """The Robots tab's card shows a robot's persona from the Roles page's /registry (another port, so CORS)."""
+    call, ws, hub = page
+    call("/persona", {"robot": "navel", "role": "role:tutor", "ocean": OCEAN})
+    with urllib.request.urlopen(call.base + "/registry", timeout=10) as r:
+        assert r.headers["Access-Control-Allow-Origin"] == "*"
+        navel = next(s for s in json.load(r)["robots"] if s["id"] == "navel")
+    assert navel["role_label"].lower() == "tutor" and navel["persona"]

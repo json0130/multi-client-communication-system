@@ -24,10 +24,10 @@
 
 /* Light theme: the header's toggle sets <html data-theme="light"> (App.jsx). */
 :root[data-theme="light"] {
-  --bg:        #f4f6fa;
-  --surface:   #ffffff;
-  --surface2:  #eef1f6;
-  --border:    #d9dee7;
+  --bg:        #dde2e9;
+  --surface:   #e9edf2;
+  --surface2:  #e0e5ec;
+  --border:    #c5cdd8;
   --text:      #0f172a;
   --muted:     #5b6b82;
   --accent-dim:#dbeafe;
@@ -36,8 +36,8 @@
   --header-text:  rgba(15, 23, 42, 0.65);
   --header-hi:    #0f172a;
   --header-hi-bg: rgba(15, 23, 42, 0.07);
-  --hover:        #e3e8ef;
-  --hover-border: #c6cdd8;
+  --hover:        #d5dbe4;
+  --hover-border: #b4bdca;
   color-scheme: light;
 }
 :root[data-theme="light"] .header { box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10); }

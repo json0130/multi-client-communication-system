@@ -732,6 +732,7 @@ def make_handler(state: GraphState, history: Optional["HistoryProvider"] = None,
             self.send_header("Content-Type", content_type)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("Cache-Control", "no-store")
+            self.send_header("Access-Control-Allow-Origin", "*")   # the dashboard reads /registry from its own port
             self.end_headers()
             self.wfile.write(body)
 

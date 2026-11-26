@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react'
-import { getRobots, getPersonas } from './api'
+import { getRobots, getPersonas, getRolesRegistry } from './api'
 import RobotCard from './components/RobotCard'
 import RobotModal from './components/RobotModal'
 import PersonaCard from './components/PersonaCard'
@@ -20,7 +20,12 @@ function savedTheme() {
   try { return localStorage.getItem('theme') || 'dark' } catch { return 'dark' }
 }
 
-function Section({ label, color, glow, robots, personas, onRefresh }) {
+// The Roles page matches a connected robot to its entry by robot_name (lower-case, no spaces), or a pinned client_id.
+const nameKey = n => String(n || '').toLowerCase().replace(/\s+/g, '')
+const roleFor = (roles, r) =>
+  roles.find(s => s.client_id === r.client_id) || roles.find(s => nameKey(s.name) === nameKey(r.robot_name))
+
+function Section({ label, color, glow, robots, roles, onRefresh }) {
   if (!robots.length) return null
   return (
     <div style={{ marginBottom: 28 }}>
@@ -39,7 +44,7 @@ function Section({ label, color, glow, robots, personas, onRefresh }) {
       </div>
       <div className="robot-grid">
         {robots.map(r => (
-          <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={onRefresh} />
+          <RobotCard key={r.client_id} robot={r} role={roleFor(roles, r)} onRefresh={onRefresh} />
         ))}
       </div>
     </div>
@@ -82,6 +87,7 @@ export default function App() {
   const [tab, setTab]               = useState('robots')
   const [robots, setRobots]         = useState([])
   const [personas, setPersonas]     = useState([])
+  const [roles, setRoles]           = useState([])      // the Roles page's robots, with what was applied
   const [loading, setLoading]       = useState(true)
   const [showPersonaModal, setShowPersonaModal] = useState(false)
   const [editPersona, setEditPersona] = useState(null)     // the persona open in the modal for editing
@@ -108,6 +114,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
+    try { setRoles((await getRolesRegistry()).robots || []) } catch { /* Roles service off: no personas shown */ }
   }, [])
 
   useEffect(() => { fetchAll() }, [fetchAll])
@@ -135,7 +142,7 @@ export default function App() {
   const onlineRobots  = realRobots.filter(r =>  r.ws_connected)
   const offlineRobots = realRobots.filter(r => !r.ws_connected)
   const simRobots     = filteredRobots.filter(r => SIM_IDS.has(r.client_id))
-  const cardProps     = { personas, onRefresh: fetchAll }
+  const cardProps     = { roles, onRefresh: fetchAll }
 
   const onlineCount  = robots.filter(r => r.ws_connected).length
   const offlineCount = robots.length - onlineCount
