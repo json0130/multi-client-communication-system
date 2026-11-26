@@ -48,6 +48,7 @@ Needs Linux and Python 3.8 or newer.
    | `modules` | Include `"speech"` to use the mic |
    | `ws_port` | Port the client listens on for the server (default 8765). Must be free on the robot |
    | `connect_to_server` | `true` if the server can't reach the robot (NAT, Tailscale): the robot dials out instead |
+   | `ai_server` | `HOST[:PORT]` of the lab AI server, only if the adapter uses `ai_server.py` (or set `AI_HOST`) |
 
    If the server uses a token, set `API_TOKEN` in the environment. Never put
    it in the config.
@@ -55,6 +56,18 @@ Needs Linux and Python 3.8 or newer.
 4. **Run.** `.venv/bin/python run.py <name>`. The banner shows the server it
    registered with. To start at every boot, fill in `robot-client.service`
    and install it (instructions inside).
+
+## What a connected robot can use
+
+Nothing below needs code beyond the adapter.
+
+| Feature | How |
+|---|---|
+| Conversation | The server's LLM answers; with `"speech"` in `modules` the mic is transcribed on the server. |
+| Personas and roles | The robot gets a tab on the Roles page; assign a role/persona there or on the Robots tab. |
+| Lab demo | Tick the robot in the dashboard's Demo tab: alone (a person guides) or as a project robot after a guide robot. Steps arrive as `demo_step` and are ACKed for you. Driving (`demo_nav`) is ACKed and skipped unless the adapter handles it. |
+| Other robots | A question about another robot's subject is handed to that robot, by role, out loud. Every connected robot is a candidate. |
+| Lab AI server | `ai_server.py`: `tts`, `stt`, `llm`, `face`, `emotion` for models the robot lacks (e.g. a voice for `say()`). |
 
 ## Check it
 

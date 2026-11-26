@@ -43,6 +43,9 @@ class Speech(SimTTSOutputModule):
         # Speak one sentence and return once it has been said.
         # Blocking SDK:      sdk.say(sentence)
         # Non-blocking SDK:  sdk.say(sentence); self._interrupt_event.wait(self.estimated_duration(sentence))
+        # No TTS of its own: the lab AI server's voice (ai_server.py, "ai_server" in the config):
+        #   wav = AIServer.from_config(self.client.config).tts(sentence)
+        #   subprocess.run(["aplay", "-q", "-"], input=wav)
         super().say(sentence)          # placeholder: logs it and waits as long as saying it would take
 
     def update_voice_config(self, voice_config: dict):
