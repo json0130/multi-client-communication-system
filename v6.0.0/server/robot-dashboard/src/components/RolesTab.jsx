@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 
 /**
  * Roles: assign a role + OCEAN personality to a robot and watch the role/persona graph.
@@ -11,18 +11,23 @@ import { useState, useEffect } from 'react'
  * The iframe is only created the first time the tab is opened (the page polls its server), then stays
  * mounted like the other tabs so the graph keeps its layout. App.jsx hides this tab with display:none,
  * which hides the fixed iframe with it.
+ *
+ * Light/dark: the page gets the theme in its URL when the frame is created, then each change as a
+ * postMessage {theme}, so switching doesn't reload the graph.
  */
 
 const URL_ = import.meta.env.VITE_ROLES_URL || `http://${window.location.hostname}:8780/`
 const HEADER_PX = 76     // the floating .header in index.css: 12 top + 52 high + 12 gap
 
-export default function RolesTab({ active }) {
-  const [opened, setOpened] = useState(false)
-  useEffect(() => { if (active) setOpened(true) }, [active])
+export default function RolesTab({ active, theme }) {
+  const [src, setSrc] = useState(null)
+  const frame = useRef(null)
+  useEffect(() => { if (active && !src) setSrc(`${URL_}?theme=${theme}`) }, [active, src, theme])
+  useEffect(() => { frame.current?.contentWindow?.postMessage({ theme }, '*') }, [theme])
 
-  return opened ? (
-    <iframe title="Roles" src={URL_}
+  return src ? (
+    <iframe ref={frame} title="Roles" src={src}
             style={{ position: 'fixed', top: HEADER_PX, left: 0, width: '100vw', height: `calc(100vh - ${HEADER_PX}px)`,
-                     border: 0, background: '#0b0d12', zIndex: 10 }} />
+                     border: 0, background: 'var(--bg)', zIndex: 10 }} />
   ) : null
 }

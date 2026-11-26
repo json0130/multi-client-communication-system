@@ -12,6 +12,53 @@ import { ToastContainer } from './components/Toast'
 
 const REFRESH_INTERVAL = 5000
 
+// The fake robots (client/configs/lab, client/configs/sim: run_lab_test.py, run_gazebo_demo.py).
+// They get their own section below Offline, online or not.
+const SIM_IDS = new Set(['chatbox_01', 'navel_01', 'pepper_01', 'silbot_01'])
+
+function savedTheme() {
+  try { return localStorage.getItem('theme') || 'dark' } catch { return 'dark' }
+}
+
+function Section({ label, color, glow, robots, personas, onRefresh }) {
+  if (!robots.length) return null
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+        <span style={{
+          width: 8, height: 8, borderRadius: '50%', background: color, display: 'inline-block',
+          boxShadow: glow ? `0 0 6px ${color}` : 'none',
+        }} />
+        <span style={{
+          fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
+          color, textTransform: 'uppercase', fontFamily: 'var(--mono)',
+        }}>
+          {label} — {robots.length}
+        </span>
+        <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
+      </div>
+      <div className="robot-grid">
+        {robots.map(r => (
+          <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={onRefresh} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function ThemeIcon({ theme }) {
+  return theme === 'dark' ? (   // dark now: a sun, to switch to light
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
+      <circle cx="8" cy="8" r="3"/>
+      <path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/>
+    </svg>
+  ) : (
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7z"/>
+    </svg>
+  )
+}
+
 function RobotIcon() {
   return (
     <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
@@ -43,6 +90,12 @@ export default function App() {
   const [search, setSearch]         = useState('')
   const [filter, setFilter]         = useState('all')
   const [demoView, setDemoView]   = useState('run')    // Demo sub-tab: 'run' | 'kg' | 'flow'
+  const [theme, setTheme]         = useState(savedTheme)
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme
+    try { localStorage.setItem('theme', theme) } catch { /* private window: just not remembered */ }
+  }, [theme])
 
   const fetchAll = useCallback(async () => {
     try {
@@ -78,8 +131,11 @@ export default function App() {
     })
   }, [robots, search, filter])
 
-  const onlineRobots  = filteredRobots.filter(r =>  r.ws_connected)
-  const offlineRobots = filteredRobots.filter(r => !r.ws_connected)
+  const realRobots    = filteredRobots.filter(r => !SIM_IDS.has(r.client_id))
+  const onlineRobots  = realRobots.filter(r =>  r.ws_connected)
+  const offlineRobots = realRobots.filter(r => !r.ws_connected)
+  const simRobots     = filteredRobots.filter(r => SIM_IDS.has(r.client_id))
+  const cardProps     = { personas, onRefresh: fetchAll }
 
   const onlineCount  = robots.filter(r => r.ws_connected).length
   const offlineCount = robots.length - onlineCount
@@ -111,10 +167,10 @@ export default function App() {
         </div>
         <nav className="nav-tabs">
           <button className={`nav-tab ${tab === 'robots'   ? 'active' : ''}`} onClick={() => setTab('robots')}>
-            Robots {robots.length > 0 && `(${robots.length})`}
+            Robots
           </button>
           <button className={`nav-tab ${tab === 'personas' ? 'active' : ''}`} onClick={() => setTab('personas')}>
-            Personas {personas.length > 0 && `(${personas.length})`}
+            Personas
           </button>
           <button className={`nav-tab ${tab === 'roles' ? 'active' : ''}`} onClick={() => setTab('roles')}>
             Roles
@@ -123,6 +179,10 @@ export default function App() {
             Demo
           </button>
         </nav>
+        <button className="theme-toggle" onClick={() => setTheme(t => (t === 'dark' ? 'light' : 'dark'))}
+                title={theme === 'dark' ? 'Light mode' : 'Dark mode'} aria-label="Toggle light and dark mode">
+          <ThemeIcon theme={theme} />
+        </button>
       </header>
 
       {/* Main */}
@@ -196,62 +256,9 @@ export default function App() {
               </div>
             ) : (
               <>
-                {/* ── Online section ── */}
-                {onlineRobots.length > 0 && (
-                  <div style={{ marginBottom: 28 }}>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      marginBottom: 12,
-                    }}>
-                      <span style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: 'var(--online)', display: 'inline-block',
-                        boxShadow: '0 0 6px var(--online)',
-                      }} />
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
-                        color: 'var(--online)', textTransform: 'uppercase',
-                        fontFamily: 'var(--mono)',
-                      }}>
-                        Online — {onlineRobots.length}
-                      </span>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                    </div>
-                    <div className="robot-grid">
-                      {onlineRobots.map(r => (
-                        <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={fetchAll} />
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* ── Offline section ── */}
-                {offlineRobots.length > 0 && (
-                  <div>
-                    <div style={{
-                      display: 'flex', alignItems: 'center', gap: 8,
-                      marginBottom: 12,
-                    }}>
-                      <span style={{
-                        width: 8, height: 8, borderRadius: '50%',
-                        background: 'var(--muted)', display: 'inline-block',
-                      }} />
-                      <span style={{
-                        fontSize: 11, fontWeight: 600, letterSpacing: '0.08em',
-                        color: 'var(--muted)', textTransform: 'uppercase',
-                        fontFamily: 'var(--mono)',
-                      }}>
-                        Offline — {offlineRobots.length}
-                      </span>
-                      <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-                    </div>
-                    <div className="robot-grid">
-                      {offlineRobots.map(r => (
-                        <RobotCard key={r.client_id} robot={r} personas={personas} onRefresh={fetchAll} />
-                      ))}
-                    </div>
-                  </div>
-                )}
+                <Section label="Online"  color="var(--online)" glow robots={onlineRobots}  {...cardProps} />
+                <Section label="Offline" color="var(--muted)"       robots={offlineRobots} {...cardProps} />
+                <Section label="Sim"     color="var(--accent)"      robots={simRobots}     {...cardProps} />
               </>
             )}
           </>
@@ -316,7 +323,7 @@ export default function App() {
           <div style={{ display: demoView === 'flow' ? 'block' : 'none' }}><FlowTab /></div>
         </div>
         <div style={{ display: tab === 'roles' ? 'block' : 'none', height: '100%' }}>
-          <RolesTab active={tab === 'roles'} />
+          <RolesTab active={tab === 'roles'} theme={theme} />
         </div>
 
       </main>

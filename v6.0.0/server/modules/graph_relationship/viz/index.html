@@ -19,6 +19,23 @@
     --node:      #dfe3ef;
     --node-brd:  #7f8496;
     --side:      min(400px, 46vw);   /* dedicated persona + chat column */
+    --glass:     rgba(28,30,41,0.92);
+    --bubble:    #2a2d3d;
+    --bubble-bot:#2f2540;
+    --chip-text: #d7c4f5;
+  }
+  :root[data-theme="light"] {
+    --bg:        #f4f6fa;
+    --panel:     #ffffff;
+    --panel-brd: #d9dee7;
+    --text:      #0f172a;
+    --muted:     #5b6b82;
+    --node:      #e2e8f0;
+    --node-brd:  #64748b;
+    --glass:     rgba(255,255,255,0.92);
+    --bubble:    #e8ecf3;
+    --bubble-bot:#efe7fb;
+    --chip-text: #5b3a99;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; background: var(--bg); color: var(--text);
@@ -27,7 +44,7 @@
   #graph:active { cursor: grabbing; }
 
   .panel {
-    position: fixed; background: rgba(28,30,41,0.92); border: 1px solid var(--panel-brd);
+    position: fixed; background: var(--glass); border: 1px solid var(--panel-brd);
     border-radius: 10px; padding: 12px 14px; font-size: 13px; backdrop-filter: blur(4px);
     box-shadow: 0 4px 18px rgba(0,0,0,0.35);
   }
@@ -38,10 +55,10 @@
   #tabs[hidden] { display: none; }
   #robots-link { position: fixed; top: 12px; right: calc(var(--side) + 14px); z-index: 6; padding: 6px 14px;
                  font-size: 13px; border-radius: 8px; color: var(--text); text-decoration: none;
-                 background: rgba(28,30,41,0.92); border: 1px solid var(--panel-brd); }
+                 background: var(--glass); border: 1px solid var(--panel-brd); }
   #robots-link:hover { border-color: var(--slow); }
   #tabs button { padding: 6px 16px; font-size: 13px; border-radius: 8px; cursor: pointer;
-                 background: rgba(28,30,41,0.92); color: var(--muted); border: 1px solid var(--panel-brd); }
+                 background: var(--glass); color: var(--muted); border: 1px solid var(--panel-brd); }
   #tabs button.on { color: var(--text); font-weight: 600; }
   #tabs .tswatch { display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 8px;
                    vertical-align: -1px; }
@@ -97,7 +114,7 @@
   .pcard .nm { font-weight: 600; font-size: 12px; }
   .pcard .sub { color: var(--muted); font-size: 10.5px; line-height: 1.3; }
   .pcard .rl { display: inline-block; margin-top: 3px; font-size: 10px; padding: 0 5px;
-               border-radius: 4px; background: #2f2540; color: #d7c4f5; }
+               border-radius: 4px; background: var(--bubble-bot); color: var(--chip-text); }
   .pcard .on { position: absolute; top: 5px; right: 6px; font-size: 9.5px; color: #3ddc84; }
   .pcard .body { display: none; margin-top: 8px; padding-top: 6px; border-top: 1px solid var(--panel-brd); }
   .pcard.sel .body { display: block; }
@@ -114,8 +131,8 @@
             border-radius: 8px; }
   .pc-msg { max-width: 88%; padding: 6px 9px; border-radius: 9px; font-size: 12.5px;
             line-height: 1.4; white-space: pre-wrap; word-break: break-word; }
-  .pc-you { align-self: flex-end; background: #2a2d3d; }
-  .pc-bot { align-self: flex-start; background: #2f2540; border: 1px solid var(--relationship); }
+  .pc-you { align-self: flex-end; background: var(--bubble); }
+  .pc-bot { align-self: flex-start; background: var(--bubble-bot); border: 1px solid var(--relationship); }
   .pc-bot .pc-meta { display: block; margin-top: 3px; font-size: 10px; color: var(--muted); }
   .pc-sys { align-self: center; color: var(--muted); font-size: 11px; text-align: center; }
   .pc-err { align-self: stretch; color: #ff9b8a; font-size: 11.5px; }
@@ -201,8 +218,8 @@
                 letter-spacing: .4px; margin-bottom: 4px; }
   .bubble { border-radius: 10px; padding: 7px 10px; font-size: 12.5px; line-height: 1.4;
             margin-bottom: 5px; white-space: pre-wrap; word-break: break-word; }
-  .bubble.child { background: #2a2d3d; }
-  .bubble.reply { background: #2f2540; border: 1px solid var(--relationship); }
+  .bubble.child { background: var(--bubble); }
+  .bubble.reply { background: var(--bubble-bot); border: 1px solid var(--relationship); }
   .bubble .who { display: block; font-size: 10px; color: var(--muted); margin-bottom: 2px; }
   .convo-empty { color: var(--muted); font-size: 12.5px; padding: 4px 0; }
   .sec-title { color: var(--muted); font-size: 11px; text-transform: uppercase;
@@ -303,6 +320,15 @@
 </div>
 
 <script>
+// Light/dark follows the dashboard: ?theme= when its iframe is made, then postMessage({theme}) on each
+// switch; kept in localStorage so robots.html (same origin) matches.
+function setTheme(t) {
+  if (t !== "light" && t !== "dark") return;
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem("theme", t); } catch (e) { /* private window */ }
+}
+setTheme(new URLSearchParams(location.search).get("theme") || (() => { try { return localStorage.getItem("theme"); } catch (e) { return null; } })());
+addEventListener("message", e => setTheme(e.data && e.data.theme));
 const COLOR = { FAST: "#ff8c42", SLOW: "#4fc3f7", RELATIONSHIP: "#a678de" };
 
 // ---- topic category -> fill colour (Feature-2d) --------------------------

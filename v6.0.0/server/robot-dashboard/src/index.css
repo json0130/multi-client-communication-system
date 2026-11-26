@@ -14,7 +14,35 @@
   --mono:      'JetBrains Mono', 'Fira Code', ui-monospace, monospace;
   --glass-bg:     transparent;
   --glass-border: rgba(255, 255, 255, 0.16);
+  --header-text:  rgba(255, 255, 255, 0.72);
+  --header-hi:    #fff;
+  --header-hi-bg: rgba(255, 255, 255, 0.16);
+  --hover:        #2a3340;
+  --hover-border: #3a4455;
+  color-scheme: dark;
 }
+
+/* Light theme: the header's toggle sets <html data-theme="light"> (App.jsx). */
+:root[data-theme="light"] {
+  --bg:        #f4f6fa;
+  --surface:   #ffffff;
+  --surface2:  #eef1f6;
+  --border:    #d9dee7;
+  --text:      #0f172a;
+  --muted:     #5b6b82;
+  --accent-dim:#dbeafe;
+  --offline:   #94a3b8;
+  --glass-border: rgba(15, 23, 42, 0.12);
+  --header-text:  rgba(15, 23, 42, 0.65);
+  --header-hi:    #0f172a;
+  --header-hi-bg: rgba(15, 23, 42, 0.07);
+  --hover:        #e3e8ef;
+  --hover-border: #c6cdd8;
+  color-scheme: light;
+}
+:root[data-theme="light"] .header { box-shadow: 0 8px 24px rgba(15, 23, 42, 0.10); }
+:root[data-theme="light"] .nav-tab.active { box-shadow: 0 1px 3px rgba(15, 23, 42, 0.12); }
+:root[data-theme="light"] .chat-msg-user .chat-bubble { color: var(--text); }
 
 /* ── Reset ─────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -80,7 +108,7 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 .header-logo {
   width: 24px;
   height: 24px;
-  color: #fff;
+  color: var(--header-hi);
   flex-shrink: 0;
 }
 
@@ -90,7 +118,7 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.01em;
-  color: #fff;
+  color: var(--header-hi);
   white-space: nowrap;
 }
 
@@ -135,14 +163,14 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
 .header .nav-tab {
   padding: 7px 14px;
   border-radius: 999px;
-  color: rgba(255,255,255,0.72);
+  color: var(--header-text);
   font-size: 14px;
   white-space: nowrap;
 }
-.header .nav-tab:hover { color: #fff; background: rgba(255,255,255,0.08); }
+.header .nav-tab:hover { color: var(--header-hi); background: var(--header-hi-bg); }
 .header .nav-tab.active {
-  color: #fff;
-  background: rgba(255,255,255,0.16);
+  color: var(--header-hi);
+  background: var(--header-hi-bg);
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.22), 0 1px 4px rgba(0,0,0,0.25);
 }
 
@@ -517,7 +545,20 @@ input, select, textarea { font-family: inherit; font-size: 13px; }
   transition: background 0.15s, border-color 0.15s, opacity 0.15s;
 }
 
-.btn:hover { background: #2a3340; border-color: #3a4455; }
+.btn:hover { background: var(--hover); border-color: var(--hover-border); }
+
+/* light/dark switch at the right end of the header */
+.theme-toggle {
+  margin-left: auto;
+  flex-shrink: 0;
+  width: 34px; height: 34px;
+  display: flex; align-items: center; justify-content: center;
+  border: none; border-radius: 50%;
+  background: transparent;
+  color: var(--header-text);
+}
+.theme-toggle:hover { color: var(--header-hi); background: var(--header-hi-bg); }
+.theme-toggle svg { width: 17px; height: 17px; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .btn-sm { padding: 5px 10px; font-size: 11px; border-radius: 5px; width: auto; }
 
