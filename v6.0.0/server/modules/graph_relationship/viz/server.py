@@ -930,4 +930,5 @@ def make_handler(state: GraphState, history: Optional["HistoryProvider"] = None,
                 self._send(200, json.dumps({"ok": False, "error": str(exc)}).encode(),
                            "application/json")
 
+    Handler.spaces = spaces                 # so the server can add a robot that connects later (roles_gateway)
     return Handler

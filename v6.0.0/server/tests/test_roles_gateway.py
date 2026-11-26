@@ -21,7 +21,8 @@ OCEAN = {"O": 0.6, "C": 0.8, "E": -0.3, "A": 0.7, "N": -0.5}
 
 
 NAMES = {"chatbox_jetson_001": "ChatBox", "navel_001": "Navel",        # the real robots
-         "chatbox_01": "ChatBox", "navel_01": "Navel", "pepper_01": "Pepper"}      # the fake ones (client/configs/lab)
+         "chatbox_01": "ChatBox", "navel_01": "Navel", "pepper_01": "Pepper",      # the fake ones (client/configs/lab)
+         "stuart_001": "Stuart"}
 
 
 class _Robot:
@@ -44,6 +45,7 @@ class FakeWS:
 
     def __init__(self, up=("chatbox_jetson_001", "navel_001"), acker=False):
         self.ack_listeners, self.demo_start_listeners, self.persona_listeners = [], [], []
+        self.connect_listeners = []
         self.up, self.sent, self.acker = list(up), [], acker
         self.registry = _Registry(up)
 
@@ -131,6 +133,16 @@ def test_gateway_routes_persona_acks_to_the_roles_page_not_the_demo():
     assert heard == ["persona-3"] and demo == ["step-7"]
 
 
+def test_gateway_tells_listeners_when_a_registered_robot_is_up():
+    gw = WebSocketGateway(_Registry(), recorder=None)
+    gw._registry = type("R", (), {"connect": lambda self, cid: _Robot("Stuart") if cid == "stuart_001" else None})()
+    heard = []
+    gw.connect_listeners.append(lambda cid, inst: heard.append((cid, inst.robot_name)))
+    assert gw._bring_up("nobody_001") is None              # not registered: nobody is told
+    assert gw._bring_up("stuart_001").robot_name == "Stuart"
+    assert heard == [("stuart_001", "Stuart")]
+
+
 class StubLLM:
     available = True
     label = "stub"
@@ -183,6 +195,36 @@ def test_the_page_lists_the_servers_robots_and_the_merged_graph(page):
     assert {"chatbox", "navel"} <= ids
     assert any(i.startswith("role:") for i in ids)                                      # the shared role library
     assert call("/registry/add", {"name": "Stuart", "kind": "connects-in"})[0] == 400   # robots are added on the server's tab
+
+
+def test_a_robot_that_connects_later_gets_a_tab_of_its_own(page, tmp_path):
+    call, ws, hub = page
+    ws.up.append("stuart_001"); ws.registry.ids.add("stuart_001")
+    for _ in range(2):                                      # connecting again adds nothing
+        for f in ws.connect_listeners:
+            f("stuart_001", _Robot("Stuart"))
+    assert call("/robots")[1]["workspaces"] == ["chatbox", "navel", "stuart"]
+    code, a = call("/persona", {"robot": "stuart", "role": "role:tutor", "ocean": OCEAN})
+    assert code == 200 and a["robot"] == {"robots": 1, "sent": True}
+    assert [c for c, d in ws.sent if d["event"] == "persona_update"] == ["stuart_001"]
+    code, out = call("/chat", {"message": "hi", "robot": "stuart"})
+    assert code == 200 and out["robot"]["sent"]
+    assert _wait(lambda: any(c == "stuart_001" and d["event"] == "demo_step" for c, d in ws.sent))
+    # a restart keeps it
+    again, _ = start_roles_service(FakeWS(), str(tmp_path), port=0, host="127.0.0.1", action_tags=False,
+                                   llm=StubLLM())
+    try:
+        with urllib.request.urlopen(f"http://127.0.0.1:{again.server_port}/robots", timeout=10) as r:
+            assert "stuart" in json.load(r)["workspaces"]
+    finally:
+        again.shutdown()
+
+
+def test_a_robot_whose_name_the_page_cannot_take_is_left_out(page):
+    call, ws, hub = page
+    for f in ws.connect_listeners:
+        f("x_001", _Robot("robot-1"))
+    assert call("/robots")[1]["workspaces"] == ["chatbox", "navel"]
 
 
 def test_assigning_a_role_from_the_page_reaches_that_robot_only(page):

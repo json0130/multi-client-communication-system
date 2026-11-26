@@ -248,10 +248,10 @@ def start_roles_service(ws, data_dir: str, port: int = 8780, host: str = "0.0.0.
 
     data_dir = os.path.abspath(data_dir)       # the persona store resolves a relative path against the graph's folder
     os.makedirs(data_dir, exist_ok=True)
-    specs = specs or DEFAULT_ROBOTS
-    registry = RobotRegistry(os.path.join(data_dir, "robots.json"), [dict(s) for s in specs])
+    # robots.json: the built-in robots plus every robot that has connected since (kept across restarts)
+    registry = RobotRegistry(os.path.join(data_dir, "robots.json"), [dict(s) for s in specs or DEFAULT_ROBOTS])
     llm = llm or (ai_server_chat(ai_server) if ai_server else OllamaChat(ollama_model, ollama_url))
-    hub = GatewayHub(ws, specs, on_persona, server_registry)
+    hub = GatewayHub(ws, registry.robots, on_persona, server_registry)
 
     def space(spec):
         rid = spec["id"]
@@ -260,7 +260,7 @@ def start_roles_service(ws, data_dir: str, port: int = 8780, host: str = "0.0.0.
         st = GraphState(path, os.path.join(data_dir, f"persona_assignment{'' if rid == PRIMARY else '_' + rid}.json"))
         return st, PersonaChat(path, st._persona_path(), llm)
 
-    spaces = {s["id"]: space(s) for s in specs}
+    spaces = {s["id"]: space(s) for s in registry.robots}
     if personas is not None:
         kg_path = os.path.join(data_dir, "kg_culture.json")
         sync = lambda: sync_personas_to_roles(kg_path, personas())    # noqa: E731
@@ -274,7 +274,27 @@ def start_roles_service(ws, data_dir: str, port: int = 8780, host: str = "0.0.0.
         if "navel" in spaces:
             tagger["navel"] = navel_tagger(ChatLLM(llm))
     handler = make_handler(state, HistoryProvider(os.path.join(data_dir, "sessions.db")), chat, hub, tagger,
-                           None, spaces, registry, None, None)
+                           None, spaces, registry, None, lambda rid: hub.specs.pop(rid, None))
+
+    lock = threading.Lock()
+
+    def on_robot_connected(client_id, instance):
+        """A robot the page doesn't know connected to the server: give it a tab of its own (graph, role,
+        persona, chat), saved in robots.json. Matched by robot_name, like every Roles robot."""
+        name = str(getattr(instance, "robot_name", "") or "")
+        with lock:
+            if any(_name_key(s["name"]) == _name_key(name) for s in hub.specs.values()):
+                return
+            try:
+                spec = registry.add(name)
+            except ValueError as e:
+                print(f"[Roles] {client_id} not added to the Roles page: {e}")
+                return
+            handler.spaces[spec["id"]] = space(spec)
+            hub.specs[spec["id"]] = spec
+        print(f"[Roles] {name} connected: added to the Roles page")
+
+    ws.connect_listeners.append(on_robot_connected)
     server = ThreadingHTTPServer((host, port), handler)
     threading.Thread(target=server.serve_forever, daemon=True, name="roles-page").start()
     print(f"[Roles] role / persona page on http://{host}:{port}/")

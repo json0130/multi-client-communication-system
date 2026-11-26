@@ -460,6 +460,7 @@ class WebSocketGateway:
         self.demo_start_listeners: list = []   # callables(), run when the lab demo is started (roles_gateway)
         self.persona_listeners: list = []      # callables(), run when the Persona library changes (persona_gateway → roles_gateway)
         self.ack_listeners: list = []    # callables(step_id) for acks of "persona-N" steps (roles_gateway)
+        self.connect_listeners: list = []      # callables(client_id, instance), run when a robot is up (roles_gateway)
 
         # ── Decision layer ────────────────────────────────────────────────────
         # Both are optional and default to something inert-but-working: without a
@@ -1944,7 +1945,7 @@ class WebSocketGateway:
             if old is not None:
                 old.disconnect()       # its handler's close is ignored below: it is no longer the pooled one
             self._inbound_ids.add(cid)
-            instance = await loop.run_in_executor(None, self._registry.connect, cid)
+            instance = await loop.run_in_executor(None, self._bring_up, cid)
             if instance is None:
                 print(f"[WS Gateway] {cid} dialled in but is not registered — register it first.")
                 with self._lock:
@@ -1993,7 +1994,7 @@ class WebSocketGateway:
             if old is not None:
                 old.disconnect()
             self._inbound_ids.add(cid)
-            if self._registry.connect(cid) is None:
+            if self._bring_up(cid) is None:
                 with self._lock:
                     if self._connections.get(cid) is conn:
                         self._connections.pop(cid, None)
@@ -2253,8 +2254,20 @@ class WebSocketGateway:
     def _on_robot_open(self, client_id: str):
         """A dialed robot's socket is up (first time, or again after a drop): bring its instance up too.
         In a thread — building the instance loads modules and must not hold up the socket."""
-        threading.Thread(target=self._registry.connect, args=(client_id,), daemon=True,
+        threading.Thread(target=self._bring_up, args=(client_id,), daemon=True,
                          name=f"instance-{client_id}").start()
+
+    def _bring_up(self, client_id: str):
+        """The robot's instance (registry.connect), then tell whoever wants to know that a robot is up.
+        Every way a robot connects (dialled, dialled in, Socket.IO) comes through here."""
+        instance = self._registry.connect(client_id)
+        if instance is not None:
+            for listener in list(self.connect_listeners):
+                try:
+                    listener(client_id, instance)
+                except Exception as e:
+                    logger.warning(f"[WS Gateway] robot-connected hook failed: {e}")
+        return instance
 
     def _on_robot_close(self, client_id: str):
         """Called when a robot's connection drops unexpectedly. A dialed connection stays in the pool and
