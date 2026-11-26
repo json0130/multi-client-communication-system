@@ -48,7 +48,7 @@ Needs Linux and Python 3.8 or newer.
    | `modules` | Include `"speech"` to use the mic |
    | `ws_port` | Port the client listens on for the server (default 8765). Must be free on the robot |
    | `connect_to_server` | `true` if the server can't reach the robot (NAT, Tailscale): the robot dials out instead |
-   | `ai_server` | `HOST[:PORT]` of the lab AI server, only if the adapter uses `ai_server.py` (or set `AI_HOST`) |
+   | `ai_server` | `HOST[:PORT]` of the AI server, only if the adapter uses `ai_server.py` and it isn't the lab's (100.110.91.42). Or set `AI_HOST` |
 
    If the server uses a token, set `API_TOKEN` in the environment. Never put
    it in the config.

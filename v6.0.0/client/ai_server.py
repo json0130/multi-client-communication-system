@@ -4,7 +4,7 @@ ai_server.py — the lab AI server's models (LLM, STT, TTS, FACE, EMOTION) for a
 For a robot that has no voice, ears or camera models of its own:
 
     from ai_server import AIServer
-    ai = AIServer.from_config(self.config)      # "ai_server": "HOST[:PORT]", or AI_HOST / AI_PORT
+    ai = AIServer.from_config(self.config)      # "ai_server": "HOST[:PORT]", or AI_HOST / AI_PORT, or the lab's
     wav = ai.tts("Hello there.")                # bytes of a WAV, ready to play
     text = ai.stt(open("q.wav", "rb").read())   # transcript
     faces = ai.face(jpeg_bytes, "recognize")    # [{"box": ..., "name": ...}, ...]
@@ -28,6 +28,7 @@ import socket
 import uuid
 import wave
 
+LAB_AI_SERVER = "100.110.91.42"     # the lab AI server, when neither the config nor AI_HOST names one
 DEFAULT_PORT = 7898
 MAX_BYTES = 8 * 1024 * 1024
 
@@ -75,7 +76,7 @@ class AIServer:
 
     @classmethod
     def from_config(cls, config: dict, **kw) -> "AIServer":
-        spec = config.get("ai_server") or os.environ.get("AI_HOST", "")
+        spec = config.get("ai_server") or os.environ.get("AI_HOST") or LAB_AI_SERVER
         host, _, port = spec.partition(":")
         return cls(host, int(port or os.environ.get("AI_PORT", DEFAULT_PORT)),
                    config.get("client_id", "robot"), **kw)

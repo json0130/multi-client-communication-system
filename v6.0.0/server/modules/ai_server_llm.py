@@ -28,7 +28,8 @@ import uuid
 import wave
 from typing import Optional
 
-DEFAULT_HOST = os.environ.get("AI_HOST", "")
+LAB_AI_SERVER = "100.110.91.42"                       # the lab AI server; $AI_HOST overrides
+DEFAULT_HOST = os.environ.get("AI_HOST") or LAB_AI_SERVER
 DEFAULT_PORT = int(os.environ.get("AI_PORT", 7898))
 _MAX_MESSAGE_BYTES = 8 * 1024 * 1024
 

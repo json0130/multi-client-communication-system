@@ -95,8 +95,7 @@ def test_config_and_unreachable(monkeypatch):
     monkeypatch.delenv("AI_HOST", raising=False)
     ai = AIServer.from_config({"ai_server": "10.0.0.5:7000", "client_id": "r_001"})
     assert (ai.host, ai.port, ai.robot_id) == ("10.0.0.5", 7000, "r_001")
-    with pytest.raises(AIServerError, match="no AI server"):
-        AIServer.from_config({})
+    assert AIServer.from_config({}).host == "100.110.91.42"     # the lab's, by default
     s = socket.socket(); s.bind(("127.0.0.1", 0)); port = s.getsockname()[1]; s.close()
     with pytest.raises(AIServerError):
         AIServer("127.0.0.1", port, timeout=2).llm("hi")

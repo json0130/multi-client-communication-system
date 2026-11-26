@@ -31,7 +31,7 @@ from modules.role_seed import seed_role_library
 
 # The lab AI server the robot talks to by default ($AI_HOST overrides; the viz server's
 # --ai-server HOST[:PORT] overrides both). Used when no chat backend flag is given.
-DEFAULT_AI_SERVER = os.environ.get("AI_HOST") or "172.24.47.255"
+from modules.ai_server_llm import DEFAULT_HOST as DEFAULT_AI_SERVER   # $AI_HOST or the lab IP
 
 MAX_HISTORY_TURNS = 6          # (message, reply) pairs sent back to the model
 MAX_MESSAGE_CHARS = 600

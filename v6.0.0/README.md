@@ -180,7 +180,7 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-service-role-key
 
 # LLM (Ollama is default, OpenAI is fallback)
-LLM_AI_SERVER=             # HOST[:PORT] of the lab AI server: robots' conversation runs there; unreachable at start = Ollama
+LLM_AI_SERVER=             # HOST[:PORT] of the AI server (the lab's: 100.110.91.42:7898): robots' conversation runs there; unreachable at start = Ollama
 OLLAMA_HOST=127.0.0.1
 OLLAMA_PORT=11434
 OLLAMA_MODEL=qwen2.5:7b
