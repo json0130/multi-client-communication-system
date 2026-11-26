@@ -1,5 +1,5 @@
 """
-LLM client for the lab's AI server (TCP, length-prefixed JSON). Stdlib only, no
+LLM (and STT) client for the lab's AI server (TCP, length-prefixed JSON). Stdlib only, no
 imports from other repos or ChatBox modules, so it can be dropped in beside
 `LLMClient` in webcam_loop.
 
@@ -18,11 +18,14 @@ Same surface as webcam_loop.LLMClient — `model`, `available`, `connect()`,
 """
 from __future__ import annotations
 
+import base64
+import io
 import json
 import os
 import re
 import socket
 import uuid
+import wave
 from typing import Optional
 
 DEFAULT_HOST = os.environ.get("AI_HOST", "")
@@ -100,9 +103,9 @@ class AIServerLLM:
             print(f"[LLM] AI server unavailable at {self.host}:{self.port}: {exc}")
         return self.available
 
-    def _request(self, prompt: str, parameters: dict) -> str:
+    def _request(self, prompt: str, parameters: dict, command: str = "LLM") -> str:
         msg = dict(robot_id=self.robot_id, request_id=str(uuid.uuid4()),
-                   command=["LLM"], parameters=parameters, content=prompt)
+                   command=[command], parameters=parameters, content=prompt)
         with socket.create_connection((self.host, self.port), timeout=self.timeout) as s:
             s.settimeout(self.timeout)
             _send_json(s, msg)
@@ -113,8 +116,20 @@ class AIServerLLM:
         if reply.get("command") == ["ERR"]:
             raise AIServerError(f"server error: {reply.get('content')}")
         if reply.get("command") != [] or not isinstance(reply.get("content"), str):
-            raise AIServerError("server returned an incomplete LLM reply")
+            raise AIServerError(f"server returned an incomplete {command} reply")
         return reply["content"]
+
+    def chat(self, messages: list[dict]) -> str:
+        """[{role, content}, ...] -> the reply. Raises on failure (respond() turns it into text)."""
+        return clean_reply(self._request(to_prompt(messages), {}))
+
+    def stt(self, wav: bytes) -> str:
+        """A WAV file's bytes -> its transcript. Raises on failure."""
+        with wave.open(io.BytesIO(wav)) as w:
+            params = {"format": "raw_pcm", "dtype": f"int{8 * w.getsampwidth()}",
+                      "sample_rate": w.getframerate(), "channels": w.getnchannels()}
+            pcm = w.readframes(w.getnframes())
+        return self._request(base64.b64encode(pcm).decode("ascii"), params, command="STT").strip()
 
     def respond(self, system_prompt: str, user_msg: str,
                 history: list[tuple[str, str]] | None = None,
@@ -146,9 +161,9 @@ class AIServerLLM:
             return f"[LLM error: {exc}]"
 
 
-def from_arg(spec: str) -> AIServerLLM:
+def from_arg(spec: str, robot_id: str = "") -> AIServerLLM:
     """`--ai-server HOST[:PORT]` -> a connected client (port defaults to AI_PORT/7898)."""
     host, _, port = spec.partition(":")
-    llm = AIServerLLM(host or DEFAULT_HOST, int(port) if port else DEFAULT_PORT)
+    llm = AIServerLLM(host or DEFAULT_HOST, int(port) if port else DEFAULT_PORT, robot_id=robot_id)
     llm.connect()
     return llm

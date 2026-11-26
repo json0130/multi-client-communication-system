@@ -34,6 +34,8 @@ class LLMConfig:
     # OpenAI (cloud fallback, optional)
     openai_api_key: Optional[str]
     openai_model: str
+    # The lab AI server (TCP, modules/ai_server_llm.py), tried before Ollama/OpenAI
+    ai_server: str = ""          # "HOST[:PORT]"; "" = Ollama, then OpenAI
 
 
 @dataclass(frozen=True)
@@ -44,6 +46,7 @@ class SpeechConfig:
     max_audio_length_sec: int
     sample_rate: int
     language: str                # en | ... | auto (detect per utterance)
+    ai_server: str = ""          # "HOST[:PORT]": transcribe on the lab AI server instead of Whisper
 
 
 @dataclass(frozen=True)
@@ -141,6 +144,7 @@ def load_config() -> AppConfig:
             ollama_model=_optional("OLLAMA_MODEL", "qwen2.5:7b"),
             openai_api_key=_optional("OPENAI_API_KEY") or None,
             openai_model=_optional("OPENAI_MODEL", "gpt-4o-mini"),
+            ai_server=_optional("LLM_AI_SERVER", ""),
         ),
         speech=SpeechConfig(
             whisper_model_size=_optional("WHISPER_MODEL_SIZE", "base"),
@@ -149,6 +153,7 @@ def load_config() -> AppConfig:
             max_audio_length_sec=_int("WHISPER_MAX_AUDIO_SEC", 30),
             sample_rate=_int("WHISPER_SAMPLE_RATE", 16000),
             language=_optional("WHISPER_LANGUAGE", "en"),
+            ai_server=_optional("STT_AI_SERVER", ""),
         ),
         emotion=EmotionConfig(
             model_path=_optional(

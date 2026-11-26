@@ -180,12 +180,14 @@ SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_KEY=your-service-role-key
 
 # LLM (Ollama is default, OpenAI is fallback)
+LLM_AI_SERVER=             # HOST[:PORT] of the lab AI server: robots' conversation runs there; unreachable at start = Ollama
 OLLAMA_HOST=127.0.0.1
 OLLAMA_PORT=11434
 OLLAMA_MODEL=qwen2.5:7b
 OPENAI_API_KEY=            # optional
 
 # Speech (Whisper)
+STT_AI_SERVER=             # HOST[:PORT] of the lab AI server: it transcribes instead of Whisper; unreachable at start = Whisper
 WHISPER_MODEL_SIZE=base    # tiny | base | small | medium
 WHISPER_DEVICE=auto        # auto | cpu | cuda
 WHISPER_LANGUAGE=en        # language Whisper transcribes in; `auto` detects per utterance

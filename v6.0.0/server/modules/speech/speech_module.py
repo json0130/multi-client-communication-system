@@ -42,11 +42,21 @@ class SpeechModule(BaseModule):
         self._max_length_sec = cfg.speech.max_audio_length_sec
         self._sample_rate = cfg.speech.sample_rate
         self._language = None if cfg.speech.language in ("", "auto") else cfg.speech.language
+        self._ai = None         # STT_AI_SERVER: the lab AI server transcribes instead of Whisper
 
     # ── BaseModule interface ───────────────────────────────────────────────────
 
     def initialize(self) -> bool:
-        """Load the Whisper model. Falls back to CPU if GPU fails."""
+        """The AI server when STT_AI_SERVER is set and reachable; else load the Whisper model
+        (falling back to CPU if GPU fails)."""
+        if cfg.speech.ai_server:
+            from modules.ai_server_llm import from_arg
+            ai = from_arg(cfg.speech.ai_server, robot_id="cares-server")
+            if ai.available:
+                self._ai, self._available = ai, True
+                print(f"[SpeechModule] Transcribing on the AI server at {cfg.speech.ai_server}")
+                return True
+            print(f"[SpeechModule] AI server {cfg.speech.ai_server} unreachable — loading Whisper")
         try:
             from faster_whisper import WhisperModel
         except ImportError:
@@ -85,13 +95,13 @@ class SpeechModule(BaseModule):
         return False
 
     def is_available(self) -> bool:
-        return self._available and self._model is not None
+        return self._available and (self._model is not None or self._ai is not None)
 
     def get_status(self) -> dict:
         return {
             "module": "speech",
             "available": self._available,
-            "model_size": self._model_size,
+            "model_size": "ai_server" if self._ai else self._model_size,
             "device": self._device,
             "max_audio_sec": self._max_length_sec,
         }
@@ -119,6 +129,19 @@ class SpeechModule(BaseModule):
         valid, error = self._validate_wav(audio_bytes)
         if not valid:
             return SpeechResult(False, "", 0.0, "", error)
+
+        if self._ai is not None:
+            from modules.ai_server_llm import AIServerError
+            try:
+                text = self._ai.stt(audio_bytes)
+            except (OSError, EOFError, ValueError, AIServerError) as e:
+                print(f"[SpeechModule] AI server transcription error: {e}")
+                return SpeechResult(False, "", 0.0, "", str(e))
+            if not text:
+                return SpeechResult(False, "", 0.0, "", "No speech detected")
+            print(f"[SpeechModule] Transcribed (AI server): '{text}'")
+            # the AI server reports no confidence or language
+            return SpeechResult(True, text, 0.0, self._language or "", "")
 
         with self._lock:
             tmp_path = None

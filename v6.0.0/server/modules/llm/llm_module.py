@@ -14,6 +14,7 @@ Auto-fallback logic:
 
 from __future__ import annotations
 
+from core.config import cfg
 from modules.base import BaseModule
 from modules.llm.llm_provider import LLMProvider, LLMResponse
 from modules.llm.ollama_provider import OllamaProvider
@@ -29,9 +30,18 @@ class LLMModule(BaseModule):
 
     def initialize(self) -> bool:
         """
-        Try Ollama first. Fall back to OpenAI if Ollama is unreachable
-        and an API key is configured.
+        The lab AI server first when LLM_AI_SERVER is set, then Ollama, then OpenAI
+        if an API key is configured.
         """
+        if cfg.llm.ai_server:
+            from modules.llm.ai_server_provider import AIServerProvider
+            ai = AIServerProvider(cfg.llm.ai_server)
+            if ai.setup():
+                self._provider = ai
+                print(f"[LLMModule] Using the AI server at {cfg.llm.ai_server}.")
+                return True
+            print(f"[LLMModule] AI server {cfg.llm.ai_server} unreachable — trying Ollama.")
+
         ollama = OllamaProvider()
         if ollama.setup():
             self._provider = ollama
