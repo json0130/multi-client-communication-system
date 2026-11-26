@@ -44,9 +44,11 @@ def parse_response(raw: str) -> LLMResponse:
     Extracts [EMOTION] tag from the start of the response.
     """
     raw = raw.strip()
-    match = re.match(r"^\[([A-Z_]+)\]", raw)
-    tag = match.group(1) if match else ""
-    clean = re.sub(r"^\[[A-Z_]+\]\s*", "", raw).strip()
+    lead = re.match(r"^(?:\[[A-Z_]+\]\s*)+", raw)
+    tags = re.findall(r"\[([A-Z_]+)\]", lead.group(0)) if lead else []
+    # "[DEFAULT] [GREETING] Hi": the model copied the example tag, then chose its own. Its own wins.
+    tag = next((t for t in tags if t != "DEFAULT"), tags[0] if tags else "")
+    clean = raw[lead.end():].strip() if lead else raw
     return LLMResponse(text=raw, emotion_tag=tag, clean_text=clean)
 
 

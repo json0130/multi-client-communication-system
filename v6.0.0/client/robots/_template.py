@@ -4,6 +4,8 @@ robots/_template.py — start here for a new robot platform
 1. Copy this file to robots/<name>.py (or robots/<name>/__init__.py when the
    robot needs more files, like robots/navel/).
 2. Fill in say() and on_emotion_detected() below; delete what you don't need.
+   The robot's own TTS/face/motor code stays in its own repo: add that repo's root
+   to sys.path at the top of the adapter and import it, rather than copying it here.
 3. Write configs/<name>.json: copy configs/generic.json and set client_id,
    robot_name, server_url, robot_role and allowed_tags (the tags this body can
    perform, e.g. "[WAVE]"; the server only asks for those).

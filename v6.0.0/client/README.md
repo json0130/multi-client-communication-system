@@ -46,6 +46,7 @@ Needs Linux and Python 3.8 or newer.
    | `robot_role` | Default role until the dashboard assigns one |
    | `allowed_tags` | Gestures this body can do, e.g. `"[WAVE]"`. The server only asks for these. |
    | `modules` | Include `"speech"` to use the mic |
+   | `ws_port` | Port the client listens on for the server (default 8765). Must be free on the robot |
    | `connect_to_server` | `true` if the server can't reach the robot (NAT, Tailscale): the robot dials out instead |
 
    If the server uses a token, set `API_TOKEN` in the environment. Never put

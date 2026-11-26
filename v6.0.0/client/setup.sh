@@ -13,7 +13,8 @@
 set -e
 cd "$(dirname "$0")"
 
-sudo apt-get update -qq
+# A broken third-party apt source shouldn't stop the install: carry on with the package lists we have.
+sudo apt-get update -qq || echo "warning: apt-get update failed; installing from the lists we have"
 sudo apt-get install -y ffmpeg alsa-utils portaudio19-dev python3-pip python3-dev python3-venv
 
 PY=python3
